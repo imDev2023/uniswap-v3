@@ -17,7 +17,9 @@ contract LaunchpadFactoryTest is Test {
     address internal treasury = makeAddr("treasury");
     address internal creator = makeAddr("creator");
 
-    event LaunchCreated(address indexed token, address indexed creator, string name, string symbol);
+    event LaunchCreated(
+        address indexed token, address indexed curve, address indexed creator, string name, string symbol
+    );
 
     function setUp() public {
         factory = new LaunchpadFactory(owner, treasury, FEE);
@@ -29,11 +31,15 @@ contract LaunchpadFactoryTest is Test {
         token = factory.createLaunch{value: value}("Doge Killer", "DOGEK");
     }
 
-    function test_CreateLaunch_MintsFixedSupplyToFactory() public {
+    function test_CreateLaunch_SplitsSupplyCurveAndReserve() public {
         address token = _create(FEE);
         assertEq(LaunchToken(token).TOTAL_SUPPLY(), SUPPLY);
         assertEq(IERC20(token).totalSupply(), SUPPLY, "fixed 1B supply");
-        assertEq(IERC20(token).balanceOf(address(factory)), SUPPLY, "supply held by factory (custodian)");
+
+        address curve = factory.curveOf(token);
+        assertTrue(curve != address(0), "curve deployed");
+        assertEq(IERC20(token).balanceOf(curve), factory.CURVE_SUPPLY(), "800M to curve");
+        assertEq(IERC20(token).balanceOf(address(factory)), factory.GRADUATION_RESERVE(), "200M reserve in factory");
     }
 
     function test_CreatorGetsNoPreMine() public {
@@ -81,8 +87,8 @@ contract LaunchpadFactoryTest is Test {
 
     function test_EmitsLaunchCreated() public {
         vm.prank(creator);
-        vm.expectEmit(false, true, false, true);
-        emit LaunchCreated(address(0), creator, "Doge Killer", "DOGEK");
+        vm.expectEmit(false, false, true, true);
+        emit LaunchCreated(address(0), address(0), creator, "Doge Killer", "DOGEK");
         factory.createLaunch{value: FEE}("Doge Killer", "DOGEK");
     }
 
@@ -136,8 +142,8 @@ contract LaunchpadFactoryTest is Test {
         uint256 treasuryBefore = treasury.balance;
 
         vm.prank(forkCreator);
-        vm.expectEmit(false, true, false, true, address(forkFactory)); // event
-        emit LaunchCreated(address(0), forkCreator, "Fork Coin", "FORK");
+        vm.expectEmit(false, false, true, true, address(forkFactory)); // event
+        emit LaunchCreated(address(0), address(0), forkCreator, "Fork Coin", "FORK");
         address token = forkFactory.createLaunch{value: FEE}("Fork Coin", "FORK");
 
         assertEq(IERC20(token).totalSupply(), SUPPLY, "supply"); // supply

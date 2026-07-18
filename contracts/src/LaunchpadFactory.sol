@@ -2,7 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LaunchToken} from "./LaunchToken.sol";
+import {BondingCurve} from "./BondingCurve.sol";
 
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
@@ -12,6 +15,18 @@ import {LaunchToken} from "./LaunchToken.sol";
 ///      Fee/treasury are owner-adjustable and apply only to FUTURE launches (decision #9);
 ///      ownership is transferred to a multisig in Build 07 (#18).
 contract LaunchpadFactory is Ownable {
+    using SafeERC20 for IERC20;
+
+    /// @notice Split of the fixed 1B supply: 80% sold on the curve, 20% reserved to seed
+    ///         the graduation pool (decisions #5/#6). The reserve is held by this factory.
+    uint256 public constant CURVE_SUPPLY = 800_000_000e18;
+    uint256 public constant GRADUATION_RESERVE = 200_000_000e18;
+
+    /// @notice Default virtual reserves for new curves. Calibrated precisely to the ETH
+    ///         graduation threshold in Build 05 (#16); working defaults for now.
+    uint256 public constant DEFAULT_VIRTUAL_ETH_RESERVE = 30 ether;
+    uint256 public constant DEFAULT_VIRTUAL_TOKEN_RESERVE = 1_073_000_000e18;
+
     /// @notice Address that receives creation fees (and, later, protocol fees).
     address public treasury;
 
@@ -24,7 +39,12 @@ contract LaunchpadFactory is Ownable {
     /// @notice token => creator who launched it.
     mapping(address => address) public creatorOf;
 
-    event LaunchCreated(address indexed token, address indexed creator, string name, string symbol);
+    /// @notice token => its bonding curve.
+    mapping(address => address) public curveOf;
+
+    event LaunchCreated(
+        address indexed token, address indexed curve, address indexed creator, string name, string symbol
+    );
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
 
@@ -56,10 +76,22 @@ contract LaunchpadFactory is Ownable {
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
 
         token = address(new LaunchToken(name, symbol, address(this)));
+        address curve = address(
+            new BondingCurve(
+                IERC20(token),
+                treasury,
+                DEFAULT_VIRTUAL_ETH_RESERVE,
+                DEFAULT_VIRTUAL_TOKEN_RESERVE,
+                CURVE_SUPPLY
+            )
+        );
+        // 80% goes to the curve for sale; the 20% graduation reserve stays in this factory (#16).
+        IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
 
         launches.push(token);
         creatorOf[token] = msg.sender;
-        emit LaunchCreated(token, msg.sender, name, symbol);
+        curveOf[token] = curve;
+        emit LaunchCreated(token, curve, msg.sender, name, symbol);
 
         // Interactions last.
         if (fee > 0) {

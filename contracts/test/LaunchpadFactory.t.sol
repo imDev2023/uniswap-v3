@@ -74,7 +74,7 @@ contract LaunchpadFactoryTest is Test {
     function test_RevertOnUnderpay() public {
         vm.prank(creator);
         vm.expectRevert(
-            abi.encodeWithSelector(LaunchpadFactory.IncorrectCreationFee.selector, FEE - 1, FEE)
+            abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE)
         );
         factory.createLaunch{value: FEE - 1}("X", "X");
     }
@@ -122,5 +122,27 @@ contract LaunchpadFactoryTest is Test {
         vm.prank(creator);
         address token = freeFactory.createLaunch{value: 0}("Free", "FREE");
         assertEq(IERC20(token).totalSupply(), SUPPLY);
+    }
+
+    /// @notice AC5: a *fork* test asserting supply, immutability, fee transfer, and event
+    ///         — proves a launch behaves against real Robinhood Chain (4663) state.
+    function test_CreateLaunch_OnRobinhoodFork() public {
+        vm.createSelectFork("robinhood");
+        assertEq(block.chainid, 4663);
+
+        LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE);
+        address forkCreator = makeAddr("forkCreator");
+        vm.deal(forkCreator, 1 ether);
+        uint256 treasuryBefore = treasury.balance;
+
+        vm.prank(forkCreator);
+        vm.expectEmit(false, true, false, true, address(forkFactory)); // event
+        emit LaunchCreated(address(0), forkCreator, "Fork Coin", "FORK");
+        address token = forkFactory.createLaunch{value: FEE}("Fork Coin", "FORK");
+
+        assertEq(IERC20(token).totalSupply(), SUPPLY, "supply"); // supply
+        (bool ok,) = token.call(abi.encodeWithSignature("mint(address,uint256)", forkCreator, 1e18));
+        assertFalse(ok, "immutability: no mint"); // immutability
+        assertEq(treasury.balance - treasuryBefore, FEE, "fee transfer"); // fee transfer
     }
 }

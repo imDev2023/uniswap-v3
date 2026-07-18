@@ -28,7 +28,7 @@ contract LaunchpadFactory is Ownable {
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
 
-    error IncorrectCreationFee(uint256 sent, uint256 required);
+    error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
     error FeeTransferFailed();
     error RefundFailed();
@@ -53,7 +53,7 @@ contract LaunchpadFactory is Ownable {
         returns (address token)
     {
         uint256 fee = creationFee;
-        if (msg.value < fee) revert IncorrectCreationFee(msg.value, fee);
+        if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
 
         token = address(new LaunchToken(name, symbol, address(this)));
 

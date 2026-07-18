@@ -12,10 +12,12 @@ contract LaunchToken is ERC20 {
     /// @notice Fixed total supply for every launched token: 1,000,000,000 (18 decimals).
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
 
+    error ZeroRecipient();
+
     constructor(string memory name_, string memory symbol_, address recipient)
         ERC20(name_, symbol_)
     {
-        require(recipient != address(0), "LaunchToken: zero recipient");
+        if (recipient == address(0)) revert ZeroRecipient();
         _mint(recipient, TOTAL_SUPPLY);
     }
 }

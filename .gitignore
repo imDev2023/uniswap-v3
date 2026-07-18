@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+contracts/node_modules/
+
+# foundry build artifacts
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# secrets / env
+.env
+.env.*
+*.local
+
+# os
+.DS_Store
+
+# scratch
+scratchpad/

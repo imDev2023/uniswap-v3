@@ -1,6 +1,6 @@
 # Contracts — DEX + Bonding-Curve Launchpad (Robinhood Chain)
 
-Foundry project for the launchpad's on-chain layer. See spec [#11](https://github.com/imDev2023/uniswap-v2/issues/11) and the wayfinder map [#1](https://github.com/imDev2023/uniswap-v2/issues/1).
+Foundry project for the launchpad's on-chain layer. See spec [#11](https://github.com/imDev2023/uniswap-v3/issues/11) and the wayfinder map [#1](https://github.com/imDev2023/uniswap-v3/issues/1).
 
 ## What's here (Build 01 / #12)
 

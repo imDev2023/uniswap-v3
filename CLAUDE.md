@@ -1,8 +1,8 @@
-# uniswap-v2
+# uniswap-v3
 
 A Uniswap-**V3**-based DEX + bonding-curve launchpad on **Robinhood Chain** (chainID 4663). New projects launch via a pump.fun-style bonding curve; on reaching a fixed-ETH threshold a token graduates atomically into a permanently-locked, full-range `TOKEN/WETH` V3 pool.
 
-The architecture decisions driving the build are charted on the **wayfinder map** — GitHub issue [#1](https://github.com/imDev2023/uniswap-v2/issues/1) (label `wayfinder:map`); its closed child tickets record each locked decision.
+The architecture decisions driving the build are charted on the **wayfinder map** — GitHub issue [#1](https://github.com/imDev2023/uniswap-v3/issues/1) (label `wayfinder:map`); its closed child tickets record each locked decision.
 
 ## Agent skills
 

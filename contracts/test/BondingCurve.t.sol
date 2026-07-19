@@ -2,34 +2,29 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
 
-/// @notice Build 03 (#14): bonding-curve buy/sell.
+/// @notice Build 03 (#14): bonding-curve buy/sell. The curve is deployed directly with the
+///         anti-snipe cap DISABLED (threshold 0) so these tests isolate pure curve math;
+///         the anti-snipe cap itself is covered in AntiSnipe.t.sol (#15).
 contract BondingCurveTest is Test {
-    uint256 internal constant FEE = 0.01 ether;
-
-    // Mirror the factory defaults so tests encode the intended formula independently.
     uint256 internal constant V_ETH = 30 ether;
     uint256 internal constant V_TOK = 1_073_000_000e18;
+    uint256 internal constant ALLOC = 800_000_000e18;
     uint256 internal constant K = V_ETH * V_TOK;
 
-    LaunchpadFactory internal factory;
     address internal treasury = makeAddr("treasury");
-    address internal creator = makeAddr("creator");
     address internal buyer = makeAddr("buyer");
 
-    IERC20 internal token;
+    MockERC20 internal token;
     BondingCurve internal curve;
 
     function setUp() public {
-        factory = new LaunchpadFactory(address(this), treasury, FEE);
-        vm.deal(creator, 1 ether);
-        vm.prank(creator);
-        address tok = factory.createLaunch{value: FEE}("Doge Killer", "DOGEK");
-        token = IERC20(tok);
-        curve = BondingCurve(factory.curveOf(tok));
+        token = new MockERC20("Doge Killer", "DOGEK");
+        curve = new BondingCurve(IERC20(address(token)), treasury, V_ETH, V_TOK, ALLOC, 100, type(uint256).max, 0);
+        token.mint(address(curve), ALLOC);
         vm.deal(buyer, 1000 ether);
     }
 
@@ -38,7 +33,7 @@ contract BondingCurveTest is Test {
         assertEq(curve.tokenReserve(), V_TOK);
         assertEq(curve.tokensSold(), 0);
         assertEq(curve.k(), K);
-        assertEq(token.balanceOf(address(curve)), factory.CURVE_SUPPLY(), "curve holds 800M");
+        assertEq(token.balanceOf(address(curve)), ALLOC, "curve holds the allocation");
     }
 
     function _ceilDiv(uint256 a, uint256 b) private pure returns (uint256) {
@@ -145,11 +140,10 @@ contract BondingCurveTest is Test {
         vm.createSelectFork("robinhood");
         assertEq(block.chainid, 4663);
 
-        LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, FEE);
-        vm.deal(creator, 1 ether);
-        vm.prank(creator);
-        address tok = f.createLaunch{value: FEE}("Fork Coin", "FORK");
-        BondingCurve c = BondingCurve(f.curveOf(tok));
+        MockERC20 tok = new MockERC20("Fork Coin", "FORK");
+        BondingCurve c =
+            new BondingCurve(IERC20(address(tok)), treasury, V_ETH, V_TOK, ALLOC, 100, type(uint256).max, 0);
+        tok.mint(address(c), ALLOC);
 
         address forkBuyer = makeAddr("forkBuyer");
         vm.deal(forkBuyer, 10 ether);
@@ -166,6 +160,6 @@ contract BondingCurveTest is Test {
         assertEq(out, expectedOut, "fork: pricing math"); // pricing math
         assertEq(treasury.balance - treasuryBefore, fee, "fork: fee accounting"); // fee accounting
         assertEq(c.ethReserve(), newEth, "fork: reserve update"); // reserve updates
-        assertEq(IERC20(tok).balanceOf(forkBuyer), out);
+        assertEq(tok.balanceOf(forkBuyer), out);
     }
 }

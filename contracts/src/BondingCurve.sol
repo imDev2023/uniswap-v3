@@ -27,6 +27,14 @@ contract BondingCurve is ReentrancyGuard {
     uint256 public immutable curveTokenAllocation; // max tokens the curve will ever sell (800M)
     uint256 public immutable k; // invariant: ethReserve * tokenReserve
 
+    // Anti-snipe (decision #7): a per-wallet buy cap that applies only during the early window
+    // (while tokensSold < antiSnipeThreshold), then auto-lifts. `purchasedOf` is gross tokens
+    // bought during the window and is NOT decremented on sell, so a wallet can't buy-sell-rebuy
+    // to dodge the cap. The creator has no exemption — it's enforced on every buyer alike.
+    uint256 public immutable maxBuyPerWallet;
+    uint256 public immutable antiSnipeThreshold;
+    mapping(address => uint256) public purchasedOf;
+
     // Effective reserves (virtual + real). Start at the virtual values.
     uint256 public ethReserve;
     uint256 public tokenReserve;
@@ -57,6 +65,7 @@ contract BondingCurve is ReentrancyGuard {
     error ZeroAmount();
     error NoTokensOut();
     error CurveSoldOut();
+    error BuyCapExceeded(uint256 attempted, uint256 cap);
     error SlippageBuy(uint256 tokensOut, uint256 minTokensOut);
     error SlippageSell(uint256 ethOut, uint256 minEthOut);
     error EthTransferFailed();
@@ -67,11 +76,14 @@ contract BondingCurve is ReentrancyGuard {
         uint256 virtualEthReserve_,
         uint256 virtualTokenReserve_,
         uint256 curveTokenAllocation_,
-        uint16 tradeFeeBps_
+        uint16 tradeFeeBps_,
+        uint256 maxBuyPerWallet_,
+        uint256 antiSnipeThreshold_
     ) {
         require(address(token_) != address(0) && treasury_ != address(0), "BondingCurve: zero addr");
         require(virtualTokenReserve_ > curveTokenAllocation_, "BondingCurve: bad reserves");
         require(tradeFeeBps_ < BPS, "BondingCurve: bad fee");
+        require(maxBuyPerWallet_ > 0, "BondingCurve: bad cap");
 
         token = token_;
         treasury = treasury_;
@@ -79,10 +91,17 @@ contract BondingCurve is ReentrancyGuard {
         virtualEthReserve = virtualEthReserve_;
         virtualTokenReserve = virtualTokenReserve_;
         curveTokenAllocation = curveTokenAllocation_;
+        maxBuyPerWallet = maxBuyPerWallet_;
+        antiSnipeThreshold = antiSnipeThreshold_;
         k = virtualEthReserve_ * virtualTokenReserve_;
 
         ethReserve = virtualEthReserve_;
         tokenReserve = virtualTokenReserve_;
+    }
+
+    /// @notice True while the anti-snipe per-wallet cap is in force (early part of the curve).
+    function buyCapActive() public view returns (bool) {
+        return tokensSold < antiSnipeThreshold;
     }
 
     /// @notice Current marginal price, ETH per token, scaled by 1e18.
@@ -112,6 +131,13 @@ contract BondingCurve is ReentrancyGuard {
         if (tokensOut == 0) revert NoTokensOut();
         if (tokensSold + tokensOut > curveTokenAllocation) revert CurveSoldOut();
         if (tokensOut < minTokensOut) revert SlippageBuy(tokensOut, minTokensOut);
+
+        // Anti-snipe: cap per-wallet accumulation during the early window (decision #7).
+        if (tokensSold < antiSnipeThreshold) {
+            uint256 purchased = purchasedOf[msg.sender] + tokensOut;
+            if (purchased > maxBuyPerWallet) revert BuyCapExceeded(purchased, maxBuyPerWallet);
+            purchasedOf[msg.sender] = purchased;
+        }
 
         ethReserve = newEthReserve;
         tokenReserve = newTokenReserve;

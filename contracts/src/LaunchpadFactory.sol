@@ -30,6 +30,11 @@ contract LaunchpadFactory is Ownable {
     /// @notice Default curve trade fee, 1% (decision #5). Passed to each curve at creation.
     uint16 public constant DEFAULT_TRADE_FEE_BPS = 100;
 
+    /// @notice Anti-snipe defaults (decision #7): per-wallet cap = 1% of the 800M curve
+    ///         allocation, in force until 15% of the curve has sold, then auto-lifts.
+    uint256 public constant DEFAULT_MAX_BUY_PER_WALLET = 8_000_000e18; // 1% of 800M
+    uint256 public constant DEFAULT_ANTI_SNIPE_THRESHOLD = 120_000_000e18; // 15% of 800M
+
     /// @notice Address that receives creation fees (and, later, protocol fees).
     address public treasury;
 
@@ -86,7 +91,9 @@ contract LaunchpadFactory is Ownable {
                 DEFAULT_VIRTUAL_ETH_RESERVE,
                 DEFAULT_VIRTUAL_TOKEN_RESERVE,
                 CURVE_SUPPLY,
-                DEFAULT_TRADE_FEE_BPS
+                DEFAULT_TRADE_FEE_BPS,
+                DEFAULT_MAX_BUY_PER_WALLET,
+                DEFAULT_ANTI_SNIPE_THRESHOLD
             )
         );
         // 80% goes to the curve for sale; the 20% graduation reserve stays in this factory (#16).

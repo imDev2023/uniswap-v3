@@ -41,18 +41,23 @@ contract BondingCurveTest is Test {
         assertEq(token.balanceOf(address(curve)), factory.CURVE_SUPPLY(), "curve holds 800M");
     }
 
+    function _ceilDiv(uint256 a, uint256 b) private pure returns (uint256) {
+        return (a + b - 1) / b;
+    }
+
     function test_Buy_FollowsConstantProductFormula() public {
         uint256 ethIn = 1 ether;
         uint256 fee = ethIn / 100;
         uint256 newEth = V_ETH + (ethIn - fee);
-        uint256 expectedOut = V_TOK - (K / newEth);
+        // Curve rounds against the trader: new token reserve is ceil(k / newEth).
+        uint256 expectedOut = V_TOK - _ceilDiv(K, newEth);
 
         vm.prank(buyer);
         uint256 tokensOut = curve.buy{value: ethIn}(0);
 
         assertEq(tokensOut, expectedOut, "constant-product tokensOut");
         assertEq(curve.ethReserve(), newEth, "eth reserve");
-        assertEq(curve.tokenReserve(), K / newEth, "token reserve");
+        assertEq(curve.tokenReserve(), _ceilDiv(K, newEth), "token reserve");
         assertEq(curve.tokensSold(), tokensOut);
         assertEq(token.balanceOf(buyer), tokensOut, "buyer received tokens");
     }
@@ -133,5 +138,34 @@ contract BondingCurveTest is Test {
         curve.buy{value: 10 ether}(0);
         // Real ETH held = effective reserve minus the virtual portion.
         assertEq(address(curve).balance, curve.ethReserve() - V_ETH, "curve holds exactly the real ETH");
+    }
+
+    /// @notice AC "Fork tests assert pricing math, fee accounting, reserve updates" — on 4663.
+    function test_BuySell_OnRobinhoodFork() public {
+        vm.createSelectFork("robinhood");
+        assertEq(block.chainid, 4663);
+
+        LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, FEE);
+        vm.deal(creator, 1 ether);
+        vm.prank(creator);
+        address tok = f.createLaunch{value: FEE}("Fork Coin", "FORK");
+        BondingCurve c = BondingCurve(f.curveOf(tok));
+
+        address forkBuyer = makeAddr("forkBuyer");
+        vm.deal(forkBuyer, 10 ether);
+        uint256 treasuryBefore = treasury.balance;
+
+        uint256 ethIn = 1 ether;
+        uint256 fee = ethIn / 100;
+        uint256 newEth = V_ETH + (ethIn - fee);
+        uint256 expectedOut = V_TOK - _ceilDiv(K, newEth);
+
+        vm.prank(forkBuyer);
+        uint256 out = c.buy{value: ethIn}(0);
+
+        assertEq(out, expectedOut, "fork: pricing math"); // pricing math
+        assertEq(treasury.balance - treasuryBefore, fee, "fork: fee accounting"); // fee accounting
+        assertEq(c.ethReserve(), newEth, "fork: reserve update"); // reserve updates
+        assertEq(IERC20(tok).balanceOf(forkBuyer), out);
     }
 }

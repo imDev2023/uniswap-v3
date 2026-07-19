@@ -27,6 +27,9 @@ contract LaunchpadFactory is Ownable {
     uint256 public constant DEFAULT_VIRTUAL_ETH_RESERVE = 30 ether;
     uint256 public constant DEFAULT_VIRTUAL_TOKEN_RESERVE = 1_073_000_000e18;
 
+    /// @notice Default curve trade fee, 1% (decision #5). Passed to each curve at creation.
+    uint16 public constant DEFAULT_TRADE_FEE_BPS = 100;
+
     /// @notice Address that receives creation fees (and, later, protocol fees).
     address public treasury;
 
@@ -82,7 +85,8 @@ contract LaunchpadFactory is Ownable {
                 treasury,
                 DEFAULT_VIRTUAL_ETH_RESERVE,
                 DEFAULT_VIRTUAL_TOKEN_RESERVE,
-                CURVE_SUPPLY
+                CURVE_SUPPLY,
+                DEFAULT_TRADE_FEE_BPS
             )
         );
         // 80% goes to the curve for sale; the 20% graduation reserve stays in this factory (#16).

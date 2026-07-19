@@ -17,3 +17,22 @@ Default canonical label vocabulary — `needs-triage` / `needs-info` / `ready-fo
 ### Domain docs
 
 Multi-context layout: a `CONTEXT-MAP.md` at the root points to per-context `CONTEXT.md` files (created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
+
+## Build workflow (for the next session)
+
+The contracts live in `contracts/` (Foundry). Toolchain is installed at `~/.foundry/bin` and OpenZeppelin + Uniswap V3 artifacts are in `contracts/node_modules` (both persist on disk).
+
+```bash
+export PATH="$HOME/.foundry/bin:$PATH"
+cd contracts && forge test          # fork tests hit Robinhood Chain (rpc alias: robinhood = 4663)
+```
+
+Ticket rhythm (build tickets #12–#21, tracked as GitHub issues; the map is #1, spec is #11):
+1. One ticket per branch: `build/<NN>-<slug>`, branched from `main`.
+2. Implement + write tests at the fork-test seam; keep the full suite green.
+3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.
+4. Comment status on the ticket; merge the branch to `main` before the next ticket.
+
+**Current state:** #12–#15 done and merged to `main` **except #15**, which sits on branch `build/04-anti-snipe` (one commit ahead of `main`). Next up is **#16 (atomic graduation + full-range seeding)** — the headline ticket, which ties the bonding curve to the #12 V3 deployment.
+
+**Deferred for #16:** (a) prefactor the `BondingCurve` constructor's growing arg list into a `CurveConfig` struct (flagged in #15 review); (b) re-test the anti-snipe cap against the real create-then-first-buy path and on the full-lifecycle fork test.

@@ -133,7 +133,7 @@ contract BondingCurve is ReentrancyGuard {
         if (tokensOut < minTokensOut) revert SlippageBuy(tokensOut, minTokensOut);
 
         // Anti-snipe: cap per-wallet accumulation during the early window (decision #7).
-        if (tokensSold < antiSnipeThreshold) {
+        if (buyCapActive()) {
             uint256 purchased = purchasedOf[msg.sender] + tokensOut;
             if (purchased > maxBuyPerWallet) revert BuyCapExceeded(purchased, maxBuyPerWallet);
             purchasedOf[msg.sender] = purchased;

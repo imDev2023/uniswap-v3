@@ -16,13 +16,15 @@ contract LaunchpadFactoryTest is Test {
     address internal owner = makeAddr("owner");
     address internal treasury = makeAddr("treasury");
     address internal creator = makeAddr("creator");
+    // Placeholder V3 position manager; these tests never graduate (that path is Graduation.t.sol).
+    address internal positionManager = makeAddr("positionManager");
 
     event LaunchCreated(
         address indexed token, address indexed curve, address indexed creator, string name, string symbol
     );
 
     function setUp() public {
-        factory = new LaunchpadFactory(owner, treasury, FEE);
+        factory = new LaunchpadFactory(owner, treasury, FEE, positionManager);
         vm.deal(creator, 100 ether);
     }
 
@@ -39,7 +41,12 @@ contract LaunchpadFactoryTest is Test {
         address curve = factory.curveOf(token);
         assertTrue(curve != address(0), "curve deployed");
         assertEq(IERC20(token).balanceOf(curve), factory.CURVE_SUPPLY(), "800M to curve");
-        assertEq(IERC20(token).balanceOf(address(factory)), factory.GRADUATION_RESERVE(), "200M reserve in factory");
+        assertEq(
+            IERC20(token).balanceOf(address(factory.graduationManager())),
+            factory.GRADUATION_RESERVE(),
+            "200M reserve escrowed in the GraduationManager"
+        );
+        assertEq(IERC20(token).balanceOf(address(factory)), 0, "factory holds no tokens after split");
     }
 
     function test_CreatorGetsNoPreMine() public {
@@ -124,7 +131,7 @@ contract LaunchpadFactoryTest is Test {
     }
 
     function test_FreeCreation_WhenFeeZero() public {
-        LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0);
+        LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager);
         vm.prank(creator);
         address token = freeFactory.createLaunch{value: 0}("Free", "FREE");
         assertEq(IERC20(token).totalSupply(), SUPPLY);
@@ -136,7 +143,7 @@ contract LaunchpadFactoryTest is Test {
         vm.createSelectFork("robinhood");
         assertEq(block.chainid, 4663);
 
-        LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE);
+        LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE, positionManager);
         address forkCreator = makeAddr("forkCreator");
         vm.deal(forkCreator, 1 ether);
         uint256 treasuryBefore = treasury.balance;

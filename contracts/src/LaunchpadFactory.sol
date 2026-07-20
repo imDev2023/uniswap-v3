@@ -5,27 +5,35 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LaunchToken} from "./LaunchToken.sol";
-import {BondingCurve} from "./BondingCurve.sol";
+import {BondingCurve, CurveConfig} from "./BondingCurve.sol";
+import {GraduationManager} from "./periphery/GraduationManager.sol";
+import {Constants} from "./Constants.sol";
 
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
 ///      creation fee. The full 1B supply is minted to this factory as custodian — no
-///      pre-mine to the creator (fair launch, decision #5). Later tickets (#14) route
-///      the 800M curve allocation to a bonding curve and reserve 200M for graduation.
+///      pre-mine to the creator (fair launch, decision #5). Build 03/04 route the 800M
+///      curve allocation to a bonding curve; Build 05 (#16) escrows the 200M graduation
+///      reserve in the GraduationManager and wires each curve to it for atomic graduation.
 ///      Fee/treasury are owner-adjustable and apply only to FUTURE launches (decision #9);
 ///      ownership is transferred to a multisig in Build 07 (#18).
 contract LaunchpadFactory is Ownable {
     using SafeERC20 for IERC20;
 
     /// @notice Split of the fixed 1B supply: 80% sold on the curve, 20% reserved to seed
-    ///         the graduation pool (decisions #5/#6). The reserve is held by this factory.
+    ///         the graduation pool (decisions #5/#6). The reserve is escrowed in the
+    ///         GraduationManager at launch creation.
     uint256 public constant CURVE_SUPPLY = 800_000_000e18;
     uint256 public constant GRADUATION_RESERVE = 200_000_000e18;
 
-    /// @notice Default virtual reserves for new curves. Calibrated precisely to the ETH
-    ///         graduation threshold in Build 05 (#16); working defaults for now.
+    /// @notice Default virtual reserves for new curves, calibrated for graduation (#16).
+    ///         V_token = CURVE_SUPPLY^2 / (CURVE_SUPPLY - GRADUATION_RESERVE) so that when the
+    ///         800M allocation sells out, 100% of the raised ETH divided by the 200M reserve
+    ///         equals the curve's final marginal price — i.e. the pool seeds at exactly the
+    ///         curve's final price with no leftover reserves (price continuity, decision #6).
+    ///         With V_eth = 30 ether this puts the graduation threshold at 90 ETH raised.
     uint256 public constant DEFAULT_VIRTUAL_ETH_RESERVE = 30 ether;
-    uint256 public constant DEFAULT_VIRTUAL_TOKEN_RESERVE = 1_073_000_000e18;
+    uint256 public constant DEFAULT_VIRTUAL_TOKEN_RESERVE = 1_066_666_666_666_666_666_666_666_666; // 800M^2 / 600M
 
     /// @notice Default curve trade fee, 1% (decision #5). Passed to each curve at creation.
     uint16 public constant DEFAULT_TRADE_FEE_BPS = 100;
@@ -34,6 +42,9 @@ contract LaunchpadFactory is Ownable {
     ///         allocation, in force until 15% of the curve has sold, then auto-lifts.
     uint256 public constant DEFAULT_MAX_BUY_PER_WALLET = 8_000_000e18; // 1% of 800M
     uint256 public constant DEFAULT_ANTI_SNIPE_THRESHOLD = 120_000_000e18; // 15% of 800M
+
+    /// @notice Executes atomic graduation and escrows the 200M reserve for every launch (#16).
+    GraduationManager public immutable graduationManager;
 
     /// @notice Address that receives creation fees (and, later, protocol fees).
     address public treasury;
@@ -61,10 +72,15 @@ contract LaunchpadFactory is Ownable {
     error FeeTransferFailed();
     error RefundFailed();
 
-    constructor(address initialOwner, address treasury_, uint256 creationFee_) Ownable(initialOwner) {
+    /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
+    constructor(address initialOwner, address treasury_, uint256 creationFee_, address positionManager)
+        Ownable(initialOwner)
+    {
         if (treasury_ == address(0)) revert ZeroTreasury();
         treasury = treasury_;
         creationFee = creationFee_;
+        // One GraduationManager per factory; it authorizes callers via this factory's curveOf().
+        graduationManager = new GraduationManager(address(this), positionManager, Constants.WETH9);
     }
 
     /// @notice Number of launches created so far.
@@ -86,22 +102,29 @@ contract LaunchpadFactory is Ownable {
         token = address(new LaunchToken(name, symbol, address(this)));
         address curve = address(
             new BondingCurve(
-                IERC20(token),
-                treasury,
-                DEFAULT_VIRTUAL_ETH_RESERVE,
-                DEFAULT_VIRTUAL_TOKEN_RESERVE,
-                CURVE_SUPPLY,
-                DEFAULT_TRADE_FEE_BPS,
-                DEFAULT_MAX_BUY_PER_WALLET,
-                DEFAULT_ANTI_SNIPE_THRESHOLD
+                CurveConfig({
+                    token: IERC20(token),
+                    treasury: treasury,
+                    graduationManager: address(graduationManager),
+                    virtualEthReserve: DEFAULT_VIRTUAL_ETH_RESERVE,
+                    virtualTokenReserve: DEFAULT_VIRTUAL_TOKEN_RESERVE,
+                    curveTokenAllocation: CURVE_SUPPLY,
+                    tradeFeeBps: DEFAULT_TRADE_FEE_BPS,
+                    maxBuyPerWallet: DEFAULT_MAX_BUY_PER_WALLET,
+                    antiSnipeThreshold: DEFAULT_ANTI_SNIPE_THRESHOLD
+                })
             )
         );
-        // 80% goes to the curve for sale; the 20% graduation reserve stays in this factory (#16).
-        IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
-
+        // Register the curve before moving tokens so the GraduationManager can authorize it.
         launches.push(token);
         creatorOf[token] = msg.sender;
         curveOf[token] = curve;
+
+        // 80% goes to the curve for sale; the 20% graduation reserve is escrowed in the
+        // GraduationManager, which seeds it into the pool at graduation (#16).
+        IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
+        IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
+
         emit LaunchCreated(token, curve, msg.sender, name, symbol);
 
         // Interactions last.

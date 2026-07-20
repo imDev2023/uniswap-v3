@@ -2,13 +2,15 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {BondingCurve} from "../src/BondingCurve.sol";
+import {BondingCurve, CurveConfig} from "../src/BondingCurve.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockGraduationManager} from "./mocks/MockGraduationManager.sol";
 
 /// @notice Build 03 (#14): bonding-curve buy/sell. The curve is deployed directly with the
 ///         anti-snipe cap DISABLED (threshold 0) so these tests isolate pure curve math;
-///         the anti-snipe cap itself is covered in AntiSnipe.t.sol (#15).
+///         the anti-snipe cap itself is covered in AntiSnipe.t.sol (#15). Graduation is stubbed
+///         with a mock manager here; the real V3 seeding path is in Graduation.t.sol (#16).
 contract BondingCurveTest is Test {
     uint256 internal constant V_ETH = 30 ether;
     uint256 internal constant V_TOK = 1_073_000_000e18;
@@ -19,12 +21,30 @@ contract BondingCurveTest is Test {
     address internal buyer = makeAddr("buyer");
 
     MockERC20 internal token;
+    MockGraduationManager internal gm;
     BondingCurve internal curve;
 
+    function _newCurve(MockERC20 t) internal returns (BondingCurve c) {
+        c = new BondingCurve(
+            CurveConfig({
+                token: IERC20(address(t)),
+                treasury: treasury,
+                graduationManager: address(gm),
+                virtualEthReserve: V_ETH,
+                virtualTokenReserve: V_TOK,
+                curveTokenAllocation: ALLOC,
+                tradeFeeBps: 100,
+                maxBuyPerWallet: type(uint256).max,
+                antiSnipeThreshold: 0
+            })
+        );
+        t.mint(address(c), ALLOC);
+    }
+
     function setUp() public {
+        gm = new MockGraduationManager();
         token = new MockERC20("Doge Killer", "DOGEK");
-        curve = new BondingCurve(IERC20(address(token)), treasury, V_ETH, V_TOK, ALLOC, 100, type(uint256).max, 0);
-        token.mint(address(curve), ALLOC);
+        curve = _newCurve(token);
         vm.deal(buyer, 1000 ether);
     }
 
@@ -99,10 +119,46 @@ contract BondingCurveTest is Test {
         assertEq(treasury.balance - treasuryBefore, 0.0099 ether, "1% sell fee to treasury");
     }
 
-    function test_Buy_RevertsWhenExceedingAllocation() public {
+    function test_Buy_CrossingAllocation_CapsRefundsAndGraduates() public {
+        // A buy large enough to exhaust the 800M allocation is the graduation trigger: it is
+        // capped at the remaining allocation, overflow is refunded, and the curve disables itself.
+        uint256 ethBefore = buyer.balance;
+        uint256 treasuryBefore = treasury.balance;
         vm.prank(buyer);
-        vm.expectRevert(BondingCurve.CurveSoldOut.selector);
-        curve.buy{value: 1000 ether}(0); // would pull far more than the 800M allocation
+        uint256 out = curve.buy{value: 1000 ether}(0);
+
+        assertEq(out, ALLOC, "crossing buy capped at the remaining allocation");
+        assertEq(curve.tokensSold(), ALLOC, "curve sold out exactly");
+        assertEq(token.balanceOf(buyer), ALLOC, "buyer received the capped amount");
+        assertTrue(curve.graduated(), "curve graduated");
+        assertEq(gm.calls(), 1, "graduation manager invoked once");
+        assertEq(gm.lastToken(), address(token), "graduated the right token");
+        // 100% of the raised ETH (curve's whole balance) was handed to the manager; nothing left.
+        assertEq(gm.raisedReceived(), curve.finalEthReserve() - V_ETH, "raised ETH forwarded");
+        assertEq(address(curve).balance, 0, "no leftover ETH in the curve");
+        // Overflow refunded: the buyer's net spend is only fee + raised ETH, far below 1000 ether.
+        uint256 fee = treasury.balance - treasuryBefore;
+        assertEq(ethBefore - buyer.balance, fee + gm.raisedReceived(), "buyer only paid to complete the curve");
+        assertLt(ethBefore - buyer.balance, 100 ether, "overflow refunded");
+    }
+
+    function test_Buy_RevertsAfterGraduation() public {
+        vm.prank(buyer);
+        curve.buy{value: 1000 ether}(0); // graduates
+        vm.deal(buyer, 1 ether);
+        vm.prank(buyer);
+        vm.expectRevert(BondingCurve.AlreadyGraduated.selector);
+        curve.buy{value: 1 ether}(0);
+    }
+
+    function test_Sell_RevertsAfterGraduation() public {
+        vm.prank(buyer);
+        curve.buy{value: 1000 ether}(0); // graduates; buyer now holds the whole allocation
+        vm.startPrank(buyer);
+        token.approve(address(curve), ALLOC);
+        vm.expectRevert(BondingCurve.AlreadyGraduated.selector);
+        curve.sell(1e18, 0);
+        vm.stopPrank();
     }
 
     function test_Buy_SlippageReverts() public {
@@ -140,10 +196,9 @@ contract BondingCurveTest is Test {
         vm.createSelectFork("robinhood");
         assertEq(block.chainid, 4663);
 
+        gm = new MockGraduationManager(); // fresh fork state
         MockERC20 tok = new MockERC20("Fork Coin", "FORK");
-        BondingCurve c =
-            new BondingCurve(IERC20(address(tok)), treasury, V_ETH, V_TOK, ALLOC, 100, type(uint256).max, 0);
-        tok.mint(address(c), ALLOC);
+        BondingCurve c = _newCurve(tok);
 
         address forkBuyer = makeAddr("forkBuyer");
         vm.deal(forkBuyer, 10 ether);

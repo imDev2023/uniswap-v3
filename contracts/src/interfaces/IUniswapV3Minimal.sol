@@ -40,3 +40,40 @@ interface IUniswapV3Pool {
 
     function setFeeProtocol(uint8 feeProtocol0, uint8 feeProtocol1) external;
 }
+
+/// @notice Minimal subset of the V3 NonfungiblePositionManager used at graduation.
+/// @dev The real (unmodified) periphery NPM is deployed from the official artifacts; this
+///      local interface just lets our 0.8.x code call it without compiling 0.7.6 source.
+interface INonfungiblePositionManager {
+    /// @notice Creates the pool for token0/token1/fee if it doesn't exist, then initializes it
+    ///         to `sqrtPriceX96`. `token0 < token1` must hold. Returns the pool address.
+    function createAndInitializePoolIfNecessary(address token0, address token1, uint24 fee, uint160 sqrtPriceX96)
+        external
+        payable
+        returns (address pool);
+
+    struct MintParams {
+        address token0;
+        address token1;
+        uint24 fee;
+        int24 tickLower;
+        int24 tickUpper;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        address recipient;
+        uint256 deadline;
+    }
+
+    /// @notice Mints a new position NFT. Pulls token0/token1 from msg.sender (approve first).
+    function mint(MintParams calldata params)
+        external
+        payable
+        returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+}
+
+/// @notice Minimal WETH9 surface: deposit wraps native ETH 1:1 into the ERC-20 WETH balance.
+interface IWETH9 {
+    function deposit() external payable;
+}

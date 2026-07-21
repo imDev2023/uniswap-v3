@@ -8,9 +8,11 @@ import {
 } from 'wagmi'
 import { bondingCurveAbi } from '../abi/bondingCurve'
 import { erc20Abi } from '../abi/erc20'
-import { activeChain } from '../config/chain'
-import { applySlippage } from '../lib/curve'
+import { TOKEN_DECIMALS } from '../config/constants'
+import { applySlippage, withinBuyCap } from '../lib/curve'
+import { shortReason } from '../lib/errors'
 import { formatEth, formatTokenAmount } from '../lib/format'
+import { useWrongChain } from '../hooks/useWrongChain'
 import { ConnectButton } from './ConnectButton'
 
 type Side = 'buy' | 'sell'
@@ -28,10 +30,12 @@ export function TradePanel({
   symbol: string
   graduated: boolean
 }) {
-  const { address, isConnected, chainId } = useAccount()
+  const { address, isConnected } = useAccount()
   const [side, setSide] = useState<Side>('buy')
   const [amount, setAmount] = useState('')
   const [slippagePct, setSlippagePct] = useState(5)
+  // Which kind of tx is in flight, so the success message can tell an approval from a real trade.
+  const [action, setAction] = useState<'approve' | 'trade' | null>(null)
 
   const parsed = safeParse(amount, side)
   const enabled = parsed !== null && parsed > 0n
@@ -64,6 +68,15 @@ export function TradePanel({
     abi: bondingCurveAbi,
     functionName: 'maxBuyPerWallet',
   })
+  // Cumulative tokens this wallet has already bought from the curve — the on-chain cap is on the
+  // running total, not a single buy (BondingCurve.sol: purchased = purchasedOf[buyer] + tokensOut).
+  const { data: purchased, refetch: refetchPurchased } = useReadContract({
+    address: curve,
+    abi: bondingCurveAbi,
+    functionName: 'purchasedOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!address && !graduated },
+  })
 
   // --- balances / allowance ---
   const { data: tokenBalance, refetch: refetchBalance } = useReadContract({
@@ -89,28 +102,31 @@ export function TradePanel({
     if (isSuccess) {
       refetchBalance()
       refetchAllowance()
+      refetchPurchased()
     }
-  }, [isSuccess, refetchBalance, refetchAllowance])
+  }, [isSuccess, refetchBalance, refetchAllowance, refetchPurchased])
 
-  const wrongChain = isConnected && chainId !== activeChain.id
+  const wrongChain = useWrongChain()
   const needsApproval =
-    side === 'sell' && enabled && allowance !== undefined && (allowance as bigint) < parsed!
+    side === 'sell' && enabled && allowance !== undefined && allowance < parsed!
 
   const tokensOut = buyQuote?.[0]
   const buyFee = buyQuote?.[1]
   const ethOut = sellQuote?.[0]
   const sellFee = sellQuote?.[1]
 
+  // Warn when this buy would push the wallet's *cumulative* purchases past the anti-snipe cap.
   const capWarning =
     side === 'buy' &&
     capActive === true &&
     tokensOut !== undefined &&
     maxBuy !== undefined &&
-    tokensOut > (maxBuy as bigint)
+    !withinBuyCap(purchased ?? 0n, tokensOut, maxBuy, true)
 
   function onBuy() {
     if (!enabled || tokensOut === undefined) return
     reset()
+    setAction('trade')
     writeContract({
       address: curve,
       abi: bondingCurveAbi,
@@ -123,6 +139,7 @@ export function TradePanel({
   function onSell() {
     if (!enabled || ethOut === undefined) return
     reset()
+    setAction('trade')
     writeContract({
       address: curve,
       abi: bondingCurveAbi,
@@ -134,6 +151,7 @@ export function TradePanel({
   function onApprove() {
     if (!enabled) return
     reset()
+    setAction('approve')
     writeContract({
       address: token,
       abi: erc20Abi,
@@ -186,14 +204,14 @@ export function TradePanel({
                 key={pct}
                 className="pill"
                 onClick={() =>
-                  setAmount(formatUnits(((tokenBalance as bigint) * BigInt(pct)) / 100n, 18))
+                  setAmount(formatUnits((tokenBalance * BigInt(pct)) / 100n, TOKEN_DECIMALS))
                 }
               >
                 {pct}%
               </button>
             ))}
             <span className="pill" style={{ cursor: 'default' }}>
-              bal {formatTokenAmount(tokenBalance as bigint)}
+              bal {formatTokenAmount(tokenBalance)}
             </span>
           </div>
         )}
@@ -246,8 +264,10 @@ export function TradePanel({
 
       {capWarning && (
         <div className="hint" style={{ color: 'var(--warn)' }}>
-          Anti-snipe cap is active: max {formatTokenAmount(maxBuy as bigint)} {symbol} per wallet
-          during the early curve. Reduce your buy.
+          Anti-snipe cap is active: max {maxBuy !== undefined ? formatTokenAmount(maxBuy) : '…'}{' '}
+          {symbol} per wallet during the early curve
+          {purchased && purchased > 0n ? ` (you hold ${formatTokenAmount(purchased)})` : ''}. Reduce
+          your buy.
         </div>
       )}
 
@@ -278,8 +298,11 @@ export function TradePanel({
         </button>
       )}
 
-      {writeError && <div className="error-text">{writeError.message.split('\n')[0].slice(0, 140)}</div>}
-      {isSuccess && !needsApproval && <div className="success-text">Trade confirmed.</div>}
+      {writeError && <div className="error-text">{shortReason(writeError.message, 140)}</div>}
+      {isSuccess && action === 'approve' && (
+        <div className="success-text">Approved — you can sell now.</div>
+      )}
+      {isSuccess && action === 'trade' && <div className="success-text">Trade confirmed.</div>}
     </div>
   )
 }
@@ -287,7 +310,7 @@ export function TradePanel({
 function safeParse(amount: string, side: Side): bigint | null {
   if (!amount || amount === '.') return null
   try {
-    return side === 'buy' ? parseEther(amount) : parseUnits(amount, 18)
+    return side === 'buy' ? parseEther(amount) : parseUnits(amount, TOKEN_DECIMALS)
   } catch {
     return null
   }

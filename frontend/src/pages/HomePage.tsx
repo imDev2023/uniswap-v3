@@ -41,9 +41,13 @@ export function HomePage() {
         </Link>
       </div>
 
-      {!isLaunchpadConfigured || isError ? (
+      {!isLaunchpadConfigured ? (
         <p className="center-note">
-          No live data. The subgraph endpoint isn’t reachable for this build yet.
+          The launchpad contracts aren’t configured for this build yet — see the banner above.
+        </p>
+      ) : isError ? (
+        <p className="center-note">
+          Couldn’t reach the subgraph. Check <code>VITE_SUBGRAPH_URL</code> for this build.
         </p>
       ) : isLoading ? (
         <div className="spinner">Loading curves…</div>

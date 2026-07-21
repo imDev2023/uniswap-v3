@@ -5,15 +5,18 @@ import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteCont
 import { launchpadFactoryAbi } from '../abi/launchpadFactory'
 import { FACTORY_ADDRESS, isLaunchpadConfigured } from '../config/contracts'
 import { activeChain } from '../config/chain'
+import { shortReason } from '../lib/errors'
 import { formatEth } from '../lib/format'
 import { setTokenImage } from '../lib/tokenMeta'
+import { useWrongChain } from '../hooks/useWrongChain'
 import { ConnectButton } from '../components/ConnectButton'
 
 const SYMBOL_RE = /^[A-Za-z0-9]{1,11}$/
 
 export function CreatePage() {
   const navigate = useNavigate()
-  const { isConnected, chainId } = useAccount()
+  const { isConnected } = useAccount()
+  const wrongChain = useWrongChain()
 
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
@@ -31,7 +34,6 @@ export function CreatePage() {
 
   const nameError = name.trim().length === 0 ? 'Required' : name.length > 32 ? 'Too long' : ''
   const symbolError = !SYMBOL_RE.test(symbol) ? '1–11 letters/numbers' : ''
-  const wrongChain = isConnected && chainId !== activeChain.id
   const canSubmit =
     isConnected && !wrongChain && !nameError && !symbolError && creationFee !== undefined
 
@@ -138,14 +140,8 @@ export function CreatePage() {
           </button>
         )}
 
-        {writeError && (
-          <div className="error-text">{shortReason(writeError.message)}</div>
-        )}
+        {writeError && <div className="error-text">{shortReason(writeError.message)}</div>}
       </form>
     </div>
   )
-}
-
-function shortReason(message: string): string {
-  return message.split('\n')[0].slice(0, 160)
 }

@@ -2,10 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import {
   fetchActiveTokens,
   fetchFactory,
-  fetchGraduatedTokens,
   fetchHolders,
   fetchToken,
-  fetchTokens,
   fetchTrades,
 } from '../lib/subgraph'
 
@@ -18,18 +16,6 @@ export function useActiveTokens() {
   return useQuery({
     queryKey: ['activeTokens'],
     queryFn: () => fetchActiveTokens(),
-    refetchInterval: LIVE_REFETCH_MS,
-  })
-}
-
-export function useAllTokens() {
-  return useQuery({ queryKey: ['allTokens'], queryFn: () => fetchTokens() })
-}
-
-export function useGraduatedTokens() {
-  return useQuery({
-    queryKey: ['graduatedTokens'],
-    queryFn: () => fetchGraduatedTokens(),
     refetchInterval: LIVE_REFETCH_MS,
   })
 }

@@ -114,15 +114,6 @@ export const TOKENS_QUERY = gql`
   }
 `
 
-export const ALL_TOKENS_QUERY = gql`
-  ${TOKEN_FIELDS}
-  query AllTokens($first: Int!) {
-    tokens(first: $first, orderBy: createdAtTimestamp, orderDirection: desc) {
-      ...TokenFields
-    }
-  }
-`
-
 export const TOKEN_QUERY = gql`
   ${TOKEN_FIELDS}
   query Token($id: ID!) {
@@ -200,23 +191,10 @@ export const FACTORY_QUERY = gql`
 
 // --- fetchers ---
 
-export async function fetchTokens(first = 50): Promise<TokenRow[]> {
-  const data = await subgraphClient.request<{ tokens: TokenRow[] }>(ALL_TOKENS_QUERY, { first })
-  return data.tokens
-}
-
 export async function fetchActiveTokens(first = 50): Promise<TokenRow[]> {
   const data = await subgraphClient.request<{ tokens: TokenRow[] }>(TOKENS_QUERY, {
     first,
     graduated: false,
-  })
-  return data.tokens
-}
-
-export async function fetchGraduatedTokens(first = 50): Promise<TokenRow[]> {
-  const data = await subgraphClient.request<{ tokens: TokenRow[] }>(TOKENS_QUERY, {
-    first,
-    graduated: true,
   })
   return data.tokens
 }

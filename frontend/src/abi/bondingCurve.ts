@@ -68,6 +68,13 @@ export const bondingCurveAbi = [
   },
   {
     type: 'function',
+    name: 'purchasedOf',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
     name: 'curveTokenAllocation',
     stateMutability: 'view',
     inputs: [],

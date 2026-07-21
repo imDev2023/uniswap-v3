@@ -12,4 +12,11 @@ fs_permissions = [{ access = "read", path = "./node_modules" }]
 robinhood = "https://rpc.mainnet.chain.robinhood.com"
 robinhood_testnet = "https://rpc.testnet.chain.robinhood.com"
 
+# Blockscout verification for the deploy pipeline (#18). Robinhood Chain uses Blockscout, which is
+# keyless — the api-key is a placeholder Blockscout ignores. Point the URLs at the chain's Blockscout
+# instance via env (see docs/deploy.md); the deploy command passes `--verify --verifier blockscout`.
+[etherscan]
+robinhood = { key = "${BLOCKSCOUT_API_KEY}", url = "${BLOCKSCOUT_MAINNET_API}", chain = 4663 }
+robinhood_testnet = { key = "${BLOCKSCOUT_API_KEY}", url = "${BLOCKSCOUT_TESTNET_API}", chain = 46630 }
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

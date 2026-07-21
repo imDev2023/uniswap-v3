@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LaunchToken} from "./LaunchToken.sol";
@@ -17,9 +18,11 @@ import {Constants} from "./Constants.sol";
 ///      pre-mine to the creator (fair launch, decision #5). Build 03/04 route the 800M
 ///      curve allocation to a bonding curve; Build 05 (#16) escrows the 200M graduation
 ///      reserve in the GraduationManager and wires each curve to it for atomic graduation.
-///      Fee/treasury are owner-adjustable and apply only to FUTURE launches (decision #9);
-///      ownership is transferred to a multisig in Build 07 (#18).
-contract LaunchpadFactory is Ownable {
+///      Fee/treasury are owner-adjustable and apply only to FUTURE launches (decision #9).
+///      Build 07 (#18): ownership is `Ownable2Step`, so control is handed to a Safe multisig
+///      via a two-step transfer+accept (a mistyped owner can never brick the launchpad), and the
+///      curve defaults become owner-tunable guarded params that likewise bind only FUTURE launches.
+contract LaunchpadFactory is Ownable2Step {
     using SafeERC20 for IERC20;
 
     /// @notice Split of the fixed 1B supply: 80% sold on the curve, 20% reserved to seed
@@ -45,6 +48,10 @@ contract LaunchpadFactory is Ownable {
     uint256 public constant DEFAULT_MAX_BUY_PER_WALLET = 8_000_000e18; // 1% of 800M
     uint256 public constant DEFAULT_ANTI_SNIPE_THRESHOLD = 120_000_000e18; // 15% of 800M
 
+    /// @notice Ceiling on the owner-tunable curve trade fee: 10% (1000 bps). A generous but finite
+    ///         cap so a param change can never brick a launch or gouge traders (#18).
+    uint16 public constant MAX_TRADE_FEE_BPS = 1000;
+
     /// @notice Executes atomic graduation and escrows the 200M reserve for every launch (#16).
     GraduationManager public immutable graduationManager;
 
@@ -66,6 +73,16 @@ contract LaunchpadFactory is Ownable {
     /// @notice Flat fee to create a launch (default 0.01 ETH, decision #5).
     uint256 public creationFee;
 
+    /// @notice Owner-tunable curve defaults applied to FUTURE launches (#18). These bind at the
+    ///         moment `createLaunch` runs and are then frozen into that curve's immutables, so an
+    ///         in-flight launch is never affected by a later change. `virtualTokenReserve` is
+    ///         deliberately NOT tunable: it stays calibration-locked to `DEFAULT_VIRTUAL_TOKEN_RESERVE`
+    ///         so graduation price continuity (#16) holds for any `virtualEthReserve`.
+    uint256 public virtualEthReserve = DEFAULT_VIRTUAL_ETH_RESERVE;
+    uint16 public tradeFeeBps = DEFAULT_TRADE_FEE_BPS;
+    uint256 public maxBuyPerWallet = DEFAULT_MAX_BUY_PER_WALLET;
+    uint256 public antiSnipeThreshold = DEFAULT_ANTI_SNIPE_THRESHOLD;
+
     /// @notice Every token this factory has launched, in creation order.
     address[] public launches;
 
@@ -84,6 +101,9 @@ contract LaunchpadFactory is Ownable {
     event PoolProtocolFeeSet(address indexed pool, uint8 feeProtocol);
     event ProtocolFeeSkipped(address indexed pool);
     event ProtocolFeesCollected(address indexed pool, address indexed treasury, uint128 amount0, uint128 amount1);
+    event CurveParamsUpdated(
+        uint256 virtualEthReserve, uint16 tradeFeeBps, uint256 maxBuyPerWallet, uint256 antiSnipeThreshold
+    );
 
     error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
@@ -91,6 +111,7 @@ contract LaunchpadFactory is Ownable {
     error RefundFailed();
     error NotGraduationManager();
     error InvalidProtocolFee(uint8 value);
+    error InvalidCurveParams();
 
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
     /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
@@ -136,12 +157,12 @@ contract LaunchpadFactory is Ownable {
                     token: IERC20(token),
                     treasury: treasury,
                     graduationManager: address(graduationManager),
-                    virtualEthReserve: DEFAULT_VIRTUAL_ETH_RESERVE,
+                    virtualEthReserve: virtualEthReserve,
                     virtualTokenReserve: DEFAULT_VIRTUAL_TOKEN_RESERVE,
                     curveTokenAllocation: CURVE_SUPPLY,
-                    tradeFeeBps: DEFAULT_TRADE_FEE_BPS,
-                    maxBuyPerWallet: DEFAULT_MAX_BUY_PER_WALLET,
-                    antiSnipeThreshold: DEFAULT_ANTI_SNIPE_THRESHOLD
+                    tradeFeeBps: tradeFeeBps,
+                    maxBuyPerWallet: maxBuyPerWallet,
+                    antiSnipeThreshold: antiSnipeThreshold
                 })
             )
         );
@@ -180,6 +201,28 @@ contract LaunchpadFactory is Ownable {
         if (newTreasury == address(0)) revert ZeroTreasury();
         emit TreasuryUpdated(treasury, newTreasury);
         treasury = newTreasury;
+    }
+
+    /// @notice Retune the curve defaults for FUTURE launches (#18). Validation mirrors BondingCurve's
+    ///         constructor invariants so a launch can never be bricked by a param change, and clamps the
+    ///         trade fee to a sane ceiling. `virtualTokenReserve` is intentionally not exposed — it stays
+    ///         calibration-locked so graduation price continuity (#16) holds for any `virtualEthReserve`.
+    ///         In-flight launches already froze their params into curve immutables and are untouched.
+    function setCurveParams(
+        uint256 virtualEthReserve_,
+        uint16 tradeFeeBps_,
+        uint256 maxBuyPerWallet_,
+        uint256 antiSnipeThreshold_
+    ) external onlyOwner {
+        if (virtualEthReserve_ == 0) revert InvalidCurveParams();
+        if (tradeFeeBps_ > MAX_TRADE_FEE_BPS) revert InvalidCurveParams();
+        if (maxBuyPerWallet_ == 0) revert InvalidCurveParams();
+        if (antiSnipeThreshold_ > CURVE_SUPPLY) revert InvalidCurveParams();
+        virtualEthReserve = virtualEthReserve_;
+        tradeFeeBps = tradeFeeBps_;
+        maxBuyPerWallet = maxBuyPerWallet_;
+        antiSnipeThreshold = antiSnipeThreshold_;
+        emit CurveParamsUpdated(virtualEthReserve_, tradeFeeBps_, maxBuyPerWallet_, antiSnipeThreshold_);
     }
 
     /// @notice Set the default protocol fee applied to FUTURE graduated pools. 0 = off, else 4..10.

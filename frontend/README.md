@@ -1,12 +1,16 @@
-# Launchpad frontend (Build 09 / #20)
+# Launchpad frontend (Builds 09–10 / #20–#21)
 
-The custom launchpad web app: **create a token** and **trade it on the bonding curve**. Built as a
-React + Vite SPA per the spec's frontend decision (#8) — not a fork of `Uniswap/interface`.
+The custom launchpad web app: **create a token**, **trade it on the bonding curve**, and **swap it
+after graduation**. Built as a React + Vite SPA per the spec's frontend decision (#8) — not a fork of
+`Uniswap/interface`.
 
 - **Create** (`/create`) — name / symbol / image form calling `LaunchpadFactory.createLaunch`.
 - **Curve** (`/token/:address`) — live price chart + graduation progress from the subgraph, an
-  on-chain-quoted buy/sell panel, and transparent creator + holder positions.
-- **Explore** (`/`) — live curves and protocol rollups from the subgraph.
+  on-chain-quoted buy/sell panel, and transparent creator + holder positions. After graduation it
+  links to the swap page.
+- **Swap** (`/swap/:address`) — trade a graduated TOKEN/WETH pool through the platform's own
+  Uniswap V3 `SwapRouter` (#21).
+- **Explore** (`/`) — a "just graduated" feed, live curves, and protocol rollups from the subgraph.
 
 ## Stack
 
@@ -28,6 +32,7 @@ Copy `.env.example` to `.env.local` and fill in after the contracts + subgraph a
 | `VITE_RPC_URL` | JSON-RPC endpoint (falls back to the chain's public RPC) |
 | `VITE_FACTORY_ADDRESS` | `LaunchpadFactory` address (see `docs/deploy.md`) |
 | `VITE_GRADUATION_MANAGER_ADDRESS` | `GraduationManager` address |
+| `VITE_SWAP_ROUTER_ADDRESS` | The platform's own Uniswap V3 `SwapRouter` (enables the swap page) |
 | `VITE_SUBGRAPH_URL` | GraphQL endpoint of the self-hosted graph-node (see `../subgraph/README.md`) |
 
 Until `VITE_FACTORY_ADDRESS` is a real address the app runs in **preview mode**: a banner shows and
@@ -51,6 +56,13 @@ npm run build      # tsc -b + vite build (typecheck + production bundle)
   subgraph. Those need the deploy keys that are an out-of-band human step (same gate as #18 — see
   `docs/deploy.md`). The app is wired entirely through config so it works the moment those are
   filled in; logic is validated here via the unit suite + a green production build.
-- **Swap page for graduated pools**, the "just graduated" feed, and richer discovery are Build 10
-  (#21). The curve view already links out to graduated-pool info and flags where the swap page lands.
 - The wallet layer uses the injected connector only (no WalletConnect project id in v1).
+- **Swap pricing is a spot-price estimate, not a router quote.** The platform's V3 deploy ships no
+  Quoter (`contracts/script/DeployLaunchpad`), so the swap page prices off the pool's live `slot0`
+  and estimates output as `amountIn × spot` (ignoring price impact), clearly labelled. Execution is
+  protected on-chain by the slippage-derived `amountOutMinimum`. Deploying a `QuoterV2` and quoting
+  through it (exact, impact-aware) is the follow-up for larger trades. TOKEN→ETH swaps route through
+  a `multicall([exactInputSingle → router, unwrapWETH9 → user])`; ETH→TOKEN sends native value to
+  `exactInputSingle` (the router wraps).
+- The "just graduated" feed and swap page are Build 10 (#21); create + curve-trade are Build 09
+  (#20).

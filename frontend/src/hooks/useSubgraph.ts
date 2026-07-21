@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   fetchActiveTokens,
   fetchFactory,
+  fetchGraduatedTokens,
   fetchHolders,
   fetchToken,
   fetchTrades,
@@ -16,6 +17,14 @@ export function useActiveTokens() {
   return useQuery({
     queryKey: ['activeTokens'],
     queryFn: () => fetchActiveTokens(),
+    refetchInterval: LIVE_REFETCH_MS,
+  })
+}
+
+export function useGraduatedTokens() {
+  return useQuery({
+    queryKey: ['graduatedTokens'],
+    queryFn: () => fetchGraduatedTokens(),
     refetchInterval: LIVE_REFETCH_MS,
   })
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   FACTORY_QUERY,
+  GRADUATED_TOKENS_QUERY,
   HOLDERS_QUERY,
   TOKENS_QUERY,
   TOKEN_QUERY,
@@ -31,6 +32,12 @@ describe('subgraph queries', () => {
   it('holders query returns only positive balances, largest first', () => {
     expect(HOLDERS_QUERY).toContain('balance_gt: 0')
     expect(HOLDERS_QUERY).toContain('orderBy: balance')
+  })
+
+  it('graduated feed orders by graduation time, newest first', () => {
+    expect(GRADUATED_TOKENS_QUERY).toContain('graduated: true')
+    expect(GRADUATED_TOKENS_QUERY).toContain('orderBy: graduatedAtTimestamp')
+    expect(GRADUATED_TOKENS_QUERY).toContain('orderDirection: desc')
   })
 
   it('factory query targets the singleton rollup', () => {

@@ -114,6 +114,21 @@ export const TOKENS_QUERY = gql`
   }
 `
 
+// Graduated tokens, most-recently-graduated first — the "just graduated" feed (spec story 28).
+export const GRADUATED_TOKENS_QUERY = gql`
+  ${TOKEN_FIELDS}
+  query GraduatedTokens($first: Int!) {
+    tokens(
+      first: $first
+      orderBy: graduatedAtTimestamp
+      orderDirection: desc
+      where: { graduated: true }
+    ) {
+      ...TokenFields
+    }
+  }
+`
+
 export const TOKEN_QUERY = gql`
   ${TOKEN_FIELDS}
   query Token($id: ID!) {
@@ -195,6 +210,13 @@ export async function fetchActiveTokens(first = 50): Promise<TokenRow[]> {
   const data = await subgraphClient.request<{ tokens: TokenRow[] }>(TOKENS_QUERY, {
     first,
     graduated: false,
+  })
+  return data.tokens
+}
+
+export async function fetchGraduatedTokens(first = 20): Promise<TokenRow[]> {
+  const data = await subgraphClient.request<{ tokens: TokenRow[] }>(GRADUATED_TOKENS_QUERY, {
+    first,
   })
   return data.tokens
 }

@@ -9,3 +9,6 @@ export const CURVE_SUPPLY = 800_000_000n * 10n ** BigInt(TOKEN_DECIMALS)
 
 /** Curve-progress denominator in basis points (matches subgraph progressBps). */
 export const PROGRESS_BPS_MAX = 10_000
+
+/** Uniswap V3 fee tier of graduated pools: 1.00% (contracts/src/Constants.sol POOL_FEE_TIER). */
+export const POOL_FEE_TIER = 10_000

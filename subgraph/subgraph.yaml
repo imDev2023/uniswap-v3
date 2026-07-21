@@ -1,0 +1,83 @@
+# Launchpad subgraph manifest (Build 08 / #19).
+#
+# Indexes the launchpad on Robinhood Chain (eip155:4663). The Graph's hosted/decentralized networks
+# do NOT support chain 4663, so this is deployed to a SELF-HOSTED graph-node pointed at the Robinhood
+# RPC (see README). `network: robinhood` is the name that graph-node's `ethereum:` config binds to the
+# 4663 RPC — a deploy/infra detail, not a chain choice.
+#
+# Contract addresses + startBlock are placeholders until the contracts are broadcast (#18 needs deploy
+# keys). Fill them in networks.json and run `graph build --network robinhood`, which rewrites the
+# addresses below from that file. Curve addresses are discovered at runtime from LaunchCreated, so
+# BondingCurve is a template (no fixed address).
+specVersion: 1.0.0
+description: Uniswap-V3-based DEX + bonding-curve launchpad on Robinhood Chain — curve progress, trades, holders, and the graduation feed.
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: LaunchpadFactory
+    network: robinhood
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: LaunchpadFactory
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/factory.ts
+      entities:
+        - Factory
+        - Token
+      abis:
+        - name: LaunchpadFactory
+          file: ./abis/LaunchpadFactory.json
+      eventHandlers:
+        - event: LaunchCreated(indexed address,indexed address,indexed address,string,string)
+          handler: handleLaunchCreated
+  - kind: ethereum
+    name: GraduationManager
+    network: robinhood
+    source:
+      address: "0x0000000000000000000000000000000000000000"
+      abi: GraduationManager
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/graduation-manager.ts
+      entities:
+        - Token
+        - Graduation
+      abis:
+        - name: GraduationManager
+          file: ./abis/GraduationManager.json
+      eventHandlers:
+        - event: Graduated(indexed address,indexed address,uint256,uint256,uint256,uint160)
+          handler: handleGraduated
+templates:
+  - kind: ethereum
+    name: BondingCurve
+    network: robinhood
+    source:
+      abi: BondingCurve
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/bonding-curve.ts
+      entities:
+        - Token
+        - Trade
+        - Holder
+      abis:
+        - name: BondingCurve
+          file: ./abis/BondingCurve.json
+      eventHandlers:
+        - event: Bought(indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
+          handler: handleBought
+        - event: Sold(indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
+          handler: handleSold
+        - event: Graduation(indexed address,uint256)
+          handler: handleGraduation

@@ -1,0 +1,852 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "initialOwner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "treasury_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "creationFee_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "positionManager",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "v3Factory_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "weth9_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "CURVE_SUPPLY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_ANTI_SNIPE_THRESHOLD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_MAX_BUY_PER_WALLET",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_TRADE_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_VIRTUAL_ETH_RESERVE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_VIRTUAL_TOKEN_RESERVE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "GRADUATION_RESERVE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_TRADE_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "acceptOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "antiSnipeThreshold",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "applyProtocolFee",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "collectProtocolFees",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amount0",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "amount1",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createLaunch",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "symbol",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "creationFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "creatorOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "curveOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "graduationManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract GraduationManager"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "launchCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "launches",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lpLock",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract LPLock"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxBuyPerWallet",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pendingOwner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "protocolFee",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setCreationFee",
+    "inputs": [
+      {
+        "name": "newFee",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setCurveParams",
+    "inputs": [
+      {
+        "name": "virtualEthReserve_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "tradeFeeBps_",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxBuyPerWallet_",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "antiSnipeThreshold_",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setPoolProtocolFee",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "feeProtocol",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setProtocolFee",
+    "inputs": [
+      {
+        "name": "newFee",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setTreasury",
+    "inputs": [
+      {
+        "name": "newTreasury",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "tradeFeeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "treasury",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "v3Factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IUniswapV3Factory"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "virtualEthReserve",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "CreationFeeUpdated",
+    "inputs": [
+      {
+        "name": "oldFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newFee",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurveParamsUpdated",
+    "inputs": [
+      {
+        "name": "virtualEthReserve",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "tradeFeeBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "maxBuyPerWallet",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "antiSnipeThreshold",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LaunchCreated",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "creator",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "symbol",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferStarted",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "previousOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PoolProtocolFeeSet",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "feeProtocol",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolFeeSkipped",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolFeeUpdated",
+    "inputs": [
+      {
+        "name": "oldFee",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      },
+      {
+        "name": "newFee",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolFeesCollected",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "treasury",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount0",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "amount1",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TreasuryUpdated",
+    "inputs": [
+      {
+        "name": "oldTreasury",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "newTreasury",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "FeeTransferFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientCreationFee",
+    "inputs": [
+      {
+        "name": "sent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidCurveParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidProtocolFee",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotGraduationManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OwnableInvalidOwner",
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnableUnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RefundFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroTreasury",
+    "inputs": []
+  }
+]

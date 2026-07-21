@@ -113,9 +113,15 @@ export function TokenPage() {
                 />
               </div>
               <p className="hint" style={{ marginTop: 12 }}>
-                Liquidity is permanently locked. A swap page for graduated pools ships in the next
-                build (#21).
+                Liquidity is permanently locked.
               </p>
+              <Link
+                to={`/swap/${token.id}`}
+                className="btn btn-primary"
+                style={{ display: 'block', textAlign: 'center', marginTop: 12 }}
+              >
+                Swap {token.symbol} / ETH →
+              </Link>
             </div>
           )}
         </div>

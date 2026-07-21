@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom'
 import { isLaunchpadConfigured } from '../config/contracts'
-import { useActiveTokens, useFactoryStats } from '../hooks/useSubgraph'
+import { useActiveTokens, useFactoryStats, useGraduatedTokens } from '../hooks/useSubgraph'
 import { formatEth } from '../lib/format'
 import { TokenCard } from '../components/TokenCard'
 
 export function HomePage() {
   const { data: tokens, isLoading, isError } = useActiveTokens()
+  const { data: graduated } = useGraduatedTokens()
   const { data: stats } = useFactoryStats()
 
   return (
@@ -33,6 +34,27 @@ export function HomePage() {
           </div>
         </div>
       </section>
+
+      {graduated && graduated.length > 0 && (
+        <section style={{ marginBottom: 36 }}>
+          <div className="row-between" style={{ marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, margin: 0 }}>
+              <span className="brand-mark" style={{ marginRight: 8 }}>
+                🎓
+              </span>
+              Just graduated
+            </h2>
+            <span className="muted" style={{ fontSize: 13 }}>
+              liquidity locked forever
+            </span>
+          </div>
+          <div className="token-grid">
+            {graduated.map((t) => (
+              <TokenCard key={t.id} token={t} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="row-between" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 18, margin: 0 }}>Live curves</h2>

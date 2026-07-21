@@ -4,6 +4,7 @@ import { ConfigBanner } from './components/ConfigBanner'
 import { HomePage } from './pages/HomePage'
 import { CreatePage } from './pages/CreatePage'
 import { TokenPage } from './pages/TokenPage'
+import { SwapPage } from './pages/SwapPage'
 
 export function App() {
   return (
@@ -31,6 +32,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/create" element={<CreatePage />} />
           <Route path="/token/:address" element={<TokenPage />} />
+          <Route path="/swap/:address" element={<SwapPage />} />
         </Routes>
       </main>
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { formatUnits, parseEther, parseUnits, type Address } from 'viem'
+import { formatUnits, type Address } from 'viem'
 import {
   useAccount,
   useReadContract,
@@ -9,15 +9,15 @@ import {
 import { bondingCurveAbi } from '../abi/bondingCurve'
 import { erc20Abi } from '../abi/erc20'
 import { TOKEN_DECIMALS } from '../config/constants'
+import { parseAmount18 } from '../lib/amount'
 import { applySlippage, withinBuyCap } from '../lib/curve'
 import { shortReason } from '../lib/errors'
 import { formatEth, formatTokenAmount } from '../lib/format'
 import { useWrongChain } from '../hooks/useWrongChain'
 import { ConnectButton } from './ConnectButton'
+import { SlippageSelector } from './SlippageSelector'
 
 type Side = 'buy' | 'sell'
-
-const SLIPPAGE_OPTIONS = [1, 3, 5]
 
 export function TradePanel({
   token,
@@ -37,7 +37,7 @@ export function TradePanel({
   // Which kind of tx is in flight, so the success message can tell an approval from a real trade.
   const [action, setAction] = useState<'approve' | 'trade' | null>(null)
 
-  const parsed = safeParse(amount, side)
+  const parsed = parseAmount18(amount)
   const enabled = parsed !== null && parsed > 0n
 
   // --- on-chain quotes (live, from the curve) ---
@@ -246,18 +246,7 @@ export function TradePanel({
           )}
           <div className="quote-line">
             <span>Max slippage</span>
-            <span className="pill-row">
-              {SLIPPAGE_OPTIONS.map((s) => (
-                <button
-                  key={s}
-                  className="pill"
-                  style={s === slippagePct ? { borderColor: 'var(--accent-dim)', color: 'var(--text)' } : undefined}
-                  onClick={() => setSlippagePct(s)}
-                >
-                  {s}%
-                </button>
-              ))}
-            </span>
+            <SlippageSelector value={slippagePct} onChange={setSlippagePct} />
           </div>
         </div>
       )}
@@ -305,13 +294,4 @@ export function TradePanel({
       {isSuccess && action === 'trade' && <div className="success-text">Trade confirmed.</div>}
     </div>
   )
-}
-
-function safeParse(amount: string, side: Side): bigint | null {
-  if (!amount || amount === '.') return null
-  try {
-    return side === 'buy' ? parseEther(amount) : parseUnits(amount, TOKEN_DECIMALS)
-  } catch {
-    return null
-  }
 }

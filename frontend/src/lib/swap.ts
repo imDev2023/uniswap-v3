@@ -1,5 +1,5 @@
 import type { Address } from 'viem'
-import { TOKEN_DECIMALS } from '../config/constants'
+import { POOL_FEE_TIER, TOKEN_DECIMALS } from '../config/constants'
 
 // Pure swap-pricing helpers for graduated TOKEN/WETH pools. Both the LaunchToken and WETH9 are
 // 18-decimal, so the decimal adjustment between token0/token1 cancels and price ratios are direct.
@@ -47,4 +47,40 @@ export function estimateAmountOut(amountIn: bigint, outPerIn: number): bigint {
   if (amountIn <= 0n || !isFinite(outPerIn) || outPerIn <= 0) return 0n
   const scaled = BigInt(Math.round(outPerIn * 1e18))
   return (amountIn * scaled) / 10n ** BigInt(TOKEN_DECIMALS)
+}
+
+export interface ExactInputSingleParams {
+  tokenIn: Address
+  tokenOut: Address
+  fee: number
+  recipient: Address
+  deadline: bigint
+  amountIn: bigint
+  amountOutMinimum: bigint
+  sqrtPriceLimitX96: bigint
+}
+
+/**
+ * Build the `SwapRouter.exactInputSingle` params tuple for a graduated pool trade. Always the 1%
+ * graduated-pool fee tier and no price limit; kept here (not inline in the component) so the router
+ * calldata shape is unit-testable.
+ */
+export function buildExactInputSingle(args: {
+  tokenIn: Address
+  tokenOut: Address
+  recipient: Address
+  deadline: bigint
+  amountIn: bigint
+  amountOutMinimum: bigint
+}): ExactInputSingleParams {
+  return {
+    tokenIn: args.tokenIn,
+    tokenOut: args.tokenOut,
+    fee: POOL_FEE_TIER,
+    recipient: args.recipient,
+    deadline: args.deadline,
+    amountIn: args.amountIn,
+    amountOutMinimum: args.amountOutMinimum,
+    sqrtPriceLimitX96: 0n,
+  }
 }

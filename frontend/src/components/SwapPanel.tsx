@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { encodeFunctionData, formatUnits, parseEther, type Address } from 'viem'
+import { encodeFunctionData, formatUnits, type Address } from 'viem'
 import {
   useAccount,
   useBalance,
@@ -11,18 +11,24 @@ import { erc20Abi } from '../abi/erc20'
 import { swapRouterAbi } from '../abi/swapRouter'
 import { uniswapV3PoolAbi } from '../abi/uniswapV3Pool'
 import { WETH9_ADDRESS } from '../config/chain'
-import { POOL_FEE_TIER, TOKEN_DECIMALS } from '../config/constants'
+import { TOKEN_DECIMALS } from '../config/constants'
 import { SWAP_ROUTER_ADDRESS, isSwapConfigured } from '../config/contracts'
+import { parseAmount18 } from '../lib/amount'
 import { applySlippage } from '../lib/curve'
 import { shortReason } from '../lib/errors'
 import { formatEth, formatTokenAmount } from '../lib/format'
-import { estimateAmountOut, spotPriceFromSqrtX96, tokenIsToken0 } from '../lib/swap'
+import {
+  buildExactInputSingle,
+  estimateAmountOut,
+  spotPriceFromSqrtX96,
+  tokenIsToken0,
+} from '../lib/swap'
 import { useWrongChain } from '../hooks/useWrongChain'
 import { ConnectButton } from './ConnectButton'
+import { SlippageSelector } from './SlippageSelector'
 
 type Dir = 'ethToToken' | 'tokenToEth'
 
-const SLIPPAGE_OPTIONS = [1, 3, 5]
 const DEADLINE_SECONDS = 1200
 
 // Swap a graduated TOKEN/WETH pool through the platform's own v3-periphery SwapRouter (#21). No
@@ -44,7 +50,7 @@ export function SwapPanel({
   const [slippagePct, setSlippagePct] = useState(3)
   const [action, setAction] = useState<'approve' | 'swap' | null>(null)
 
-  const parsed = safeParse(amount)
+  const parsed = parseAmount18(amount)
   const enabled = parsed !== null && parsed > 0n
   const tokenIs0 = tokenIsToken0(token, WETH9_ADDRESS)
 
@@ -117,16 +123,14 @@ export function SwapPanel({
         abi: swapRouterAbi,
         functionName: 'exactInputSingle',
         args: [
-          {
+          buildExactInputSingle({
             tokenIn: WETH9_ADDRESS,
             tokenOut: token,
-            fee: POOL_FEE_TIER,
             recipient: address!,
             deadline: deadline(),
             amountIn: parsed!,
             amountOutMinimum: minOut,
-            sqrtPriceLimitX96: 0n,
-          },
+          }),
         ],
         value: parsed!,
       })
@@ -136,16 +140,14 @@ export function SwapPanel({
         abi: swapRouterAbi,
         functionName: 'exactInputSingle',
         args: [
-          {
+          buildExactInputSingle({
             tokenIn: token,
             tokenOut: WETH9_ADDRESS,
-            fee: POOL_FEE_TIER,
             recipient: SWAP_ROUTER_ADDRESS,
             deadline: deadline(),
             amountIn: parsed!,
             amountOutMinimum: minOut,
-            sqrtPriceLimitX96: 0n,
-          },
+          }),
         ],
       })
       const unwrapData = encodeFunctionData({
@@ -203,12 +205,12 @@ export function SwapPanel({
         />
         {bal !== undefined && (
           <div className="pill-row">
-            <button
-              className="pill"
-              onClick={() => setAmount(formatUnits(bal, TOKEN_DECIMALS))}
-            >
-              max
-            </button>
+            {/* No "max" on the ETH leg — spending the whole balance leaves nothing for gas. */}
+            {dir === 'tokenToEth' && (
+              <button className="pill" onClick={() => setAmount(formatUnits(bal, TOKEN_DECIMALS))}>
+                max
+              </button>
+            )}
             <span className="pill" style={{ cursor: 'default' }}>
               bal{' '}
               {dir === 'ethToToken'
@@ -241,22 +243,7 @@ export function SwapPanel({
           </div>
           <div className="quote-line">
             <span>Max slippage</span>
-            <span className="pill-row">
-              {SLIPPAGE_OPTIONS.map((s) => (
-                <button
-                  key={s}
-                  className="pill"
-                  style={
-                    s === slippagePct
-                      ? { borderColor: 'var(--accent-dim)', color: 'var(--text)' }
-                      : undefined
-                  }
-                  onClick={() => setSlippagePct(s)}
-                >
-                  {s}%
-                </button>
-              ))}
-            </span>
+            <SlippageSelector value={slippagePct} onChange={setSlippagePct} />
           </div>
           <div className="hint">
             Spot-price estimate (excludes price impact) — the trade is protected by your slippage
@@ -292,14 +279,4 @@ export function SwapPanel({
       {isSuccess && action === 'swap' && <div className="success-text">Swap confirmed.</div>}
     </div>
   )
-}
-
-function safeParse(amount: string): bigint | null {
-  if (!amount || amount === '.') return null
-  try {
-    // ETH and the 18-decimal LaunchToken parse identically
-    return parseEther(amount)
-  } catch {
-    return null
-  }
 }

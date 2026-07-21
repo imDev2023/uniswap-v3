@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { parseEther } from 'viem'
-import { estimateAmountOut, spotPriceFromSqrtX96, tokenIsToken0 } from './swap'
+import {
+  buildExactInputSingle,
+  estimateAmountOut,
+  spotPriceFromSqrtX96,
+  tokenIsToken0,
+} from './swap'
+import { POOL_FEE_TIER } from '../config/constants'
 
 const Q96 = 2n ** 96n
 
@@ -58,5 +64,33 @@ describe('estimateAmountOut', () => {
   it('returns zero for non-positive inputs', () => {
     expect(estimateAmountOut(0n, 1000)).toBe(0n)
     expect(estimateAmountOut(parseEther('1'), 0)).toBe(0n)
+  })
+})
+
+describe('buildExactInputSingle', () => {
+  const weth = '0x000000000000000000000000000000000000000a'
+  const token = '0x000000000000000000000000000000000000000b'
+  const user = '0x000000000000000000000000000000000000000c'
+
+  it('always pins the 1% graduated-pool fee tier and no price limit', () => {
+    const p = buildExactInputSingle({
+      tokenIn: weth,
+      tokenOut: token,
+      recipient: user,
+      deadline: 123n,
+      amountIn: parseEther('1'),
+      amountOutMinimum: parseEther('0.9'),
+    })
+    expect(p.fee).toBe(POOL_FEE_TIER)
+    expect(p.fee).toBe(10_000)
+    expect(p.sqrtPriceLimitX96).toBe(0n)
+    expect(p).toMatchObject({
+      tokenIn: weth,
+      tokenOut: token,
+      recipient: user,
+      deadline: 123n,
+      amountIn: parseEther('1'),
+      amountOutMinimum: parseEther('0.9'),
+    })
   })
 })

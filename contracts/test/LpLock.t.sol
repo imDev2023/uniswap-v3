@@ -60,7 +60,7 @@ contract LpLockTest is Test, V3Deployer {
         v3Factory = IUniswapV3Factory(deployV3Factory());
         router = deploySwapRouter(address(v3Factory), Constants.WETH9);
         positionManager = deployPositionManager(address(v3Factory), Constants.WETH9, address(0xDEAD));
-        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, address(v3Factory));
+        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, address(v3Factory), Constants.WETH9);
         gm = factory.graduationManager();
         lock = factory.lpLock();
         // Hand the V3 factory to the launchpad so it can drive the protocol fee switch (decision #9).

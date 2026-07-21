@@ -25,6 +25,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
     // Placeholder V3 addresses; these cases never graduate.
     address internal positionManager = makeAddr("positionManager");
     address internal v3Factory = makeAddr("v3Factory");
+    address internal weth9 = makeAddr("weth9");
 
     event CurveParamsUpdated(
         uint256 virtualEthReserve, uint16 tradeFeeBps, uint256 maxBuyPerWallet, uint256 antiSnipeThreshold
@@ -32,7 +33,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
 
     function setUp() public {
-        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory);
+        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, weth9);
         vm.deal(creator, 10 ether);
     }
 
@@ -169,7 +170,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
 
         address realV3Factory = deployV3Factory(); // deployer (this test) owns it
         address pm = deployPositionManager(realV3Factory, Constants.WETH9, address(0xDEAD));
-        LaunchpadFactory lp = new LaunchpadFactory(address(this), treasury, 0, pm, realV3Factory);
+        LaunchpadFactory lp = new LaunchpadFactory(address(this), treasury, 0, pm, realV3Factory, weth9);
 
         // Hand the V3 protocol-fee switch to the launchpad (single-step, Uniswap's own Ownable).
         IUniswapV3Factory(realV3Factory).setOwner(address(lp));

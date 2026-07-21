@@ -52,9 +52,10 @@ contract DeployLaunchpad is Script, V3Deployer {
         address router = deploySwapRouter(v3Factory, weth9);
         address positionManager = deployPositionManager(v3Factory, weth9, tokenDescriptor);
 
-        // 2. The launchpad, wired to our V3 stack. Broadcaster is initial owner.
+        // 2. The launchpad, wired to our V3 stack. Broadcaster is initial owner. WETH9 is threaded in
+        //    (not hardcoded) so testnet 46630 and mainnet 4663 use their own wrapped-native.
         LaunchpadFactory launchpad =
-            new LaunchpadFactory(msg.sender, treasury, creationFee, positionManager, v3Factory);
+            new LaunchpadFactory(msg.sender, treasury, creationFee, positionManager, v3Factory, weth9);
 
         // 3. Hand the V3 protocol-fee switch to the launchpad (so applyProtocolFee works at graduation).
         IUniswapV3Factory(v3Factory).setOwner(address(launchpad));

@@ -10,7 +10,6 @@ import {BondingCurve, CurveConfig} from "./BondingCurve.sol";
 import {GraduationManager} from "./periphery/GraduationManager.sol";
 import {LPLock} from "./periphery/LPLock.sol";
 import {IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IUniswapV3Minimal.sol";
-import {Constants} from "./Constants.sol";
 
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
@@ -116,12 +115,16 @@ contract LaunchpadFactory is Ownable2Step {
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
     /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
     ///        post-deploy so the owner can drive the protocol fee switch (#17 / decision #9).
+    /// @param weth9_ The chain's canonical wrapped-native, wrapped into the graduation pool. Passed in
+    ///        (not hardcoded) so the same code deploys on testnet 46630 and mainnet 4663, whose WETH9
+    ///        addresses differ (#18); defaults to `Constants.WETH9` (mainnet) in the deploy script.
     constructor(
         address initialOwner,
         address treasury_,
         uint256 creationFee_,
         address positionManager,
-        address v3Factory_
+        address v3Factory_,
+        address weth9_
     ) Ownable(initialOwner) {
         if (treasury_ == address(0)) revert ZeroTreasury();
         treasury = treasury_;
@@ -130,8 +133,7 @@ contract LaunchpadFactory is Ownable2Step {
         // One lock + one GraduationManager per factory. Graduated positions mint straight into the
         // lock; the manager authorizes callers via this factory's curveOf().
         lpLock = new LPLock(positionManager, address(this));
-        graduationManager =
-            new GraduationManager(address(this), positionManager, Constants.WETH9, address(lpLock));
+        graduationManager = new GraduationManager(address(this), positionManager, weth9_, address(lpLock));
     }
 
     /// @notice Number of launches created so far.

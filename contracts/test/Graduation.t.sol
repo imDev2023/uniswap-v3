@@ -32,7 +32,7 @@ contract GraduationTest is Test, V3Deployer {
         vm.createSelectFork("robinhood", FORK_BLOCK);
         address v3Factory = deployV3Factory();
         positionManager = deployPositionManager(v3Factory, Constants.WETH9, address(0xDEAD));
-        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory);
+        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, Constants.WETH9);
         gm = factory.graduationManager();
     }
 

@@ -7,6 +7,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {LaunchToken} from "./LaunchToken.sol";
 import {BondingCurve, CurveConfig} from "./BondingCurve.sol";
 import {GraduationManager} from "./periphery/GraduationManager.sol";
+import {LPLock} from "./periphery/LPLock.sol";
+import {IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IUniswapV3Minimal.sol";
 import {Constants} from "./Constants.sol";
 
 /// @notice Entry point for creating a token launch.
@@ -46,7 +48,19 @@ contract LaunchpadFactory is Ownable {
     /// @notice Executes atomic graduation and escrows the 200M reserve for every launch (#16).
     GraduationManager public immutable graduationManager;
 
-    /// @notice Address that receives creation fees (and, later, protocol fees).
+    /// @notice Permanent lock that owns every graduated LP position (#17).
+    LPLock public immutable lpLock;
+
+    /// @notice The platform's own V3 factory. Ownership is transferred to this launchpad post-deploy,
+    ///         which is what lets the owner exercise the protocol fee switch on graduated pools (#17).
+    IUniswapV3Factory public immutable v3Factory;
+
+    /// @notice Protocol swap-fee setting applied to graduated pools: 0 = off, else N in [4,10] meaning
+    ///         the protocol takes 1/N of each swap's fee (user story 21). Owner-tunable and applies to
+    ///         FUTURE graduations; default 4 (protocol takes 1/4 of swap fees).
+    uint8 public protocolFee = 4;
+
+    /// @notice Address that receives creation fees, protocol fees, and locked-LP trading fees.
     address public treasury;
 
     /// @notice Flat fee to create a launch (default 0.01 ETH, decision #5).
@@ -66,21 +80,37 @@ contract LaunchpadFactory is Ownable {
     );
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
+    event ProtocolFeeUpdated(uint8 oldFee, uint8 newFee);
+    event PoolProtocolFeeSet(address indexed pool, uint8 feeProtocol);
+    event ProtocolFeeSkipped(address indexed pool);
+    event ProtocolFeesCollected(address indexed pool, address indexed treasury, uint128 amount0, uint128 amount1);
 
     error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
     error FeeTransferFailed();
     error RefundFailed();
+    error NotGraduationManager();
+    error InvalidProtocolFee(uint8 value);
 
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
-    constructor(address initialOwner, address treasury_, uint256 creationFee_, address positionManager)
-        Ownable(initialOwner)
-    {
+    /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
+    ///        post-deploy so the owner can drive the protocol fee switch (#17 / decision #9).
+    constructor(
+        address initialOwner,
+        address treasury_,
+        uint256 creationFee_,
+        address positionManager,
+        address v3Factory_
+    ) Ownable(initialOwner) {
         if (treasury_ == address(0)) revert ZeroTreasury();
         treasury = treasury_;
         creationFee = creationFee_;
-        // One GraduationManager per factory; it authorizes callers via this factory's curveOf().
-        graduationManager = new GraduationManager(address(this), positionManager, Constants.WETH9);
+        v3Factory = IUniswapV3Factory(v3Factory_);
+        // One lock + one GraduationManager per factory. Graduated positions mint straight into the
+        // lock; the manager authorizes callers via this factory's curveOf().
+        lpLock = new LPLock(positionManager, address(this));
+        graduationManager =
+            new GraduationManager(address(this), positionManager, Constants.WETH9, address(lpLock));
     }
 
     /// @notice Number of launches created so far.
@@ -150,5 +180,44 @@ contract LaunchpadFactory is Ownable {
         if (newTreasury == address(0)) revert ZeroTreasury();
         emit TreasuryUpdated(treasury, newTreasury);
         treasury = newTreasury;
+    }
+
+    /// @notice Set the default protocol fee applied to FUTURE graduated pools. 0 = off, else 4..10.
+    function setProtocolFee(uint8 newFee) external onlyOwner {
+        if (newFee != 0 && (newFee < 4 || newFee > 10)) revert InvalidProtocolFee(newFee);
+        emit ProtocolFeeUpdated(protocolFee, newFee);
+        protocolFee = newFee;
+    }
+
+    /// @notice Turn on the current protocol fee for a freshly graduated pool. Called by the
+    ///         GraduationManager during graduation. Best-effort: only acts if this launchpad owns the
+    ///         V3 factory, so a fee-switch misconfiguration can never brick a graduation.
+    function applyProtocolFee(address pool) external {
+        if (msg.sender != address(graduationManager)) revert NotGraduationManager();
+        uint8 fee = protocolFee;
+        if (fee == 0) return; // protocol fee intentionally off; nothing to signal
+        if (v3Factory.owner() == address(this)) {
+            IUniswapV3Pool(pool).setFeeProtocol(fee, fee);
+            emit PoolProtocolFeeSet(pool, fee);
+        } else {
+            // Misconfigured (launchpad doesn't own the V3 factory yet). Never brick graduation;
+            // surface it so the owner can remediate later via setPoolProtocolFee.
+            emit ProtocolFeeSkipped(pool);
+        }
+    }
+
+    /// @notice Owner override to (re)set a specific pool's protocol fee. Requires this launchpad to
+    ///         own the V3 factory. 0 = off, else 4..10.
+    function setPoolProtocolFee(address pool, uint8 feeProtocol) external onlyOwner {
+        if (feeProtocol != 0 && (feeProtocol < 4 || feeProtocol > 10)) revert InvalidProtocolFee(feeProtocol);
+        IUniswapV3Pool(pool).setFeeProtocol(feeProtocol, feeProtocol);
+        emit PoolProtocolFeeSet(pool, feeProtocol);
+    }
+
+    /// @notice Sweep a pool's accrued protocol fees to the treasury. Permissionless — the funds can
+    ///         only ever go to the treasury. Requires this launchpad to own the V3 factory.
+    function collectProtocolFees(address pool) external returns (uint128 amount0, uint128 amount1) {
+        (amount0, amount1) = IUniswapV3Pool(pool).collectProtocol(treasury, type(uint128).max, type(uint128).max);
+        emit ProtocolFeesCollected(pool, treasury, amount0, amount1);
     }
 }

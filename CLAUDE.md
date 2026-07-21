@@ -33,6 +33,6 @@ Ticket rhythm (build tickets #12–#21, tracked as GitHub issues; the map is #1,
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.
 4. Comment status on the ticket; merge the branch to `main` before the next ticket.
 
-**Current state:** #12–#15 done and merged to `main` **except #15**, which sits on branch `build/04-anti-snipe` (one commit ahead of `main`). Next up is **#16 (atomic graduation + full-range seeding)** — the headline ticket, which ties the bonding curve to the #12 V3 deployment.
+**Current state:** #12–#16 done and merged to `main` (`main` is pushed to `origin`). #17 (Build 06 — permanent LP lock + fee routing + protocol fee switch) is implemented on branch `build/06-lp-lock`, 44/44 tests green, both code reviews passed (spec-complete); it has **not** yet been merged to `main`. Next up after merging #17 is **#18 (Build 07 — ownership → multisig, params admin, testnet→mainnet deploy pipeline)** — the last Solidity ticket; then #19 (subgraph), #20/#21 (frontend).
 
-**Deferred for #16:** (a) prefactor the `BondingCurve` constructor's growing arg list into a `CurveConfig` struct (flagged in #15 review); (b) re-test the anti-snipe cap against the real create-then-first-buy path and on the full-lifecycle fork test.
+**Optional low-severity test gaps left on #17** (flagged in review, non-blocking): negative-owner tests for `setProtocolFee`/`setPoolProtocolFee`; an explicit `NPM.burn` reverts assertion; a `ProtocolFeeSkipped`-path test.

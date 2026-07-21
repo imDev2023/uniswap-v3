@@ -32,7 +32,7 @@ contract GraduationTest is Test, V3Deployer {
         vm.createSelectFork("robinhood", FORK_BLOCK);
         address v3Factory = deployV3Factory();
         positionManager = deployPositionManager(v3Factory, Constants.WETH9, address(0xDEAD));
-        factory = new LaunchpadFactory(owner, treasury, 0, positionManager);
+        factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory);
         gm = factory.graduationManager();
     }
 
@@ -93,8 +93,9 @@ contract GraduationTest is Test, V3Deployer {
         uint256 poolPrice = (poolWeth * 1e18) / poolToken; // ETH per token, from actual pool reserves
         assertApproxEqRel(poolPrice, curveFinalPrice, 1e15, "pool price == curve final price");
 
-        // --- Full-range position NFT held by the GraduationManager (permanent lock is #17) ---
-        assertEq(IERC721(positionManager).balanceOf(address(gm)), 1, "GM holds the position NFT");
+        // --- Full-range position NFT minted straight into the permanent lock (#17) ---
+        assertEq(IERC721(positionManager).balanceOf(address(factory.lpLock())), 1, "lock holds the position NFT");
+        assertEq(IERC721(positionManager).balanceOf(address(gm)), 0, "manager keeps no NFT");
 
         // --- No leftover reserves anywhere (token, native ETH, AND wrapped WETH must all be dust) ---
         assertLt(IERC20(token).balanceOf(address(gm)), 1e12, "GM token dust is negligible");

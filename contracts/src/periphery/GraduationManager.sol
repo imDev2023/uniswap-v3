@@ -11,6 +11,7 @@ import {Constants} from "../Constants.sol";
 interface ILaunchpad {
     function curveOf(address token) external view returns (address);
     function GRADUATION_RESERVE() external view returns (uint256);
+    function applyProtocolFee(address pool) external;
 }
 
 /// @notice Executes the atomic migration from bonding curve to a seeded, full-range V3 pool
@@ -22,8 +23,8 @@ interface ILaunchpad {
 ///         final marginal price (see `LaunchpadFactory.DEFAULT_VIRTUAL_TOKEN_RESERVE`).
 /// @dev The 200M reserve is escrowed here (transferred by the factory at launch creation); the seed
 ///      amount is the factory's fixed GRADUATION_RESERVE constant, not this contract's live balance,
-///      so donated tokens can't skew the seed price. The position NFT is held here for now;
-///      permanent-lock custody + fee routing land in #17.
+///      so donated tokens can't skew the seed price. The position NFT is minted straight into the
+///      permanent LPLock, and the pool's protocol fee is switched on at graduation (#17).
 contract GraduationManager is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -39,11 +40,15 @@ contract GraduationManager is ReentrancyGuard {
     address public immutable launchpad;
     INonfungiblePositionManager public immutable positionManager;
     address public immutable weth9;
+    /// @notice The permanent lock that receives every graduated position NFT (#17).
+    address public immutable lpLock;
 
     /// @notice token => whether it has already graduated.
     mapping(address => bool) public graduated;
     /// @notice token => the V3 pool it graduated into.
     mapping(address => address) public poolOf;
+    /// @notice token => the locked position NFT id it graduated into.
+    mapping(address => uint256) public tokenIdOf;
 
     event Graduated(
         address indexed token,
@@ -58,14 +63,16 @@ contract GraduationManager is ReentrancyGuard {
     error AlreadyGraduated();
     error NothingToSeed();
 
-    constructor(address launchpad_, address positionManager_, address weth9_) {
+    constructor(address launchpad_, address positionManager_, address weth9_, address lpLock_) {
         require(
-            launchpad_ != address(0) && positionManager_ != address(0) && weth9_ != address(0),
+            launchpad_ != address(0) && positionManager_ != address(0) && weth9_ != address(0)
+                && lpLock_ != address(0),
             "GraduationManager: zero addr"
         );
         launchpad = launchpad_;
         positionManager = INonfungiblePositionManager(positionManager_);
         weth9 = weth9_;
+        lpLock = lpLock_;
     }
 
     /// @notice Migrate `token` into a seeded, full-range `TOKEN/WETH` V3 pool. Callable only by the
@@ -113,10 +120,15 @@ contract GraduationManager is ReentrancyGuard {
                 amount1Desired: amount1,
                 amount0Min: 0,
                 amount1Min: 0,
-                recipient: address(this), // interim custody; permanent lock is #17
+                recipient: lpLock, // minted straight into the permanent lock (#17)
                 deadline: block.timestamp
             })
         );
+        tokenIdOf[token] = tokenId;
+
+        // Switch on the pool's protocol fee. Best-effort: the factory only acts if it owns the V3
+        // factory, so a fee-switch misconfiguration can never brick a graduation.
+        ILaunchpad(launchpad).applyProtocolFee(pool);
 
         emit Graduated(token, pool, tokenId, tokenAmount, wethAmount, sqrtPriceX96);
     }

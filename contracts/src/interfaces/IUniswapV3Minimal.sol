@@ -39,6 +39,11 @@ interface IUniswapV3Pool {
     function fee() external view returns (uint24);
 
     function setFeeProtocol(uint8 feeProtocol0, uint8 feeProtocol1) external;
+
+    /// @notice Withdraws accrued protocol fees to `recipient`. Callable only by the factory owner.
+    function collectProtocol(address recipient, uint128 amount0Requested, uint128 amount1Requested)
+        external
+        returns (uint128 amount0, uint128 amount1);
 }
 
 /// @notice Minimal subset of the V3 NonfungiblePositionManager used at graduation.
@@ -71,6 +76,29 @@ interface INonfungiblePositionManager {
         external
         payable
         returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
+
+    struct CollectParams {
+        uint256 tokenId;
+        address recipient;
+        uint128 amount0Max;
+        uint128 amount1Max;
+    }
+
+    /// @notice Collects accrued trading fees for a position to `recipient`. Callable by the position
+    ///         owner or an approved operator; does NOT touch principal liquidity.
+    function collect(CollectParams calldata params) external payable returns (uint256 amount0, uint256 amount1);
+
+    /// @notice Reduces a position's liquidity (principal). The LP lock never calls this — its
+    ///         absence is what makes the lock permanent.
+    function decreaseLiquidity(
+        uint256 tokenId,
+        uint128 liquidity,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        uint256 deadline
+    ) external payable returns (uint256 amount0, uint256 amount1);
+
+    function ownerOf(uint256 tokenId) external view returns (address);
 }
 
 /// @notice Minimal WETH9 surface: deposit wraps native ETH 1:1 into the ERC-20 WETH balance.

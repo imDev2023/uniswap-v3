@@ -16,15 +16,16 @@ contract LaunchpadFactoryTest is Test {
     address internal owner = makeAddr("owner");
     address internal treasury = makeAddr("treasury");
     address internal creator = makeAddr("creator");
-    // Placeholder V3 position manager; these tests never graduate (that path is Graduation.t.sol).
+    // Placeholder V3 addresses; these tests never graduate (that path is Graduation.t.sol).
     address internal positionManager = makeAddr("positionManager");
+    address internal v3Factory = makeAddr("v3Factory");
 
     event LaunchCreated(
         address indexed token, address indexed curve, address indexed creator, string name, string symbol
     );
 
     function setUp() public {
-        factory = new LaunchpadFactory(owner, treasury, FEE, positionManager);
+        factory = new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory);
         vm.deal(creator, 100 ether);
     }
 
@@ -131,7 +132,7 @@ contract LaunchpadFactoryTest is Test {
     }
 
     function test_FreeCreation_WhenFeeZero() public {
-        LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager);
+        LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory);
         vm.prank(creator);
         address token = freeFactory.createLaunch{value: 0}("Free", "FREE");
         assertEq(IERC20(token).totalSupply(), SUPPLY);
@@ -143,7 +144,7 @@ contract LaunchpadFactoryTest is Test {
         vm.createSelectFork("robinhood");
         assertEq(block.chainid, 4663);
 
-        LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE, positionManager);
+        LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory);
         address forkCreator = makeAddr("forkCreator");
         vm.deal(forkCreator, 1 ether);
         uint256 treasuryBefore = treasury.balance;

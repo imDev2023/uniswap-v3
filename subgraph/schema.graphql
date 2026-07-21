@@ -1,0 +1,143 @@
+# Subgraph schema — launchpad indexing (Build 08 / #19).
+#
+# Entities are shaped for the launchpad UI (spec #11, stories 11/26/27/28/29): a live curve-progress
+# view per token, per-holder positions, a trade history for charts, and a "just graduated" feed.
+#
+# Everything is derived from the launchpad's own rich events (BondingCurve.Bought/Sold/Graduation,
+# LaunchpadFactory.LaunchCreated, GraduationManager.Graduated) — no eth_calls — so indexing is
+# deterministic and unit-testable under matchstick.
+
+"Global rollups across every launch. Singleton, id = \"launchpad\"."
+type Factory @entity(immutable: false) {
+  id: ID!
+  "Number of tokens launched."
+  launchCount: Int!
+  "Number of tokens that have graduated to a locked V3 pool."
+  graduationCount: Int!
+  "Total curve trades (buys + sells)."
+  tradeCount: Int!
+  buyCount: Int!
+  sellCount: Int!
+  "Cumulative gross ETH traded against the curve, in wei (reserves-in + fee on buys, ETH out + fee on sells; excludes graduation refunds)."
+  totalVolumeEth: BigInt!
+  "Cumulative ETH raised across all graduations, in wei."
+  totalRaisedEth: BigInt!
+}
+
+"A launched token and the live state of its bonding curve (stories 11/29)."
+type Token @entity(immutable: false) {
+  "Token address."
+  id: Bytes!
+  "The token's bonding curve."
+  curve: Bytes!
+  "The creator who launched it."
+  creator: Bytes!
+  name: String!
+  symbol: String!
+
+  createdAtTimestamp: BigInt!
+  createdAtBlock: BigInt!
+  createdAtTx: Bytes!
+
+  # --- live curve state, refreshed on every trade ---
+  "Effective ETH reserve (virtual + real), in wei."
+  ethReserve: BigInt!
+  "Effective token reserve."
+  tokenReserve: BigInt!
+  "Cumulative tokens sold by the curve (0..800M)."
+  tokensSold: BigInt!
+  "Marginal price, ETH per token, scaled by 1e18."
+  priceX18: BigInt!
+  "Curve progress toward graduation, in basis points (tokensSold / 800M * 10000)."
+  progressBps: Int!
+  lastTradeTimestamp: BigInt!
+
+  # --- aggregates ---
+  buyCount: Int!
+  sellCount: Int!
+  tradeCount: Int!
+  "Cumulative gross ETH traded against this curve, in wei (excludes graduation refunds)."
+  volumeEth: BigInt!
+  "Number of distinct addresses currently holding a positive curve position."
+  holderCount: Int!
+
+  # --- graduation ---
+  graduated: Boolean!
+  graduatedAtTimestamp: BigInt
+  graduation: Graduation
+
+  trades: [Trade!]! @derivedFrom(field: "token")
+  holders: [Holder!]! @derivedFrom(field: "token")
+}
+
+enum TradeType {
+  BUY
+  SELL
+}
+
+"A single curve buy or sell — the trade history that backs price charts and feeds (story 27)."
+type Trade @entity(immutable: true) {
+  "txHash-logIndex."
+  id: Bytes!
+  token: Token!
+  trader: Bytes!
+  type: TradeType!
+  "Gross ETH for a BUY (msg.value); net ETH received for a SELL. In wei."
+  amountEth: BigInt!
+  "ETH that actually entered the curve reserves on a BUY (net of fee and any graduation refund); 0 for a SELL."
+  ethToCurve: BigInt!
+  "Curve trade fee paid to the treasury, in wei."
+  fee: BigInt!
+  "Tokens received (BUY) or returned (SELL)."
+  amountToken: BigInt!
+  "Marginal price after the trade, ETH per token, scaled by 1e18."
+  priceX18: BigInt!
+  "Curve reserves/sold after the trade."
+  ethReserve: BigInt!
+  tokenReserve: BigInt!
+  tokensSold: BigInt!
+
+  timestamp: BigInt!
+  block: BigInt!
+  txHash: Bytes!
+  logIndex: BigInt!
+}
+
+"An address's position on a token's curve, netted from its buys and sells (stories 26/27)."
+type Holder @entity(immutable: false) {
+  "token-account."
+  id: Bytes!
+  token: Token!
+  account: Bytes!
+  "Net tokens acquired from the curve (bought - sold). Never negative."
+  balance: BigInt!
+  "Lifetime gross tokens bought from the curve."
+  bought: BigInt!
+  "Lifetime gross tokens sold back to the curve."
+  sold: BigInt!
+  firstTradeTimestamp: BigInt!
+  lastTradeTimestamp: BigInt!
+  tradeCount: Int!
+}
+
+"A graduation into a permanently-locked, full-range V3 pool — the \"just graduated\" feed (story 28)."
+type Graduation @entity(immutable: false) {
+  "Token address (one graduation per token)."
+  id: Bytes!
+  token: Token!
+  "The seeded TOKEN/WETH V3 pool."
+  pool: Bytes!
+  "The locked position NFT id held by LPLock."
+  tokenId: BigInt!
+  "Tokens seeded into the pool (the 200M graduation reserve)."
+  tokensSeeded: BigInt!
+  "WETH seeded into the pool (== raised ETH), in wei."
+  wethSeeded: BigInt!
+  "Pool initialization price, sqrt(price) * 2^96."
+  sqrtPriceX96: BigInt!
+  "ETH raised on the curve and forwarded into the pool, in wei."
+  raisedEth: BigInt!
+  timestamp: BigInt!
+  block: BigInt!
+  txHash: Bytes!
+}

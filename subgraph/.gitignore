@@ -1,0 +1,10 @@
+# graph-cli codegen + build output (regenerated from schema/manifest/ABIs)
+generated/
+build/
+
+# matchstick
+tests/.latest.json
+tests/.bin/
+
+# deps
+node_modules/

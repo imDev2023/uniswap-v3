@@ -8,15 +8,17 @@ export const WETH9_ADDRESS = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as con
 
 const DEFAULT_RPC = import.meta.env.VITE_RPC_URL || undefined
 
+// Endpoints are the public documented values from research/robinhood-chain-compat.md. VITE_RPC_URL
+// overrides the RPC (e.g. an Alchemy key) for reliability under load.
 export const robinhoodMainnet = defineChain({
   id: 4663,
   name: 'Robinhood Chain',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: [DEFAULT_RPC ?? 'https://rpc.robinhood.com'] },
+    default: { http: [DEFAULT_RPC ?? 'https://rpc.mainnet.chain.robinhood.com'] },
   },
   blockExplorers: {
-    default: { name: 'Blockscout', url: 'https://explorer.robinhood.com' },
+    default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' },
   },
 })
 
@@ -26,10 +28,10 @@ export const robinhoodTestnet = defineChain({
   testnet: true,
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: [DEFAULT_RPC ?? 'https://testnet-rpc.robinhood.com'] },
+    default: { http: [DEFAULT_RPC ?? 'https://rpc.testnet.chain.robinhood.com'] },
   },
   blockExplorers: {
-    default: { name: 'Blockscout', url: 'https://testnet-explorer.robinhood.com' },
+    default: { name: 'Blockscout', url: 'https://explorer.testnet.chain.robinhood.com' },
   },
 })
 

@@ -73,8 +73,38 @@ Re-extract and re-run `codegen` whenever a contract's events change.
 
 ## Deploy (self-hosted graph-node)
 
-The contract addresses in `subgraph.yaml` / `networks.json` are **placeholders** until the contracts
-are broadcast (that needs deploy keys — see `../docs/deploy.md`, #18). After deploy:
+**Status:** `robinhood-testnet` in `networks.json` is **filled in** from the live 46630 deploy
+(`LaunchpadFactory` `0xE98B99AD…2232`, `GraduationManager` `0xE44a178E…85a5`, `startBlock`
+`93090715` — see `../docs/deployments-testnet.md`). `graph build --network robinhood-testnet`
+compiles clean against it. `robinhood` (mainnet 4663) is still a placeholder pending that deploy.
+
+**No graph-node is running yet** — the indexer stack below has not been stood up. Until it is, the
+frontend's `VITE_SUBGRAPH_URL` points at a `localhost` endpoint that does not answer, and the app
+degrades to on-chain reads (feeds and charts stay empty).
+
+> ⚠️ `graph build --network <net>` **rewrites `subgraph.yaml` in place** — it stamps the addresses
+> and network name from `networks.json` into the tracked manifest and strips its comments. Treat
+> `networks.json` as the source of truth and `git checkout -- subgraph.yaml` after building, or
+> build from a scratch copy. The deployable artifact is `build/subgraph.yaml`, not the source.
+
+### What a self-hosted graph-node needs
+
+Chain 46630 is not on The Graph's hosted or decentralized networks, so indexing requires running the
+stack yourself. Three services:
+
+| Service | Purpose | Notes |
+| --- | --- | --- |
+| `graph-node` | the indexer | image `graphprotocol/graph-node`; ports 8000 (GraphQL), 8020 (admin/deploy), 8030 (status) |
+| Postgres | entity store | v14+, needs `initdb` locale `C`; graph-node owns the schema |
+| IPFS | manifest + mapping storage | `ipfs/kubo`, port 5001; `graph deploy` uploads the wasm here |
+
+The RPC binding is the one chain-specific piece — graph-node needs an archive-ish endpoint that
+answers `eth_getLogs` over the historical range from `startBlock`. The public Robinhood RPC has not
+been checked for log-range limits or retention; if it rejects wide `eth_getLogs` windows, graph-node
+will stall and a dedicated/archive endpoint becomes a hard requirement. Worth verifying before
+committing to infra.
+
+After the deploy:
 
 1. Put the deployed `LaunchpadFactory` and `GraduationManager` addresses and their deploy block
    (`startBlock`) into **`networks.json`** under `robinhood` (and `robinhood-testnet`).
@@ -97,3 +127,18 @@ are broadcast (that needs deploy keys — see `../docs/deploy.md`, #18). After d
 
 Point `--network robinhood-testnet` at the testnet stack first (mirrors the contracts' testnet →
 mainnet pipeline in `../docs/deploy.md`).
+
+4. Set the frontend's `VITE_SUBGRAPH_URL` to the resulting GraphQL endpoint (default
+   `http://localhost:8000/subgraphs/name/launchpad/launchpad`) and reload.
+
+### Testnet data available to index
+
+The 46630 smoke test (`../docs/deployments-testnet.md`) already wrote real events for every handler,
+so a fresh index has non-trivial data to chew on immediately:
+
+- 2 `LaunchCreated` (`SMOKE` on a production-calibrated curve, `GRAD` on a test-calibrated one)
+- `Bought` ×3, `Sold` ×1 on the curve templates
+- 1 `Graduation` + 1 `Graduated` (pool `0x4eB4Ca42…9cf7`, locked NFT id 1)
+
+Indexing from `startBlock` 93090715 should reproduce exactly those entities — a good first
+correctness check on the stack.

@@ -90,6 +90,67 @@ EOA. On mainnet the Safe multisig must execute it as a multisig transaction.
   `BLOCKSCOUT_API_KEY` / `BLOCKSCOUT_TESTNET_API` / `BLOCKSCOUT_MAINNET_API`. **All three** must be
   exported or forge errors on the unused mainnet one.
 
+## Smoke test — end-to-end on 46630 ✅
+
+Every production path was exercised on-chain against this deployment.
+
+### Launch A — `SMOKE`, production calibration
+
+Token `0x3AdDafBAC225B160a2770145c1259F5de5b9bd0e` · curve `0xf48A1140bD437E5161730fA55f0C9C8479c348ad`
+
+| Step | Result |
+| --- | --- |
+| `createLaunch("Smoke Test Token","SMOKE")` + 0.01 ETH | ✅ 800M minted to curve |
+| `buy` 0.22 ETH | ✅ 7,688,183.78 tokens — **exactly** the `quoteBuy` figure |
+| `buy` 0.05 ETH (2nd, would total ~9.4M) | ✅ **reverts** `BuyCapExceeded(9.43e24, 8e24)` — anti-snipe holds |
+| `buy` 0.008 ETH (inside 311k headroom) | ✅ simulates fine — cap is a ceiling, not a freeze |
+| `approve` + `sell` 2M tokens | ✅ 0.0564 ETH out, 0.00057 fee; `tokensSold` decreased |
+| `purchasedOf` after the sell | ✅ still 7.688M — **sell-then-rebuy cannot evade the cap** |
+
+### Curve params are future-only
+
+`setCurveParams(0.3 ETH, 100bps, 800M, 0)` was executed from the owner, then restored. While the
+factory defaults were changed, launch A's curve still read `virtualEthReserve = 30 ETH` and
+`maxBuyPerWallet = 8M` — **in-flight launches freeze their params at `createLaunch`, confirmed
+on-chain**, not just in tests. Production values are restored (30 ETH / 100 bps / 8M / 120M).
+
+### Launch B — `GRAD`, test calibration, graduated
+
+Token `0x1bFB12F7bE47cb8C485a1193551e25d99DcA9375` · curve `0x56d1EcDdF12ae4Ee662b873DC39b6Aa15C03a7a8`
+
+Calibrated to `virtualEthReserve = 0.3 ETH` so graduation costs ~0.9 ETH instead of ~90 (the
+deployer holds ~2.9 testnet ETH). `virtualTokenReserve` is calibration-locked, so the #16 price
+continuity property is exercised faithfully — only the absolute ETH scale differs.
+
+| Check | Result |
+| --- | --- |
+| Threshold-crossing `buy` of **1.5 ETH** (oversized on purpose) | ✅ graduated; **net spend exactly 0.9 ETH** + gas — the 0.6 ETH excess was refunded |
+| `curve.graduated()` / curve ETH balance | ✅ `true` / `0` — fully drained |
+| Pool `0x4eB4Ca4260cBCbf015740fA0e2259f82A6fd9cf7` | ✅ `getPool(TOKEN,WETH,10000)` resolves to it |
+| Pool seeding | ✅ 200,000,000 TOKEN + 0.9 WETH, liquidity `1.341e22` |
+| Full-range position | ✅ ticks `-887200 … 887200` at the 1% tier |
+| LP NFT id 1 owner | ✅ `LPLock` `0xf9D783…3aAd` |
+| LP is *structurally* locked | ✅ `LPLock` exposes only `collect` + `onERC721Received` — no transfer/burn/approve. `decreaseLiquidity` from the deployer reverts `Not approved` |
+| Protocol fee switch (#17) | ✅ `slot0.feeProtocol = 68` = 4/4 — `applyProtocolFee` fired at graduation |
+
+### Swap page paths (#21) — both directions through our own `SwapRouter`
+
+| Path | Result |
+| --- | --- |
+| ETH→TOKEN, payable `exactInputSingle`, 0.01 ETH | ✅ pool WETH 0.8999 → 0.9099 |
+| TOKEN→ETH, `multicall([exactInputSingle → router, unwrapWETH9 → user])`, 1M tokens | ✅ +0.00453 native ETH received (net of gas) |
+| Router WETH dust after unwrap | ✅ `0` — nothing stranded |
+
+### Not covered
+
+- **Multi-wallet anti-snipe.** One EOA was used, so the per-wallet cap is proven per-wallet but not
+  across competing buyers in one block.
+- **Graduation at production scale.** Launch B graduated at 1/100th the ETH scale. The mechanism is
+  validated; the ~90 ETH absolute figure is not exercised on testnet.
+- **`LPLock.collect`.** The pool has accrued essentially no fees yet, so the fee-routing path to
+  treasury is still test-only.
+- **Subgraph indexing.** No graph-node is running — see `subgraph/README.md`.
+
 ## Reproduce
 
 ```bash

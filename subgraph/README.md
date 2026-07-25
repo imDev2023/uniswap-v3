@@ -98,11 +98,51 @@ stack yourself. Three services:
 | Postgres | entity store | v14+, needs `initdb` locale `C`; graph-node owns the schema |
 | IPFS | manifest + mapping storage | `ipfs/kubo`, port 5001; `graph deploy` uploads the wasm here |
 
-The RPC binding is the one chain-specific piece — graph-node needs an archive-ish endpoint that
-answers `eth_getLogs` over the historical range from `startBlock`. The public Robinhood RPC has not
-been checked for log-range limits or retention; if it rejects wide `eth_getLogs` windows, graph-node
-will stall and a dedicated/archive endpoint becomes a hard requirement. Worth verifying before
-committing to infra.
+### RPC capability — measured against `rpc.testnet.chain.robinhood.com` (2026-07-25)
+
+Node is `nitro/v3.11.3-rc.4`. **Verdict: the public RPC is sufficient for this subgraph** — but only
+because the mappings make **zero `eth_call`s**. That is now a load-bearing infra constraint, not just
+a testability nicety (see "Why no eth_calls" below).
+
+| Property | Measured | Consequence |
+| --- | --- | --- |
+| `eth_getLogs` block-range limit | **none** — genesis→head (93.2M blocks) succeeds | wide backfill windows are fine |
+| `eth_getLogs` result limit | **10,000 logs**, then `-32000 "logs matched by query exceeds limit of 10000"` | the real ceiling; see sizing below |
+| Chain-wide log density | ~1.72 logs/block (1,720 in 1,000 blocks near head) | unfiltered queries cap at ~5,800 blocks |
+| Our filtered backfill (`LaunchpadFactory`, deploy→head) | **8 logs over 80,907 blocks** | ~3 orders of magnitude below the cap |
+| Block time | **0.305 s** | ~197k blocks/day |
+| Historical **logs / blocks / receipts** | ✅ retained at the deploy block (~81k blocks / 6.9 h back) | backfill from `startBlock` works |
+| Historical **state** (`eth_call`, `eth_getBalance`) | ❌ **pruned after ~5,600 blocks (~28 min)** — `missing trie node … not available` | **this is not an archive node** |
+| `eth_getLogs` by `blockHash` (EIP-1898) | ✅ supported | the `no_eip1898` binding below is more conservative than required |
+| `eth_getBlockReceipts` | ✅ supported | |
+| Head consistency | ✅ monotonic; 15-block spread over 20 consecutive calls, never regressed | no load-balancer skew to design around |
+
+#### Why "no eth_calls" is now an infra requirement
+
+State is pruned after **~28 minutes** of chain time. Any mapping that calls a contract would fail
+during backfill for every block older than that — and backfill starts ~7 hours back. The #19 design
+derives everything from event payloads (`CURVE_SUPPLY` is a constant), so it never touches historical
+state and indexes fine on a pruned node.
+
+**Do not add an `eth_call` to a mapping without first moving to an archive endpoint.** The failure is
+not subtle but it only appears on backfill, so it can pass a near-head test and then break on reindex.
+
+#### Sizing graph-node against the 10,000-log cap
+
+Defaults request up to 2,000 blocks per `eth_getLogs`. To hit the cap in one window, *our* contracts
+would need >5 logs/block sustained for ~10 minutes (~10k trade events). Unlikely, but a viral launch
+is exactly when it would bite — and Nitro's error string is non-standard, so graph-node will probably
+not recognise it as a "reduce your range" signal and may retry-loop instead of adapting.
+
+Cheap insurance — halve the window, doubling headroom:
+
+```
+GRAPH_ETHEREUM_MAX_BLOCK_RANGE_SIZE=1000          # default 2000
+GRAPH_ETHEREUM_TARGET_TRIGGERS_PER_BLOCK_RANGE=100
+```
+
+Mainnet (4663) has **not** been measured — re-run these probes before committing to infra there, as
+density and retention will differ.
 
 After the deploy:
 

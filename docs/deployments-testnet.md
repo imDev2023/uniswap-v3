@@ -151,6 +151,47 @@ continuity property is exercised faithfully — only the absolute ETH scale diff
   treasury is still test-only.
 - **Subgraph indexing.** No graph-node is running — see `subgraph/README.md`.
 
+## ⚙️ Current testnet curve config — **1 ETH graduation** (test calibration)
+
+The live 46630 factory is deliberately **not** on production calibration. It is set so a new launch
+graduates for **exactly 1 ETH**, so the full lifecycle is cheap to exercise repeatedly.
+
+| Param | Live testnet value | Production value (code default) |
+| --- | --- | --- |
+| `virtualEthReserve` | **1/3 ETH** (`333333333333333333`) | 30 ETH |
+| `tradeFeeBps` | 100 (1%) | 100 (1%) |
+| `maxBuyPerWallet` | **800M** (effectively uncapped) | 8M |
+| `antiSnipeThreshold` | **0** (cap inactive) | 120M |
+
+**Why `virtualEthReserve = 1/3 ETH` gives exactly 1 ETH:** `virtualTokenReserve` is calibration-locked
+at `CURVE_SUPPLY² / (CURVE_SUPPLY - GRADUATION_RESERVE)`, which fixes `finalEthReserve = 4 × V_eth`.
+So **ETH-to-graduate = 3 × V_eth**, always. 30 ETH → 90; 1/3 ETH → 1.
+
+Verified on launch `ONEETH` (token `0x9903AFeF4800a4b8A05e4Ee62BE2bA720444255F`, curve
+`0x5CdF2eed221F3b2816BdA978fD4dE10e46210407`): `finalEthReserve - virtualEthReserve` = **1.000000 ETH**.
+
+> The 1% trade fee is taken off the way in, so graduating costs ~**1.0101 ETH gross** (1 ETH *net*
+> reaches the reserve). Send a little over 1 ETH — the curve refunds any excess past the threshold.
+
+**Anti-snipe is off**, and that is deliberate: at this scale the production 8M-per-wallet cap would
+let one wallet contribute only ~0.0025 ETH, so a solo graduation would need ~400 wallets. The cap
+itself is already proven on the `SMOKE` launch above (production calibration, cap enforced).
+
+**This is testnet-only state, set via the owner-only `setCurveParams`.** The Solidity constants in
+`LaunchpadFactory` are untouched — `DEFAULT_VIRTUAL_ETH_RESERVE` is still `30 ether`, so a **mainnet
+deploy is unaffected** and lands on production calibration.
+
+Restore production values on testnet at any time:
+
+```bash
+cast send $LAUNCHPAD "setCurveParams(uint256,uint16,uint256,uint256)" \
+  30000000000000000000 100 8000000000000000000000000 120000000000000000000000000 \
+  --rpc-url robinhood_testnet --private-key $PRIVATE_KEY
+```
+
+`setCurveParams` is **future-only** — it never touches an in-flight curve (proven on-chain above), so
+existing launches keep whatever calibration they froze at `createLaunch`.
+
 ## Reproduce
 
 ```bash

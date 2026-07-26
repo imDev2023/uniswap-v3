@@ -1,7 +1,7 @@
 {
-  "name": "uniswap-v3-launchpad-subgraph",
+  "name": "octopus-subgraph",
   "version": "0.1.0",
-  "description": "Subgraph indexing the bonding-curve launchpad on Robinhood Chain (eip155:4663).",
+  "description": "Subgraph indexing the Octopus bonding-curve launchpad on Robinhood Chain (eip155:4663).",
   "license": "GPL-2.0-or-later",
   "private": true,
   "scripts": {
@@ -9,8 +9,8 @@
     "build": "graph build",
     "build:robinhood": "graph build --network robinhood",
     "test": "graph test",
-    "create-local": "graph create --node http://localhost:8020/ launchpad/launchpad",
-    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 launchpad/launchpad"
+    "create-local": "graph create --node http://localhost:8120/ octopus/octopus",
+    "deploy-local": "graph deploy --node http://localhost:8120/ --ipfs http://localhost:5001 octopus/octopus"
   },
   "devDependencies": {
     "@graphprotocol/graph-cli": "0.97.1",

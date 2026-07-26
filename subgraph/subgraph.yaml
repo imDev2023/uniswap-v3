@@ -10,7 +10,7 @@
 # addresses below from that file. Curve addresses are discovered at runtime from LaunchCreated, so
 # BondingCurve is a template (no fixed address).
 specVersion: 1.0.0
-description: Uniswap-V3-based DEX + bonding-curve launchpad on Robinhood Chain — curve progress, trades, holders, and the graduation feed.
+description: Octopus — bonding-curve launchpad and DEX on Robinhood Chain. Indexes curve progress, trades, holders, and the graduation feed.
 schema:
   file: ./schema.graphql
 dataSources:

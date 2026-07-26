@@ -18,6 +18,8 @@ contract V3Deployer {
         "node_modules/@uniswap/v3-periphery/artifacts/contracts/SwapRouter.sol/SwapRouter.json";
     string internal constant POSITION_MANAGER_ARTIFACT =
         "node_modules/@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json";
+    string internal constant QUOTER_V2_ARTIFACT =
+        "node_modules/@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json";
 
     function _create(bytes memory bytecode) private returns (address addr) {
         assembly {
@@ -46,5 +48,16 @@ contract V3Deployer {
         bytes memory bytecode =
             abi.encodePacked(vm.getCode(POSITION_MANAGER_ARTIFACT), abi.encode(factory, weth9, tokenDescriptor));
         positionManager = _create(bytecode);
+    }
+
+    /// @notice Deploy our own QuoterV2, so the swap UI can price trades exactly instead of
+    ///         estimating from `slot0` spot price (which ignores price impact and fees).
+    /// @dev Stateless and permissionless — it holds no funds and has no owner, so it can be added to
+    ///      a live deployment at any time without touching the pools or the launchpad. Its quote
+    ///      functions are non-`view` by design (they execute a real swap and revert to return the
+    ///      result), so callers must use `eth_call`, never a transaction.
+    function deployQuoterV2(address factory, address weth9) public returns (address quoter) {
+        bytes memory bytecode = abi.encodePacked(vm.getCode(QUOTER_V2_ARTIFACT), abi.encode(factory, weth9));
+        quoter = _create(bytecode);
     }
 }

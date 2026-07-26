@@ -4,15 +4,22 @@ import {
   useAccount,
   useBalance,
   useReadContract,
+  useSimulateContract,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi'
 import { erc20Abi } from '../abi/erc20'
+import { quoterV2Abi } from '../abi/quoterV2'
 import { swapRouterAbi } from '../abi/swapRouter'
 import { uniswapV3PoolAbi } from '../abi/uniswapV3Pool'
 import { WETH9_ADDRESS } from '../config/chain'
-import { TOKEN_DECIMALS } from '../config/constants'
-import { SWAP_ROUTER_ADDRESS, isSwapConfigured } from '../config/contracts'
+import { POOL_FEE_TIER, TOKEN_DECIMALS } from '../config/constants'
+import {
+  QUOTER_ADDRESS,
+  SWAP_ROUTER_ADDRESS,
+  isQuoterConfigured,
+  isSwapConfigured,
+} from '../config/contracts'
 import { parseAmount18 } from '../lib/amount'
 import { applySlippage } from '../lib/curve'
 import { shortReason } from '../lib/errors'
@@ -31,9 +38,13 @@ type Dir = 'ethToToken' | 'tokenToEth'
 
 const DEADLINE_SECONDS = 1200
 
-// Swap a graduated TOKEN/WETH pool through the platform's own v3-periphery SwapRouter (#21). No
-// Quoter is deployed, so output is ESTIMATED from the pool's live slot0 spot price (ignoring price
-// impact) and clearly labelled; on-chain safety comes from the slippage-derived amountOutMinimum.
+// Swap a graduated TOKEN/WETH pool through the platform's own v3-periphery SwapRouter (#21).
+//
+// Output comes from our own QuoterV2 when VITE_QUOTER_ADDRESS is set — an exact figure including the
+// 1% fee and price impact, verified against real execution in contracts/test/QuoterV2.t.sol. When it
+// is unset (older deployments, preview mode) the panel falls back to the pool's slot0 spot price,
+// which is optimistic and is labelled as an estimate. Either way, on-chain safety comes from the
+// slippage-derived amountOutMinimum.
 export function SwapPanel({
   token,
   symbol,
@@ -54,17 +65,43 @@ export function SwapPanel({
   const enabled = parsed !== null && parsed > 0n
   const tokenIs0 = tokenIsToken0(token, WETH9_ADDRESS)
 
-  // --- live spot price from the pool ---
+  const tokenIn = dir === 'ethToToken' ? WETH9_ADDRESS : token
+  const tokenOut = dir === 'ethToToken' ? token : WETH9_ADDRESS
+
+  // --- exact quote from our own QuoterV2 (preferred) ---
+  // quoteExactInputSingle is non-view — it swaps and reverts with the result — so it must go through
+  // eth_call. useSimulateContract does exactly that and surfaces the decoded return in `data.result`.
+  const { data: quoteSim, isFetching: isQuoting } = useSimulateContract({
+    address: QUOTER_ADDRESS,
+    abi: quoterV2Abi,
+    functionName: 'quoteExactInputSingle',
+    args: [
+      {
+        tokenIn,
+        tokenOut,
+        amountIn: parsed ?? 0n,
+        fee: POOL_FEE_TIER,
+        sqrtPriceLimitX96: 0n,
+      },
+    ],
+    query: { enabled: isSwapConfigured && isQuoterConfigured && enabled, refetchInterval: 8_000 },
+  })
+  const quotedOut = quoteSim?.result?.[0]
+
+  // --- fallback: live spot price from the pool (optimistic; ignores fee and price impact) ---
   const { data: slot0 } = useReadContract({
     address: pool,
     abi: uniswapV3PoolAbi,
     functionName: 'slot0',
-    query: { enabled: isSwapConfigured, refetchInterval: 8_000 },
+    query: { enabled: isSwapConfigured && !isQuoterConfigured, refetchInterval: 8_000 },
   })
   const sqrtPriceX96 = slot0?.[0]
   const spot = sqrtPriceX96 !== undefined ? spotPriceFromSqrtX96(sqrtPriceX96, tokenIs0) : undefined
   const outPerIn = spot ? (dir === 'ethToToken' ? spot.tokenPerWeth : spot.wethPerToken) : 0
-  const estOut = enabled && spot ? estimateAmountOut(parsed, outPerIn) : undefined
+  const spotOut = enabled && spot ? estimateAmountOut(parsed, outPerIn) : undefined
+
+  const estOut = isQuoterConfigured ? quotedOut : spotOut
+  const isExactQuote = isQuoterConfigured && quotedOut !== undefined
   const minOut = estOut !== undefined ? applySlippage(estOut, slippagePct * 100) : 0n
 
   // --- balances / allowance ---
@@ -224,13 +261,15 @@ export function SwapPanel({
       {enabled && (
         <div style={{ margin: '12px 0' }}>
           <div className="quote-line">
-            <span>You receive (est.)</span>
+            <span>{isExactQuote ? 'You receive' : 'You receive (est.)'}</span>
             <span className="num">
               {estOut !== undefined
                 ? recvSymbol === 'ETH'
                   ? `${formatEth(estOut, 6)} ETH`
                   : `${formatTokenAmount(estOut)} ${symbol}`
-                : '…'}
+                : isQuoting
+                  ? 'quoting…'
+                  : '…'}
             </span>
           </div>
           <div className="quote-line">
@@ -246,8 +285,9 @@ export function SwapPanel({
             <SlippageSelector value={slippagePct} onChange={setSlippagePct} />
           </div>
           <div className="hint">
-            Spot-price estimate (excludes price impact) — the trade is protected by your slippage
-            limit. 1% pool fee applies.
+            {isExactQuote
+              ? 'Exact quote from the pool, including the 1% fee and price impact. The trade is still protected by your slippage limit.'
+              : 'Spot-price estimate (excludes price impact) — the trade is protected by your slippage limit. 1% pool fee applies.'}
           </div>
         </div>
       )}

@@ -1,0 +1,110 @@
+# Self-hosted graph-node stack for the launchpad subgraph.
+#
+# Chain 46630 (and mainnet 4663) are not on The Graph's hosted or decentralized networks, so the
+# indexer runs locally. See ../README.md for the RPC capability probe that this config is sized
+# against.
+#
+#   docker compose up -d
+#   cd .. && npm run codegen && npx graph build --network robinhood-testnet
+#   git checkout -- subgraph.yaml          # graph build rewrites the tracked manifest in place
+#   npx graph create --node http://localhost:8120/ launchpad/launchpad
+#   npx graph deploy --node http://localhost:8120/ --ipfs http://localhost:5001 launchpad/launchpad
+#
+# HOST PORTS ARE REMAPPED into the 81xx range: the conventional graph-node ports 8000/8080 are
+# commonly taken by other local stacks (supabase-kong, open-webui). Container-internal ports are
+# unchanged, so every graph-node doc still applies — only the host side shifts.
+#
+#   8100 -> 8000  GraphQL HTTP      (query endpoint)
+#   8101 -> 8001  GraphQL WebSocket (subscriptions)
+#   8120 -> 8020  admin / JSON-RPC  (graph create, graph deploy)
+#   8130 -> 8030  index node status (indexing health, chain head)
+#   8140 -> 8040  Prometheus metrics
+#   5434 -> 5432  Postgres          (exposed for debugging only; graph-node talks over the network)
+
+services:
+  graph-node:
+    image: graphprotocol/graph-node:v0.40.2
+    container_name: launchpad-graph-node
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    ports:
+      - "8100:8000"
+      - "8101:8001"
+      - "8120:8020"
+      - "8130:8030"
+      - "8140:8040"
+    environment:
+      postgres_host: postgres
+      postgres_user: graph-node
+      postgres_pass: let-me-in
+      postgres_db: graph-node
+      ipfs: "ipfs:5001"
+
+      # The network name here MUST match `network:` in the built subgraph.yaml, which
+      # `graph build --network <key>` stamps from ../networks.json. Testnet key is
+      # `robinhood-testnet`; mainnet key is `robinhood`.
+      ethereum: "robinhood-testnet:${ROBINHOOD_RPC_URL:-https://rpc.testnet.chain.robinhood.com}"
+
+      # --- Sizing against the measured RPC limits (see ../README.md) --------------------------
+      # The RPC imposes no eth_getLogs block-range limit but caps results at 10,000 logs, and its
+      # Nitro error string is non-standard so graph-node will not recognise it as a "narrow your
+      # range" signal. Halving the default 2000-block window doubles headroom before that cap.
+      GRAPH_ETHEREUM_MAX_BLOCK_RANGE_SIZE: 1000
+      GRAPH_ETHEREUM_TARGET_TRIGGERS_PER_BLOCK_RANGE: 100
+
+      # --- Keeping pace with a 0.3s-block chain over a high-latency public RPC ----------------
+      # Blocks land at ~3-4.5/s. graph-node's block ingestor is the bottleneck, not the log scan:
+      # at stock settings it ingests ~4.5 blocks/s (round-trip-bound against the public RPC), which
+      # only just matches block production, so the subgraph sits ~2 min behind head and never
+      # converges. These widen the ingestor's concurrency and per-cycle batch.
+      ETHEREUM_POLLING_INTERVAL: 500
+      GRAPH_ETHEREUM_BLOCK_BATCH_SIZE: 100
+      ETHEREUM_BLOCK_INGESTOR_MAX_CONCURRENT_JSON_RPC_CALLS_FOR_TXN_RECEIPTS: 1000
+      # Orbit L2 with fast finality — the 250-block default reorg window is far more ancestor
+      # ingestion than this chain needs.
+      ETHEREUM_REORG_THRESHOLD: 50
+
+      GRAPH_LOG: info
+      RUST_BACKTRACE: "1"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:14
+    container_name: launchpad-graph-postgres
+    ports:
+      - "5434:5432"
+    command:
+      - postgres
+      - -cshared_preload_libraries=pg_stat_statements
+      - -cmax_connections=200
+    environment:
+      POSTGRES_USER: graph-node
+      POSTGRES_PASSWORD: let-me-in
+      POSTGRES_DB: graph-node
+      # graph-node requires locale C collation; initdb only honours this on first creation.
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graph-node -d graph-node"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - graph-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  ipfs:
+    image: ipfs/kubo:v0.34.1
+    container_name: launchpad-graph-ipfs
+    ports:
+      - "5001:5001"
+    volumes:
+      - graph-ipfs:/data/ipfs
+    restart: unless-stopped
+
+volumes:
+  graph-postgres:
+  graph-ipfs:

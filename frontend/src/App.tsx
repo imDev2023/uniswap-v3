@@ -12,8 +12,9 @@ export function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="brand">
-            <span className="brand-mark">◭</span>
-            <span className="brand-name">Launchpad</span>
+            {/* Placeholder wordmark — the visual identity is the frontend-design pass. */}
+            <span className="brand-mark">🐙</span>
+            <span className="brand-name">Octopus</span>
           </Link>
           <nav className="nav">
             <Link to="/">Explore</Link>
@@ -38,8 +39,17 @@ export function App() {
 
       <footer className="footer">
         <span>
-          Fair-launch bonding curves · every graduation locks liquidity forever · v1 on Robinhood
-          Chain
+          Octopus · fair-launch bonding curves · every graduation locks liquidity forever · v1 on
+          Robinhood Chain
+        </span>
+        {/*
+          Attribution, not branding. Octopus pools are our own deployment of unmodified Uniswap V3
+          (GPL-2.0-or-later) — saying so is both a licence obligation and a trust signal: the AMM
+          holding locked liquidity is audited code, not a homebrew curve. Deliberately worded to
+          avoid implying any endorsement by Uniswap Labs.
+        */}
+        <span className="footer-attribution">
+          Pools run on unmodified Uniswap V3 (GPL-2.0-or-later). Not affiliated with Uniswap Labs.
         </span>
       </footer>
     </div>

@@ -22,6 +22,7 @@ per the runbook in [`docs/deploy.md`](./deploy.md). Addresses are public; this f
 | `UniswapV3Factory` (ours) | `0x808088B7949877b0eF9CC514627426505CF069bA` | ⬜ see note |
 | `SwapRouter` (ours) | `0x7a9232B5af20635AbC85c5f854648E916B3b8826` | ⬜ see note |
 | `NonfungiblePositionManager` (ours) | `0x52e32e892E43b945a3FE747305CC7C2496dDbB61` | ⬜ see note |
+| `QuoterV2` (ours) | `0xC02123e9Ac2E87BDC85dB4af0664b2d694c4e857` | ⬜ see note |
 | `WETH9` (canonical, pre-existing) | `0x7943e237c7F95DA44E0301572D358911207852Fa` | n/a |
 | Treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` | n/a |
 
@@ -57,8 +58,39 @@ mainnet-only. `GraduationManager.weth9()` on this deployment reads back the test
 | `v3Factory.setOwner(launchpad)` | `0x7a60375cfc0fb8a485cb57697a03d60394f991ab21c999078e7d92de5b719ed8` |
 | `launchpad.transferOwnership(SAFE)` | `0xf7dbdcf9d0c492e9148b2c2f5b486202c781030c3c66a37a26a855d6f0e09bef` |
 | `launchpad.acceptOwnership()` | `0x71ba77c46ee14d863ac6592d4b835372af98619c34ee4cc10d3662ad50d57545` |
+| Deploy `QuoterV2` (later, block 93351338) | `0xbbf70529fc60ee6f33213947c6350216016b704df91455f9841fd462da73802c` |
 
 All receipts `status = 0x1`.
+
+## QuoterV2 — exact swap quotes
+
+Deployed separately via [`contracts/script/DeployQuoter.s.sol`](../contracts/script/DeployQuoter.s.sol),
+because the quoter is a pure read-side lens: no owner, no funds, and nothing in the protocol
+references it, so it can be added to a live deployment with zero risk to pools or the launchpad.
+
+```
+quoter.factory() = 0x808088B7949877b0eF9CC514627426505CF069bA   # == our V3 factory ✅
+quoter.WETH9()   = 0x7943e237c7F95DA44E0301572D358911207852Fa   # testnet WETH9 ✅
+```
+
+Live check — `quoteExactInputSingle` 0.01 ETH → `GRAD` on the graduated pool returns
+**2,150,469.10 GRAD**, and the swap page now renders exactly that figure instead of a `slot0`
+estimate. `contracts/test/QuoterV2.t.sol` pins the property that matters against the live pool:
+**the quote equals what the swap actually pays out**, both directions.
+
+> ⚠️ `quoteExactInputSingle` is **non-`view`** — it performs a real swap and reverts with the result.
+> Always call it with `eth_call` (the frontend uses wagmi's `useSimulateContract`). Sending it as a
+> transaction burns gas and reverts.
+
+Reproduce:
+
+```bash
+EXPECTED_CHAIN_ID=46630 \
+  V3_FACTORY=0x808088B7949877b0eF9CC514627426505CF069bA \
+  WETH9=0x7943e237c7F95DA44E0301572D358911207852Fa \
+  forge script script/DeployQuoter.s.sol \
+  --rpc-url robinhood_testnet --broadcast --non-interactive --private-key $PRIVATE_KEY
+```
 
 ## Post-deploy state (verified via `cast`)
 
@@ -96,7 +128,7 @@ Every production path was exercised on-chain against this deployment.
 
 ### Launch A — `SMOKE`, production calibration
 
-Token `0x3AdDafBAC225B160a2770145c1259F5de5b9bd0e` · curve `0xf48A1140bD437E5161730fA55f0C9C8479c348ad`
+Token `0x3ADDafBaC225b160A2770145c1259f5De5b9Bd0e` · curve `0xf48a1140bD437e5161730fa55F0c9C8479C348aD`
 
 | Step | Result |
 | --- | --- |
@@ -116,7 +148,7 @@ on-chain**, not just in tests. Production values are restored (30 ETH / 100 bps 
 
 ### Launch B — `GRAD`, test calibration, graduated
 
-Token `0x1bFB12F7bE47cb8C485a1193551e25d99DcA9375` · curve `0x56d1EcDdF12ae4Ee662b873DC39b6Aa15C03a7a8`
+Token `0x1bfb12f7BE47CB8c485A1193551E25D99Dca9375` · curve `0x56D1eCddF12AE4ee662B873dC39B6AA15c03A7A8`
 
 Calibrated to `virtualEthReserve = 0.3 ETH` so graduation costs ~0.9 ETH instead of ~90 (the
 deployer holds ~2.9 testnet ETH). `virtualTokenReserve` is calibration-locked, so the #16 price
@@ -126,7 +158,7 @@ continuity property is exercised faithfully — only the absolute ETH scale diff
 | --- | --- |
 | Threshold-crossing `buy` of **1.5 ETH** (oversized on purpose) | ✅ graduated; **net spend exactly 0.9 ETH** + gas — the 0.6 ETH excess was refunded |
 | `curve.graduated()` / curve ETH balance | ✅ `true` / `0` — fully drained |
-| Pool `0x4eB4Ca4260cBCbf015740fA0e2259f82A6fd9cf7` | ✅ `getPool(TOKEN,WETH,10000)` resolves to it |
+| Pool `0x4eB4cA4260cBcBF015740Fa0e2259f82A6fd9cF7` | ✅ `getPool(TOKEN,WETH,10000)` resolves to it |
 | Pool seeding | ✅ 200,000,000 TOKEN + 0.9 WETH, liquidity `1.341e22` |
 | Full-range position | ✅ ticks `-887200 … 887200` at the 1% tier |
 | LP NFT id 1 owner | ✅ `LPLock` `0xf9D783…3aAd` |
@@ -149,33 +181,52 @@ continuity property is exercised faithfully — only the absolute ETH scale diff
   validated; the ~90 ETH absolute figure is not exercised on testnet.
 - **`LPLock.collect`.** The pool has accrued essentially no fees yet, so the fee-routing path to
   treasury is still test-only.
-- **Subgraph indexing.** No graph-node is running — see `subgraph/README.md`.
+- ~~**Subgraph indexing.**~~ Now covered: a self-hosted graph-node indexes this deployment from
+  `startBlock` 93090715 and reproduces every event above. Stack + verification table in
+  `subgraph/README.md`.
 
 ## ⚙️ Current testnet curve config — **1 ETH graduation** (test calibration)
 
 The live 46630 factory is deliberately **not** on production calibration. It is set so a new launch
-graduates for **exactly 1 ETH**, so the full lifecycle is cheap to exercise repeatedly.
+graduates for **exactly 0.1 ETH**, so the full lifecycle is cheap to exercise repeatedly.
 
 | Param | Live testnet value | Production value (code default) |
 | --- | --- | --- |
-| `virtualEthReserve` | **1/3 ETH** (`333333333333333333`) | 30 ETH |
+| `virtualEthReserve` | **1/30 ETH** (`33333333333333333`) | 30 ETH |
 | `tradeFeeBps` | 100 (1%) | 100 (1%) |
 | `maxBuyPerWallet` | **800M** (effectively uncapped) | 8M |
 | `antiSnipeThreshold` | **0** (cap inactive) | 120M |
 
-**Why `virtualEthReserve = 1/3 ETH` gives exactly 1 ETH:** `virtualTokenReserve` is calibration-locked
-at `CURVE_SUPPLY² / (CURVE_SUPPLY - GRADUATION_RESERVE)`, which fixes `finalEthReserve = 4 × V_eth`.
-So **ETH-to-graduate = 3 × V_eth**, always. 30 ETH → 90; 1/3 ETH → 1.
+**Why `virtualEthReserve = 1/30 ETH` gives exactly 0.1 ETH:** `virtualTokenReserve` is
+calibration-locked at `CURVE_SUPPLY² / (CURVE_SUPPLY - GRADUATION_RESERVE)`, which fixes
+`finalEthReserve = 4 × V_eth`. So **ETH-to-graduate = 3 × V_eth**, always. 30 ETH → 90; 1/3 ETH → 1;
+1/30 ETH → 0.1.
 
-Verified on launch `ONEETH` (token `0x9903AFeF4800a4b8A05e4Ee62BE2bA720444255F`, curve
-`0x5CdF2eed221F3b2816BdA978fD4dE10e46210407`): `finalEthReserve - virtualEthReserve` = **1.000000 ETH**.
+Verified on launch `P1ETH` (token `0x99fa21DCC0BAA3EFE125b32CCeEDa9AbcA4F90b8`, curve
+`0xFa3506cE7e4450dD50CAA6063cB0Ca98BaD42fC0`, tx
+`0x4125c4db1d618a23a705ead6878b81fe1902a505c1feada33efa75473e52c6a1`) — read straight off the curve:
 
-> The 1% trade fee is taken off the way in, so graduating costs ~**1.0101 ETH gross** (1 ETH *net*
-> reaches the reserve). Send a little over 1 ETH — the curve refunds any excess past the threshold.
+```
+virtualEthReserve = 33333333333333333
+finalEthReserve   = 133333333333333333      # ratio exactly 4.0
+difference        = 100000000000000000      # == 0.1 ETH exactly, not 1 wei short
+```
+
+`1e18/30` truncates to `33333333333333333`, but `finalEthReserve` is `ceil(k / finalTokenReserve)`,
+and that rounding up lands the difference on exactly `1e17`.
+
+> The 1% trade fee is taken off the way in, so graduating costs ~**0.10101 ETH gross** (0.1 ETH *net*
+> reaches the reserve). Send a little over 0.1 ETH — the curve refunds any excess past the threshold.
 
 **Anti-snipe is off**, and that is deliberate: at this scale the production 8M-per-wallet cap would
-let one wallet contribute only ~0.0025 ETH, so a solo graduation would need ~400 wallets. The cap
+let one wallet contribute only ~0.00025 ETH, so a solo graduation would need ~400 wallets. The cap
 itself is already proven on the `SMOKE` launch above (production calibration, cap enforced).
+
+**Previously 1 ETH.** Set by
+`setCurveParams(33333333333333333, 100, 800000000000000000000000000, 0)` — tx
+`0x9e8b9d7240f41ae0fe814f673a6a1fe3eb00b8232c71e9fb5ab47ad5a455da41`, block 93355174. Because
+`setCurveParams` is future-only, the older `ONEETH` / `SMOKE` / `GRAD` launches keep the calibration
+they froze at `createLaunch` — only launches created after that block graduate at 0.1 ETH.
 
 **This is testnet-only state, set via the owner-only `setCurveParams`.** The Solidity constants in
 `LaunchpadFactory` are untouched — `DEFAULT_VIRTUAL_ETH_RESERVE` is still `30 ether`, so a **mainnet
@@ -186,6 +237,16 @@ Restore production values on testnet at any time:
 ```bash
 cast send $LAUNCHPAD "setCurveParams(uint256,uint16,uint256,uint256)" \
   30000000000000000000 100 8000000000000000000000000 120000000000000000000000000 \
+  --rpc-url robinhood_testnet --private-key $PRIVATE_KEY
+```
+
+Or re-scale the graduation threshold to any target — `virtualEthReserve = target / 3`:
+
+```bash
+# 1 ETH graduation:    333333333333333333
+# 0.1 ETH graduation:   33333333333333333   <- current
+cast send $LAUNCHPAD "setCurveParams(uint256,uint16,uint256,uint256)" \
+  33333333333333333 100 800000000000000000000000000 0 \
   --rpc-url robinhood_testnet --private-key $PRIVATE_KEY
 ```
 

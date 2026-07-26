@@ -15,7 +15,7 @@ export function HomePage() {
         <h1>Launch fair. Graduate locked.</h1>
         <p>
           Create a token on a bonding curve with zero upfront liquidity. It graduates automatically
-          into a permanently-locked Uniswap V3 pool the instant it fills — no pre-mine, no rug.
+          into a permanently-locked Octopus pool the instant it fills — no pre-mine, no rug.
         </p>
         <div className="stat-row">
           <div className="stat">

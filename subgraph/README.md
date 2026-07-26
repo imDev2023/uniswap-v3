@@ -1,6 +1,6 @@
-# Launchpad subgraph (Build 08 / #19)
+# Octopus subgraph (Build 08 / #19)
 
-Indexes the bonding-curve launchpad on **Robinhood Chain (eip155:4663)** into the entities the UI
+Indexes the Octopus bonding-curve launchpad on **Robinhood Chain (eip155:4663)** into the entities the UI
 needs: live **curve progress** per token, per-wallet **holders**, a **trade** history for charts, and
 a **graduation feed** of tokens that reached the DEX. Data layer is a subgraph on **The Graph's
 graph-node toolchain** (spec #11, decision #8).
@@ -78,25 +78,103 @@ Re-extract and re-run `codegen` whenever a contract's events change.
 `93090715` — see `../docs/deployments-testnet.md`). `graph build --network robinhood-testnet`
 compiles clean against it. `robinhood` (mainnet 4663) is still a placeholder pending that deploy.
 
-**No graph-node is running yet** — the indexer stack below has not been stood up. Until it is, the
-frontend's `VITE_SUBGRAPH_URL` points at a `localhost` endpoint that does not answer, and the app
-degrades to on-chain reads (feeds and charts stay empty).
+**The indexer is up and synced.** `docker/docker-compose.yml` runs the stack and the subgraph is
+deployed to it as `octopus/octopus`, indexing 46630 from `startBlock` 93090715. See
+[Run the indexer](#run-the-indexer) below.
 
 > ⚠️ `graph build --network <net>` **rewrites `subgraph.yaml` in place** — it stamps the addresses
 > and network name from `networks.json` into the tracked manifest and strips its comments. Treat
 > `networks.json` as the source of truth and `git checkout -- subgraph.yaml` after building, or
 > build from a scratch copy. The deployable artifact is `build/subgraph.yaml`, not the source.
 
-### What a self-hosted graph-node needs
+### Run the indexer
 
 Chain 46630 is not on The Graph's hosted or decentralized networks, so indexing requires running the
-stack yourself. Three services:
+stack yourself. [`docker/docker-compose.yml`](./docker/docker-compose.yml) does that — three services:
 
 | Service | Purpose | Notes |
 | --- | --- | --- |
-| `graph-node` | the indexer | image `graphprotocol/graph-node`; ports 8000 (GraphQL), 8020 (admin/deploy), 8030 (status) |
-| Postgres | entity store | v14+, needs `initdb` locale `C`; graph-node owns the schema |
-| IPFS | manifest + mapping storage | `ipfs/kubo`, port 5001; `graph deploy` uploads the wasm here |
+| `graph-node` | the indexer | `graphprotocol/graph-node:v0.40.2` |
+| Postgres | entity store | `postgres:14`, `initdb` locale `C`; graph-node owns the schema |
+| IPFS | manifest + mapping storage | `ipfs/kubo:v0.34.1`; `graph deploy` uploads the wasm here |
+
+**Host ports are remapped into the 81xx range.** graph-node's conventional 8000 and 8080 are commonly
+already taken locally (supabase-kong, open-webui), so the compose file publishes 8000→**8100**,
+8001→8101, 8020→**8120**, 8030→**8130**, 8040→8140, Postgres→5434. Container-internal ports are
+unchanged, so upstream graph-node docs still apply verbatim — only the host side shifts.
+
+Full first-run sequence:
+
+```bash
+cd subgraph/docker && docker compose up -d && cd ..
+
+npm run codegen
+npx graph build --network robinhood-testnet   # stamps addresses from networks.json
+git checkout -- subgraph.yaml                 # ...by REWRITING the tracked manifest — restore it
+                                              # (do this AFTER deploy: the deploy reads this file)
+
+npx graph create --node http://localhost:8120/ octopus/octopus
+npx graph deploy --node http://localhost:8120/ --ipfs http://localhost:5001 \
+  --version-label v0.1.0 octopus/octopus
+```
+
+> ⚠️ Order matters: `graph deploy` re-reads the **root** `subgraph.yaml`, so restoring it before
+> deploying would ship the placeholder zero-addresses. Build → deploy → `git checkout`.
+
+Query endpoint: **`http://localhost:8100/subgraphs/name/octopus/octopus`** — note *both* path
+segments; a single `octopus` 404s. Indexing health:
+
+```bash
+curl -s -X POST http://localhost:8130/graphql -H 'content-type: application/json' \
+  -d '{"query":"{indexingStatusForCurrentVersion(subgraphName:\"octopus/octopus\"){synced health fatalError{message handler} chains{chainHeadBlock{number} latestBlock{number}}}}"}'
+```
+
+Backfill from `startBlock` to head (~83k blocks) takes about **90 seconds**.
+
+#### Keeping pace with a 0.3s-block chain — measured
+
+The log scan is not the bottleneck; **the block ingestor is**. At stock settings graph-node ingests
+~4.5 blocks/s against this RPC (round-trip-bound), while the chain produces ~3.3–4.5 blocks/s. That
+is break-even, so the subgraph settles **~330–640 blocks (≈2 min) behind head and oscillates there
+without converging**. The compose file therefore sets:
+
+```
+GRAPH_ETHEREUM_BLOCK_BATCH_SIZE=100
+ETHEREUM_BLOCK_INGESTOR_MAX_CONCURRENT_JSON_RPC_CALLS_FOR_TXN_RECEIPTS=1000
+ETHEREUM_REORG_THRESHOLD=50      # Orbit finality is fast; 250 is needless ancestor ingestion
+```
+
+Measured over 2 minutes, before → after:
+
+| | Lag behind true chain head |
+| --- | --- |
+| Stock ingestor settings | 330–640 blocks (~2 min), drifting up |
+| Tuned (above) | **90–160 blocks (~40 s), stable** |
+
+Trading is unaffected either way — the frontend quotes buys/sells **on-chain**, so only the feed,
+chart and holder table carry this lag.
+
+> ⚠️ **`synced: true` does not mean "caught up with the chain."** The status API's `chainHeadBlock`
+> is graph-node's *own ingested* head, not the RPC's. While the ingestor lagged, the API reported
+> `synced: true` with `latestBlock == chainHeadBlock == 93347390` while the chain was really at
+> 93348111 — 721 blocks ahead. To monitor real lag, compare `latestBlock` against `eth_blockNumber`
+> from the RPC directly, as the table above does.
+
+#### The stack survives host sleep, but falls far behind
+
+Closing a laptop pauses the Docker VM. On resume, graph-node logs a burst of Postgres
+`could not translate host name "postgres"` and RPC `failed to send request` errors, retries through
+them, and recovers on its own — but at ~197k blocks/day the backlog is large (a 13-hour sleep left
+it ~2,000 blocks behind even after partial catch-up). No intervention needed; just don't mistake the
+post-resume error burst for a broken stack.
+
+#### graph-node declares `archive` capability — it is lying, and that is fine *only* while there are no eth_calls
+
+Startup logs `Creating transport, capabilities: archive, traces`. That is graph-node's unconditional
+default for an `ethereum:` URL with no capability prefix; the Robinhood RPC is **not** an archive node
+(state is pruned after ~28 min — see the table above). Nothing requests those capabilities today
+because the mappings make zero `eth_call`s, so the mislabel is inert. It becomes a live trap the
+moment someone adds one: the subgraph would fail on backfill, not at the near-head test.
 
 ### RPC capability — measured against `rpc.testnet.chain.robinhood.com` (2026-07-25)
 
@@ -144,41 +222,51 @@ GRAPH_ETHEREUM_TARGET_TRIGGERS_PER_BLOCK_RANGE=100
 Mainnet (4663) has **not** been measured — re-run these probes before committing to infra there, as
 density and retention will differ.
 
-After the deploy:
+### Pointing the stack at mainnet 4663
 
-1. Put the deployed `LaunchpadFactory` and `GraduationManager` addresses and their deploy block
-   (`startBlock`) into **`networks.json`** under `robinhood` (and `robinhood-testnet`).
-2. Stand up a `graph-node` with an `ethereum` network named `robinhood` pointed at the RPC:
+The compose file binds the **testnet** network name and RPC. To index mainnet instead:
 
-   ```
-   ethereum: 'robinhood:no_eip1898:https://rpc.mainnet.chain.robinhood.com'
-   # testnet: 'robinhood-testnet:no_eip1898:https://rpc.testnet.chain.robinhood.com'
-   ```
+1. Fill the `robinhood` key in **`networks.json`** with the mainnet `LaunchpadFactory` /
+   `GraduationManager` addresses and their deploy block. (Still placeholder zeros — mainnet is
+   undeployed.)
+2. Change graph-node's `ethereum:` binding in `docker/docker-compose.yml` to
+   `robinhood:https://rpc.mainnet.chain.robinhood.com`, and re-measure the RPC probes above first —
+   density and retention will differ, and the 10,000-log sizing is derived from testnet numbers.
+3. `npx graph build --network robinhood`, then create/deploy as above.
 
-   (graph-node also needs a Postgres and an IPFS node — the standard graph-node compose stack.)
-3. Build against the chosen network (rewrites addresses from `networks.json`) and deploy:
-
-   ```bash
-   npm run codegen
-   graph build --network robinhood
-   graph create --node http://localhost:8020/ launchpad/launchpad
-   graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 launchpad/launchpad
-   ```
-
-Point `--network robinhood-testnet` at the testnet stack first (mirrors the contracts' testnet →
-mainnet pipeline in `../docs/deploy.md`).
-
-4. Set the frontend's `VITE_SUBGRAPH_URL` to the resulting GraphQL endpoint (default
-   `http://localhost:8000/subgraphs/name/launchpad/launchpad`) and reload.
+The `no_eip1898` binding suffix that earlier drafts of this doc suggested is **not** needed: the
+testnet RPC answers `eth_getLogs` by `blockHash` correctly (measured above).
 
 ### Testnet data available to index
 
 The 46630 smoke test (`../docs/deployments-testnet.md`) already wrote real events for every handler,
 so a fresh index has non-trivial data to chew on immediately:
 
-- 2 `LaunchCreated` (`SMOKE` on a production-calibrated curve, `GRAD` on a test-calibrated one)
-- `Bought` ×3, `Sold` ×1 on the curve templates
-- 1 `Graduation` + 1 `Graduated` (pool `0x4eB4Ca42…9cf7`, locked NFT id 1)
+- 3 `LaunchCreated` — `SMOKE` (production-calibrated curve), `GRAD` (test-calibrated), `ONEETH`
+  (created to verify the 1-ETH calibration; never traded)
+- `Bought` ×2, `Sold` ×1 on the curve templates
+- 1 `Graduation` + 1 `Graduated` (pool `0x4eB4cA42…9cF7`, locked NFT id 1)
 
-Indexing from `startBlock` 93090715 should reproduce exactly those entities — a good first
-correctness check on the stack.
+**Verified ✅** — a full index from `startBlock` 93090715 reproduces exactly that, and every figure
+reconciles against the on-chain record in `../docs/deployments-testnet.md`:
+
+| Entity | Indexed | Matches |
+| --- | --- | --- |
+| `Factory` | 3 launches / 1 graduation / 3 trades (2 buys, 1 sell) | the smoke-test log |
+| `Token` SMOKE | `tokensSold` 5,688,183.79 | 7,688,183.78 bought − 2M sold ✅ |
+| `Trade` SMOKE buy | 0.22 ETH gross, 0.0022 fee, 7,688,183.78 out | the `quoteBuy` figure ✅ |
+| `Trade` SMOKE sell | 0.056392 ETH out, 0.00057 fee | ✅ |
+| `Trade` GRAD buy | 1.5 ETH gross, **`ethToCurve` exactly 0.9 ETH** | the 0.6 ETH graduation refund is correctly excluded from volume — the #19 review fix holding on real data ✅ |
+| `Graduation` | pool `0x4eB4cA42…9cF7`, NFT id 1, 200M + 0.9 ETH seeded | ✅ |
+| `Holder` | SMOKE bought 7.688M / sold 2M / balance 5.688M | ✅ |
+
+#### Known gap: a launched-but-untraded token reads price 0
+
+`ONEETH` indexes with `ethReserve`, `priceX18` and `tokenReserve` all **0**, because `Token` curve
+state is only written by the `Bought`/`Sold` handlers. `LaunchCreated(token, curve, creator, name,
+symbol)` carries no reserves, so the initial `virtualEthReserve` and opening price can't be derived
+from the event — and reading them would need an `eth_call`, which the pruned RPC forbids on backfill.
+
+The UI therefore shows "Price 0 ETH" on a brand-new launch until its first trade. `progressBps` 0 is
+genuinely correct; the price is not. Fixing it properly means emitting the frozen curve params in
+`LaunchCreated` (a contract change), not adding a mapping call.

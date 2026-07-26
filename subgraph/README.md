@@ -168,6 +168,33 @@ them, and recovers on its own — but at ~197k blocks/day the backlog is large (
 it ~2,000 blocks behind even after partial catch-up). No intervention needed; just don't mistake the
 post-resume error burst for a broken stack.
 
+#### The stack needs ~1 GB of Docker VM headroom — starve it and IPFS dies, not graph-node
+
+Symptom seen in practice: `graph-node` logs `Waiting for IPFS (ipfs:5001)` forever, the status API
+answers `{"indexingStatuses":[]}` or `Store error: database unavailable`, and `docker compose ps`
+shows `ipfs  Restarting (137)`. It looks like a broken subgraph deployment. It is not — the
+deployment rows (`subgraphs.subgraph_version`, `subgraphs.deployment`, the `sgd1` schema) are all
+still intact, and re-deploying fixes nothing.
+
+**Exit 137 with `OOMKilled=false` is the giveaway.** Docker Desktop only sets the `OOMKilled` flag
+for *cgroup* limits; when the whole Linux VM runs out of memory the kernel OOM killer fires with
+`constraint=CONSTRAINT_NONE ... global_oom` and the container just reports SIGKILL. Confirm it:
+
+```bash
+docker inspect launchpad-graph-ipfs --format 'OOMKilled={{.State.OOMKilled}} Exit={{.State.ExitCode}}'
+docker run --rm --privileged alpine sh -c "head -3 /proc/meminfo; dmesg | grep -i 'killed process'"
+```
+
+On a machine also running other local stacks (supabase, langfuse, open-webui, qdrant, …) an 8 GB
+Docker VM is not enough: 29 containers left ~165 MB free and the kernel killed IPFS repeatedly
+(along with unrelated victims like `clickhouse-server`). Raising the VM to **16 GB** cleared it and
+IPFS came up `healthy` immediately. Docker Desktop stores the setting in
+`~/Library/Group Containers/group.com.docker/settings-store.json` as `MemoryMiB` (absent = default);
+set it and `docker desktop restart`.
+
+Postgres separately logs `database system was not properly shut down; automatic recovery in
+progress` after a host sleep or hard stop — that one **is** self-healing and needs no action.
+
 #### graph-node declares `archive` capability — it is lying, and that is fine *only* while there are no eth_calls
 
 Startup logs `Creating transport, capabilities: archive, traces`. That is graph-node's unconditional

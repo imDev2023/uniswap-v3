@@ -77,7 +77,7 @@ export function CreatePage() {
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Launch a token</h1>
       <p className="muted" style={{ marginTop: 0, marginBottom: 24 }}>
         Fixed 1B supply, no pre-mine, no upfront liquidity. It trades on a bonding curve and
-        graduates automatically into a permanently-locked Uniswap V3 pool.
+        graduates automatically into a permanently-locked Octopus pool.
       </p>
 
       <form className="card" onSubmit={onSubmit}>

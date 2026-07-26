@@ -1,6 +1,6 @@
-# Launchpad frontend (Builds 09–10 / #20–#21)
+# Octopus frontend (Builds 09–10 / #20–#21)
 
-The custom launchpad web app: **create a token**, **trade it on the bonding curve**, and **swap it
+The Octopus web app: **create a token**, **trade it on the bonding curve**, and **swap it
 after graduation**. Built as a React + Vite SPA per the spec's frontend decision (#8) — not a fork of
 `Uniswap/interface`.
 
@@ -52,17 +52,18 @@ npm run build      # tsc -b + vite build (typecheck + production bundle)
 - **Token images are stored per-browser** (`localStorage`), because `LaunchCreated` carries no image
   field. Global images need a metadata contract or an image URI in the event — a documented
   follow-up (see `src/lib/tokenMeta.ts`).
-- **End-to-end against the live testnet** requires the deployed contract addresses + a running
-  subgraph. Those need the deploy keys that are an out-of-band human step (same gate as #18 — see
-  `docs/deploy.md`). The app is wired entirely through config so it works the moment those are
-  filled in; logic is validated here via the unit suite + a green production build.
+- **Running against the live testnet** is wired up: `.env.local` carries the 46630 addresses and the
+  self-hosted subgraph endpoint (`subgraph/docker`), and the feeds, charts, holder tables and swap
+  page all populate from it. See `docs/deployments-testnet.md`.
 - The wallet layer uses the injected connector only (no WalletConnect project id in v1).
-- **Swap pricing is a spot-price estimate, not a router quote.** The platform's V3 deploy ships no
-  Quoter (`contracts/script/DeployLaunchpad`), so the swap page prices off the pool's live `slot0`
-  and estimates output as `amountIn × spot` (ignoring price impact), clearly labelled. Execution is
-  protected on-chain by the slippage-derived `amountOutMinimum`. Deploying a `QuoterV2` and quoting
-  through it (exact, impact-aware) is the follow-up for larger trades. TOKEN→ETH swaps route through
-  a `multicall([exactInputSingle → router, unwrapWETH9 → user])`; ETH→TOKEN sends native value to
-  `exactInputSingle` (the router wraps).
+- **Swap pricing uses our own `QuoterV2`** (`contracts/script/DeployQuoter.s.sol`, address in
+  `VITE_QUOTER_ADDRESS`): an exact output including the 1% pool fee and price impact, verified
+  against real execution in `contracts/test/QuoterV2.t.sol`. It is called via `eth_call`
+  (`useSimulateContract`) because `quoteExactInputSingle` is non-`view` — it swaps and reverts with
+  the result. When `VITE_QUOTER_ADDRESS` is unset the page falls back to the older `slot0`
+  spot-price estimate (`amountIn × spot`, ignoring fee and impact), clearly labelled as an estimate.
+  Either way execution is protected on-chain by the slippage-derived `amountOutMinimum`. TOKEN→ETH
+  swaps route through a `multicall([exactInputSingle → router, unwrapWETH9 → user])`; ETH→TOKEN
+  sends native value to `exactInputSingle` (the router wraps).
 - The "just graduated" feed and swap page are Build 10 (#21); create + curve-trade are Build 09
   (#20).

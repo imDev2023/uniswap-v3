@@ -575,3 +575,21 @@ code {
 .link-accent:hover {
   text-decoration: underline;
 }
+
+/* Footer. Deliberately plain — visual identity is the frontend-design pass. The attribution line
+   is a licence obligation (pools are unmodified Uniswap V3, GPL-2.0-or-later), so it stays
+   legible rather than hidden: dimmer and smaller than the tagline, but not decorative. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.footer-attribution {
+  font-size: 12px;
+  opacity: 0.75;
+}

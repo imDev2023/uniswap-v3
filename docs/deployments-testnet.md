@@ -173,14 +173,100 @@ continuity property is exercised faithfully — only the absolute ETH scale diff
 | TOKEN→ETH, `multicall([exactInputSingle → router, unwrapWETH9 → user])`, 1M tokens | ✅ +0.00453 native ETH received (net of gas) |
 | Router WETH dust after unwrap | ✅ `0` — nothing stranded |
 
+### Launch C — `P1ETH`, 0.1 ETH calibration, graduated
+
+Token `0x99fa21DCC0BAA3EFE125b32CCeEDa9AbcA4F90b8` · curve `0xFa3506cE7e4450dD50CAA6063cB0Ca98BaD42fC0`
+
+The first launch created **after** the 0.1 ETH re-calibration, so it graduates on the live testnet
+config rather than a bespoke one. It sat at 99.74% and was completed with one small buy.
+
+| Check | Result |
+| --- | --- |
+| Graduating `buy` of **0.005 ETH** (`minTokensOut` 2e24) | ✅ returned exactly `2015113350125942574345375` — the full remaining allocation |
+| Threshold-crossing refund | ✅ only ~0.00101 ETH gross charged; the ~0.00399 ETH excess refunded |
+| `curve.graduated()` / curve ETH balance | ✅ `true` / `0` |
+| Pool `0x8c723D400288c380b8742A5f34931feBE6c4CDf2` | ✅ `getPool(TOKEN,WETH,10000)` resolves to it |
+| Pool seeding | ✅ 200,000,000 TOKEN + **0.1 WETH**, liquidity `4.472e21` |
+| Full-range position | ✅ ticks `-887200 … 887200` at the 1% tier |
+| LP NFT id 2 owner | ✅ `LPLock` `0xf9D783…3aAd` |
+| Protocol fee switch (#17) | ✅ `slot0.feeProtocol = 68` = 4/4 |
+
+Tx `0xe06f970304aba889faad0013b65df219eff39625567bc7320af6475352ccce1f`, block **93528382**,
+17 logs, gas 5,401,965. Confirms the **3 × `virtualEthReserve`** graduation identity on a launch
+that froze the current calibration: `finalEthReserve − virtualEthReserve` = exactly `1e17`.
+
+Indexed end-to-end: the subgraph's `Graduation` entity reads pool `0x8c723d40…cdf2`, `tokenId` 2,
+`tokensSeeded` 200M, `wethSeeded` / `raisedEth` `1e17`, matching the chain wei-for-wei; the frontend
+shows P1ETH at the head of the "Just graduated" feed and `/swap/0x99fa21…90b8` resolves the pool
+("liquidity locked · 0.1 ETH seeded").
+
+### `LPLock.collect` — fee path to treasury ✅
+
+Exercised on locked position **NFT id 1** (the `GRAD` pool), which had accrued real fees from the
+#21 swap-page test swaps. `collect` is **permissionless** but hardcodes `recipient = launchpad
+.treasury()`, so anyone may trigger it and only the treasury can receive.
+
+| Check | Result |
+| --- | --- |
+| `eth_call` preview of `collect(1)` | 7,500 GRAD + 0.000075 WETH |
+| Broadcast (tx `0x8e86148c0beedf33bf402d53e6a6cc6c99730c240b1493594bcc96ec0a14d2f5`, block 93671810) | ✅ treasury received **exactly** those amounts |
+| Position liquidity before → after | ✅ `13416407864998738185908` → unchanged — **principal untouched** |
+| `tokensOwed0/1` after | ✅ `0 / 0` — fully swept |
+| NFT 1 owner after | ✅ still `LPLock` — collection does not move the position |
+
+### Launch D — `SNIPE`, six wallets, anti-snipe armed ✅
+
+Token `0xca77ffb346Be5945e6D745ed6723d7d794317c8F` · curve `0x41068c3d86dA330ba2Ac00Dc0FbDd08974b5f072`
+· pool `0x03D5597ad23eBda088a5F22353dd3ea5D56Efe15` · LP NFT **id 3** locked in `LPLock`
+
+The first launch traded by **more than one wallet**. Anti-snipe was armed for it via
+`setCurveParams(33333333333333333, 100, 25e24, 120e24)` (tx `0x833b11d4…34f`) — production's **15%
+threshold kept**, per-wallet cap scaled 1% → 3.125% because six wallets cannot traverse a window
+that by design needs ≥15 (`120M / 8M`). Restored to the baseline afterwards (tx `0x017ebffe…a82`).
+
+Test wallets `TEST_PK_1..6` in `contracts/.env` (gitignored), 0.4 ETH each.
+
+| # | Step | Result |
+| --- | --- | --- |
+| 1 | W1 buys 24M | ✅ `purchasedOf` 24M, `tokensSold` 24M |
+| 2 | W1 buys 2M more | ✅ **reverts `BuyCapExceeded(26.996M, 25M)`** — decoded from the revert data |
+| 3 | W1 buys 1M | ✅ succeeds → exactly 25M. The cap is a **ceiling, not a freeze** |
+| 4 | W2, W3 buy 24M each | ✅ competing wallets each capped independently |
+| 5 | W3 **sells 10M**, then re-buys 5M | ✅ `tokensSold` 73M→63M but `purchasedOf` **stays 24M** → re-buy **still reverts**. Sell-then-rebuy cannot evade the cap, now proven with competing buyers |
+| 6 | W4, W5 buy 24M each | ✅ `tokensSold` 111M — still under the 120M threshold, cap still active |
+| 7 | W6 buys 24M — the **crossing** buy | ✅ still capped (24M ≤ 25M): the window snapshot is taken **before** `tokensSold` mutates, so one buy cannot cross the threshold to escape its own cap (decision #7) |
+| 8 | `buyCapActive()` after crossing | ✅ `false` at `tokensSold` 135M ≥ 120M |
+| 9 | **W1** — the wallet blocked in step 2 — buys **100M in one go** | ✅ succeeds. Cap has genuinely lifted, and `purchasedOf` stays 25M (no longer written once inactive) |
+| 10 | W6 graduates with 0.15 ETH (deliberate overpay) | ✅ net spend 0.09155 ETH vs 0.0914961 needed + gas — the 0.0585 ETH excess refunded |
+
+Graduation identical in shape to launches B and C: pool seeded **200,000,000 SNIPE + 0.1 WETH**,
+liquidity `4.472e21`, full range `-887200 … 887200` at the 1% tier, `slot0.feeProtocol = 68`,
+LP NFT id 3 owned by `LPLock`.
+
+**Multi-holder state reconciles exactly.** The subgraph indexes `holderCount` **6**, 10 trades
+(9 buys / 1 sell), and the netting closes to the wei:
+
+```
+Σ bought   = 810,000,000e18      (W6 589M, W1 125M, W2/W4/W5 24M each, W3 24M)
+Σ sold     =  10,000,000e18      (W3)
+Σ balances = 800,000,000e18      == tokensSold == curveTokenAllocation ✅
+```
+
+W3 is the interesting row — `bought` 24M, `sold` 10M, `balance` 14M — confirming `Holder` nets
+buys against sells rather than tracking gross. The frontend's holder table renders all six with
+correct shares (73.6% / 15.6% / 3% / 3% / 3% / 1.7%) and "Creator holdings 0" (the deployer created
+the launch but never bought).
+
 ### Not covered
 
-- **Multi-wallet anti-snipe.** One EOA was used, so the per-wallet cap is proven per-wallet but not
-  across competing buyers in one block.
-- **Graduation at production scale.** Launch B graduated at 1/100th the ETH scale. The mechanism is
-  validated; the ~90 ETH absolute figure is not exercised on testnet.
-- **`LPLock.collect`.** The pool has accrued essentially no fees yet, so the fee-routing path to
-  treasury is still test-only.
+- **Graduation at production scale.** Launches B, C and D graduated at 1/100th–1/900th of the ETH
+  scale. The mechanism is validated; the ~90 ETH absolute figure is not exercised on testnet.
+- **Same-block competition.** The six wallets bought in sequential blocks. The cap is per-wallet
+  cumulative state, so ordering within a block does not change the arithmetic, but a genuine
+  same-block race has not been staged.
+- ~~**Multi-wallet anti-snipe.**~~ Now covered — launch D above.
+- ~~**Multi-holder state.**~~ Now covered — launch D above.
+- ~~**`LPLock.collect`.**~~ Now covered — see above.
 - ~~**Subgraph indexing.**~~ Now covered: a self-hosted graph-node indexes this deployment from
   `startBlock` 93090715 and reproduces every event above. Stack + verification table in
   `subgraph/README.md`.

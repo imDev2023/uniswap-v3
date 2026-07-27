@@ -148,6 +148,34 @@ contract LaunchMetadataTest is Test {
         assertEq(LaunchToken(token).metadataURI(), long, "long URI survives storage");
     }
 
+    /// A token must be able to name the factory that created it, so that a client holding only a
+    /// token address can reach its curve without being told which launchpad to ask. This is the
+    /// resolution path Stage 2 needs, and the one that keeps working once a v2 factory exists.
+    function test_Token_NamesItsLaunchpad() public {
+        address token = _create(URI);
+        assertEq(LaunchToken(token).launchpad(), address(factory), "token points back at its factory");
+
+        // The full two-hop resolution, using nothing but the token address.
+        address resolvedCurve = LaunchpadFactory(LaunchToken(token).launchpad()).curveOf(token);
+        assertEq(resolvedCurve, factory.curveOf(token), "curve resolved from the token alone");
+        assertEq(address(BondingCurve(resolvedCurve).token()), token, "and the curve agrees it is ours");
+    }
+
+    /// Tokens from different factories must each name their own, which is the entire point.
+    function test_Token_LaunchpadIsPerFactory() public {
+        LaunchpadFactory second =
+            new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory, weth9);
+        vm.deal(creator, 10 ether);
+
+        address a = _create(URI);
+        vm.prank(creator);
+        address b = second.createLaunch{value: FEE}("Second", "TWO", URI);
+
+        assertEq(LaunchToken(a).launchpad(), address(factory));
+        assertEq(LaunchToken(b).launchpad(), address(second));
+        assertTrue(LaunchToken(a).launchpad() != LaunchToken(b).launchpad(), "distinct factories");
+    }
+
     /// Two launches must not share metadata state — each token owns its own string.
     function test_MetadataURI_IsPerToken() public {
         address a = _create("ipfs://aaa");

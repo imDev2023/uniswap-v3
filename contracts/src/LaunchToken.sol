@@ -24,12 +24,23 @@ contract LaunchToken is ERC20 {
     ///      removed on-chain, so moderation is a frontend denylist.
     string public metadataURI;
 
+    /// @notice The `LaunchpadFactory` that created this token — i.e. whoever deployed it.
+    /// @dev Makes every token self-describing. The launchpad is a factory, so the expected way to
+    ///      change how launches work is to deploy a v2 factory rather than to upgrade this one; once
+    ///      more than one exists, a token address alone no longer implies which factory made it.
+    ///      With this field, `token.launchpad()` then `curveOf(token)` resolves a token's curve in
+    ///      two plain RPC calls, with no prior knowledge of the factory set — which is what an
+    ///      external wallet, explorer or aggregator has to work from. Read from `msg.sender` rather
+    ///      than `recipient` so it records the deployer even if the two ever diverge.
+    address public immutable launchpad;
+
     error ZeroRecipient();
 
     constructor(string memory name_, string memory symbol_, string memory metadataURI_, address recipient)
         ERC20(name_, symbol_)
     {
         if (recipient == address(0)) revert ZeroRecipient();
+        launchpad = msg.sender;
         metadataURI = metadataURI_;
         _mint(recipient, TOTAL_SUPPLY);
     }

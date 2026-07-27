@@ -1,6 +1,6 @@
 # Audit scope — Octopus launchpad contracts
 
-Prepared at the end of build #24 (Stage 1), when the contract surface was frozen for review.
+Prepared at the end of build #24 (Build 11 / Stage 1), when the contract surface was frozen for review.
 
 Everything here is under `contracts/src/`. The AMM underneath is **unmodified Uniswap V3**, deployed
 byte-for-byte from the audited upstream artifacts via `vm.getCode`. We run our own instance and own
@@ -10,19 +10,19 @@ the factory, but we did not write an AMM and it is not what needs reviewing.
 
 | Contract | Runtime size | Role |
 |---|---:|---|
-| `LaunchpadFactory.sol` | 27,594 B | Entry point. Deploys the token + curve, escrows the graduation reserve, owns the tunable params and the V3 protocol-fee switch. |
-| `BondingCurve.sol` | 7,068 B | Constant-product curve over virtual reserves. Buy/sell, anti-snipe cap, and the graduation trigger. |
-| `periphery/GraduationManager.sol` | 5,900 B | The atomic curve → V3 pool handoff. |
-| `periphery/LPLock.sol` | 1,957 B | Permanent custodian for graduated LP NFTs. |
-| `LaunchToken.sol` | 3,909 B | Fixed-supply ERC-20. No mint, no owner, no setters. |
+| `LaunchpadFactory.sol` | 15,942 B | Entry point. Deploys the token + curve, escrows the graduation reserve, owns the tunable params and the V3 protocol-fee switch. |
+| `BondingCurve.sol` | 4,623 B | Constant-product curve over virtual reserves. Buy/sell, anti-snipe cap, and the graduation trigger. |
+| `periphery/GraduationManager.sol` | 3,651 B | The atomic curve → V3 pool handoff. |
+| `periphery/LPLock.sol` | 1,056 B | Permanent custodian for graduated LP NFTs. |
+| `LaunchToken.sol` | 2,086 B | Fixed-supply ERC-20. No mint, no owner, no setters. |
 
-Test suite: `cd contracts && forge test` — 69 tests, including fork tests against live testnet 46630.
+Test suite: `cd contracts && forge test` — 84 tests, including fork tests against live testnet 46630.
 
-> ⚠️ **Size note for reviewers.** `LaunchpadFactory` is compiled **without the optimizer** and is
-> currently 27,594 B — over the EIP-170 24,576 B limit. It deploys because Robinhood Chain is an
-> Arbitrum Orbit chain. Enabling the optimizer takes it to 15,857 B (comfortably under the limit);
-> whether to ship that way is an open decision. **Please confirm which build settings you reviewed**,
-> because the deployed bytecode depends on it.
+> **Build settings are part of what you are reviewing.** `solc 0.8.24`, `evm_version = paris`
+> (Robinhood Chain is an Arbitrum L2; our bytecode is kept PUSH0-free), **optimizer on, 200 runs**.
+> The optimizer was switched on in build #24: without it `LaunchpadFactory` was 27,594 B, over the
+> EIP-170 24,576 B limit and deployable only because Orbit relaxes it. Changing any of these changes
+> the deployed bytecode, and Blockscout verification must be given the same values.
 
 ## Where to spend the most time: the graduation transition
 
@@ -55,8 +55,25 @@ refund = msg.value - grossNeeded;
 
 `previewTokens >= remaining` guarantees `msg.value >= netNeeded`, but the fee floor and this `ceilDiv`
 gross-up may not compose to the wei — hence the clamp, so an honest buy sized to exactly complete the
-curve cannot underflow-revert on the refund. **Is the clamp reachable, and if so can it be used to
-underpay the fee?** Worth attacking with a buy sized to land exactly on the boundary.
+curve cannot underflow-revert on the refund.
+
+**We probed this ourselves and the clamp IS reachable — please verify our characterisation rather
+than re-deriving it.** `grossNeeded` is a `ceilDiv` and the fee is a floor division; between them
+there is a sliver of slack, so sending `grossNeeded - 1` still yields enough tokens to cross and the
+crossing branch runs with `msg.value < grossNeeded`. What we believe matters is *where the missing
+wei comes from*:
+
+- the **raise is untouched** — the GraduationManager still receives exactly `finalEthReserve -
+  virtualEthReserve`, so the pool is seeded at the intended price and no buyer is short-changed;
+- the **protocol's own fee** absorbs the shortfall, coming out one wei lighter;
+- the slack is a rounding sliver, not a discount — underpaying by 1000 wei does not cross at all, so
+  nobody can graduate a launch (and seize the whole remaining allocation) below calibration.
+
+Pinned in `test/CrossingBuyBoundary.t.sol`, which brackets the boundary from both sides and fuzzes
+the invariant across every overpayment size. **The questions we would most like answered: is the
+shortfall genuinely bounded at one wei, or can it be widened — by a different `tradeFeeBps`, a
+retuned `virtualEthReserve`, or a partially-filled curve where `ethReserve` is not virgin? And is
+there any sequence that makes it repeatable rather than once-per-launch?**
 
 Also note the ordering: the refund is sent **before** `_graduate()`, specifically so refunded ETH is
 never seeded into the pool.
@@ -103,6 +120,10 @@ Both leave surplus stranded on purpose. Confirm stranding is the worst outcome.
 - **`applyProtocolFee` is best-effort by design** — if the launchpad does not own the V3 factory it
   emits `ProtocolFeeSkipped` rather than reverting, so a fee-switch misconfiguration can never brick a
   graduation.
+- **`LaunchToken.launchpad`** records the deploying factory (`msg.sender`), so a token can be resolved
+  to its curve from the token address alone. The launchpad is a factory and the intended way to change
+  how launches work is to deploy a v2 rather than upgrade in place, so more than one factory may exist
+  and a token address alone would otherwise not imply which one made it.
 
 ## Known and accepted (please confirm, don't re-report)
 
@@ -120,8 +141,23 @@ Both leave surplus stranded on purpose. Confirm stranding is the worst outcome.
 - **`collectProtocolFees` and `LPLock.collect` are permissionless.** Funds can only ever reach the
   treasury, so anyone triggering them is harmless.
 
-## Not exercised on testnet
+## Coverage of the two historically-thin areas
 
-- A **production-scale (~90 ETH) graduation**. Every testnet graduation ran on the retuned 0.1 ETH
-  calibration. The arithmetic is identical, but the magnitudes are not.
-- **Same-block races** — two buys in one block, or a buy racing the crossing buy.
+Both are now covered by tests; the caveat is *where* they are covered.
+
+- **Production-scale (~90 ETH) graduation** — covered in `test/Graduation.t.sol`
+  (`test_FullLifecycle_AtomicGraduation`), which runs the full production calibration against a real
+  Robinhood Chain fork with our own unmodified V3 deployment, and asserts price continuity, the
+  ~200M/~90 WETH seed, and the locked position NFT. **Not** exercised on live testnet: every on-chain
+  testnet graduation ran the retuned 0.1 ETH calibration, because funding 90 ETH of testnet buys is
+  impractical. The arithmetic is identical; the magnitudes are not.
+- **Same-block races** — covered in `test/SameBlockRaces.t.sol`: two wallets buying in one block, the
+  anti-snipe cap counting cumulatively within a block, buy-sell-rebuy inside a single block failing to
+  refresh the cap, and both a buy and a sell losing the race to the crossing buy. **Not** exercised on
+  live testnet, because you cannot reliably force two wallets into a chosen block on demand. Note
+  Robinhood Chain's ~0.3s blocks make same-block contention the normal case, not an exotic one.
+
+## Not exercised anywhere
+
+- **Real adversarial MEV** — reordering, sandwiching, or censoring within a block. The anti-snipe cap
+  is a per-wallet accumulation limit, not an MEV defence, and does not claim to be one.

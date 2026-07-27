@@ -4,7 +4,10 @@ The Octopus web app: **create a token**, **trade it on the bonding curve**, and 
 after graduation**. Built as a React + Vite SPA per the spec's frontend decision (#8) — not a fork of
 `Uniswap/interface`.
 
-- **Create** (`/create`) — name / symbol / image form calling `LaunchpadFactory.createLaunch`.
+- **Create** (`/create`) — name / symbol / metadata-URI form calling
+  `LaunchpadFactory.createLaunch(name, symbol, metadataURI)`. The metadata URI is written to the token
+  contract and is permanent; v1 is "bring your own URI" (uploading on the creator's behalf needs a
+  pinning key that cannot live in a Vite bundle). The separate image field is a local-only preview.
 - **Curve** (`/token/:address`) — live price chart + graduation progress from the subgraph, an
   on-chain-quoted buy/sell panel, and transparent creator + holder positions. After graduation it
   links to the swap page.

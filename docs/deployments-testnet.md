@@ -132,7 +132,7 @@ Token `0x3ADDafBaC225b160A2770145c1259f5De5b9Bd0e` · curve `0xf48a1140bD437e516
 
 | Step | Result |
 | --- | --- |
-| `createLaunch("Smoke Test Token","SMOKE")` + 0.01 ETH | ✅ 800M minted to curve |
+| `createLaunch("Smoke Test Token","SMOKE")` + 0.01 ETH | ✅ 800M minted to curve — *2-arg signature; build #24 added a third `metadataURI` arg* |
 | `buy` 0.22 ETH | ✅ 7,688,183.78 tokens — **exactly** the `quoteBuy` figure |
 | `buy` 0.05 ETH (2nd, would total ~9.4M) | ✅ **reverts** `BuyCapExceeded(9.43e24, 8e24)` — anti-snipe holds |
 | `buy` 0.008 ETH (inside 311k headroom) | ✅ simulates fine — cap is a ceiling, not a freeze |

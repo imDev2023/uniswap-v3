@@ -10,7 +10,7 @@ the factory, but we did not write an AMM and it is not what needs reviewing.
 
 | Contract | Runtime size | Role |
 |---|---:|---|
-| `LaunchpadFactory.sol` | 27,691 B | Entry point. Deploys the token + curve, escrows the graduation reserve, owns the tunable params and the V3 protocol-fee switch. |
+| `LaunchpadFactory.sol` | 27,594 B | Entry point. Deploys the token + curve, escrows the graduation reserve, owns the tunable params and the V3 protocol-fee switch. |
 | `BondingCurve.sol` | 7,068 B | Constant-product curve over virtual reserves. Buy/sell, anti-snipe cap, and the graduation trigger. |
 | `periphery/GraduationManager.sol` | 5,900 B | The atomic curve → V3 pool handoff. |
 | `periphery/LPLock.sol` | 1,957 B | Permanent custodian for graduated LP NFTs. |
@@ -19,7 +19,7 @@ the factory, but we did not write an AMM and it is not what needs reviewing.
 Test suite: `cd contracts && forge test` — 69 tests, including fork tests against live testnet 46630.
 
 > ⚠️ **Size note for reviewers.** `LaunchpadFactory` is compiled **without the optimizer** and is
-> currently 27,691 B — over the EIP-170 24,576 B limit. It deploys because Robinhood Chain is an
+> currently 27,594 B — over the EIP-170 24,576 B limit. It deploys because Robinhood Chain is an
 > Arbitrum Orbit chain. Enabling the optimizer takes it to 15,857 B (comfortably under the limit);
 > whether to ship that way is an open decision. **Please confirm which build settings you reviewed**,
 > because the deployed bytecode depends on it.

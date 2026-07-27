@@ -12,22 +12,16 @@ contract LaunchToken is ERC20 {
     /// @notice Fixed total supply for every launched token: 1,000,000,000 (18 decimals).
     uint256 public constant TOTAL_SUPPLY = 1_000_000_000e18;
 
-    /// @notice URI of this token's off-chain JSON metadata, in the NFT-standard shape
-    ///         `{name, description, image, banner, links}` (build #24).
-    /// @dev Deliberately a JSON document rather than a bare image URI, so richer fields can be
-    ///      added later without deploying a new token contract.
-    ///
-    ///      **Write-once and permanent.** It is assigned in the constructor and there is NO setter —
-    ///      not for the creator, not for the launchpad owner, nobody. That is the same fair-launch
-    ///      guarantee the locked LP makes: what buyers saw at launch is what the token is forever,
-    ///      and nobody can swap clean art for something else after people have bought.
-    ///      (Solidity has no `immutable` for `string`; assign-in-constructor with no setter is the
-    ///      enforcement, and it is verifiable from the bytecode.)
-    ///
-    ///      Two consequences follow from that permanence and are handled off-chain by design: an
-    ///      unpinned or mistyped URI can never be corrected, so the UI must degrade to a fallback
-    ///      avatar; and abusive imagery can never be removed on-chain, so moderation is a frontend
-    ///      denylist rather than a contract capability.
+    /// @notice URI of this token's off-chain JSON metadata, shaped
+    ///         `{name, description, image, banner, links}` (Build 11 / #24).
+    /// @dev A JSON document rather than a bare image URI, so fields can be added later without a new
+    ///      token contract. Assigned in the constructor with NO setter — not for the creator, not for
+    ///      the launchpad owner — so art cannot be swapped after people have bought, matching the
+    ///      fair-launch guarantee the locked LP already makes. (Solidity has no `immutable` for
+    ///      `string`; assign-in-constructor with no setter is the enforcement, verifiable from the
+    ///      bytecode.) Permanence is handled off-chain in two places: an unpinned or mistyped URI can
+    ///      never be corrected, so clients need a fallback avatar, and abusive imagery cannot be
+    ///      removed on-chain, so moderation is a frontend denylist.
     string public metadataURI;
 
     error ZeroRecipient();

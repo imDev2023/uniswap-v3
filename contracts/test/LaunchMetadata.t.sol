@@ -212,9 +212,10 @@ contract LaunchMetadataTest is Test {
         assertApproxEqAbs(raiseTarget, 3 * p.virtualEthReserve, 1, "graduation target = 3 x V_eth (within ceil)");
     }
 
-    /// `curveTokenAllocation` in the log removes a hardcoded constant from every consumer: curve
-    /// progress is (tokensSold / allocation) and both sides are now event-derived.
-    function test_LaunchCreated_AllocationRemovesHardcodedConstant() public {
+    /// Emitting `curveTokenAllocation` lets a consumer derive curve progress (tokensSold /
+    /// allocation) entirely from events. The subgraph now does exactly that, which let its hardcoded
+    /// CURVE_SUPPLY constant be deleted; the frontend still carries its own copy (Stage 3).
+    function test_LaunchCreated_AllocationIsEventDerived() public {
         (address token,, LaunchData memory p) = _createAndDecode(URI);
         assertEq(p.curveTokenAllocation, factory.CURVE_SUPPLY(), "allocation is the 800M curve supply");
         assertEq(

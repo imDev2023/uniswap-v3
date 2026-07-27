@@ -52,7 +52,12 @@ export function handleLaunchCreated(event: LaunchCreated): void {
   token.ethReserve = event.params.virtualEthReserve;
   token.tokenReserve = event.params.virtualTokenReserve;
   token.tokensSold = ZERO_BI;
-  token.priceX18 = event.params.virtualEthReserve.times(ONE_E18).div(event.params.virtualTokenReserve);
+  // Guarded for the same reason as progressBps in bonding-curve.ts: virtualTokenReserve is always
+  // the calibration constant and can never be 0, but a division by zero halts the entire subgraph
+  // deterministically — too blunt a failure to risk on an unreachable branch.
+  token.priceX18 = event.params.virtualTokenReserve.gt(ZERO_BI)
+    ? event.params.virtualEthReserve.times(ONE_E18).div(event.params.virtualTokenReserve)
+    : ZERO_BI;
   token.progressBps = 0;
   // No trade has happened yet, so this stays 0 — createdAtTimestamp is the "age" field.
   token.lastTradeTimestamp = ZERO_BI;

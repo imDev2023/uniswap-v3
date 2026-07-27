@@ -12,8 +12,8 @@ import {LPLock} from "./periphery/LPLock.sol";
 import {IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IUniswapV3Minimal.sol";
 
 /// @notice The three creator-supplied strings for a launch, bundled into one struct.
-/// @dev Purely a stack-management device (build #24). Three `string calldata` arguments occupy six
-///      stack slots (offset + length each); behind a single memory pointer they occupy one, which is
+/// @dev Purely a stack-management device (Build 11 / #24). Three `string calldata` arguments occupy
+///      six stack slots (offset + length each); behind one memory pointer they occupy one, which is
 ///      what keeps `_emitLaunchCreated` inside the EVM's 16-slot reachable stack under legacy codegen.
 struct LaunchStrings {
     string name;
@@ -102,24 +102,20 @@ contract LaunchpadFactory is Ownable2Step {
     mapping(address => address) public curveOf;
 
     /// @notice A new launch.
-    /// @dev Build #24 widened this event so it is **self-sufficient**: it carries the token's
-    ///      metadata URI plus the COMPLETE set of curve params frozen into this launch's
-    ///      `BondingCurve` immutables. An indexer or a plain-RPC client can therefore reconstruct
-    ///      the curve's entire pricing state — starting price, graduation threshold, fee, and the
-    ///      anti-snipe cap — from this single log, with no `eth_call`. That matters for two
-    ///      concrete reasons: a pruned RPC rejects historical `eth_call` during backfill, and an
-    ///      untraded launch previously indexed with `priceX18 == 0` because price was only ever
-    ///      learned from a `Bought`/`Sold` event that had not happened yet.
+    /// @dev Build 11 (#24) widened this event to be self-sufficient: it carries the metadata URI plus
+    ///      the complete set of curve params frozen into this launch's `BondingCurve` immutables, so
+    ///      an indexer or plain-RPC client can reconstruct the curve's whole pricing state from one
+    ///      log with no `eth_call`. Two concrete reasons: a pruned RPC rejects historical `eth_call`
+    ///      during backfill, and an untraded launch previously indexed with `priceX18 == 0` because
+    ///      price was only ever learned from a `Bought`/`Sold` that had not happened yet.
     ///
-    ///      The params are snapshotted into locals in `createLaunch` before the curve is built, so
-    ///      the emitted values and the deployed curve's immutables can never disagree, even if the
-    ///      owner retunes the defaults in a later block. `virtualTokenReserve` and
-    ///      `curveTokenAllocation` are constants today but are emitted anyway — they are part of
-    ///      the frozen set, and emitting them frees consumers from hardcoding a Solidity constant
-    ///      they cannot verify.
+    ///      `createLaunch` builds one `CurveConfig` in memory and uses it BOTH to construct the curve
+    ///      and to populate this event, so the emitted params and the deployed immutables cannot
+    ///      disagree even if the owner retunes the defaults in a later block. `virtualTokenReserve`
+    ///      and `curveTokenAllocation` are constants today but are emitted anyway: they belong to the
+    ///      frozen set, and emitting them frees consumers from copying a constant they cannot verify.
     ///
-    ///      Only 3 params are indexed because that is the EVM's per-event ceiling for a
-    ///      non-anonymous event; everything else is in the data section.
+    ///      Only 3 params are indexed — the EVM's ceiling for a non-anonymous event.
     event LaunchCreated(
         address indexed token,
         address indexed curve,
@@ -227,7 +223,7 @@ contract LaunchpadFactory is Ownable2Step {
         IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
         IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
 
-        _emitLaunchCreated(LaunchStrings(name, symbol, metadataURI), cfg);
+        _emitLaunchCreated(curve, LaunchStrings(name, symbol, metadataURI), cfg);
 
         // Interactions last.
         if (fee > 0) {
@@ -246,12 +242,10 @@ contract LaunchpadFactory is Ownable2Step {
     ///      (which is already holding the fee, the token, the curve and the config) overflows the
     ///      EVM's 16-slot reachable stack. A shallow frame is a cheaper fix than switching the whole
     ///      project to `viaIR`, which would change the bytecode of every contract right before an audit.
-    ///      For the same reason the token and curve addresses are re-derived here from `cfg` and
-    ///      `curveOf` (both already written by this point) rather than passed in as extra arguments.
-    function _emitLaunchCreated(LaunchStrings memory s, CurveConfig memory cfg) private {
+    function _emitLaunchCreated(address curve, LaunchStrings memory s, CurveConfig memory cfg) private {
         emit LaunchCreated(
             address(cfg.token), // same struct the curve was built from — cannot drift
-            curveOf[address(cfg.token)],
+            curve,
             msg.sender,
             s.name,
             s.symbol,

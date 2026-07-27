@@ -1,10 +1,12 @@
-// Off-chain token image storage.
+// Off-chain token image storage — a local preview, superseded but not yet replaced.
 //
-// The LaunchToken contract and the subgraph carry only name + symbol (LaunchCreated emits no image
-// field). Rather than block launches on a metadata backend that doesn't exist in v1, the create form
-// captures an optional image URL and we persist it client-side, keyed by token address. This is a
-// deliberate v1 limitation: images are per-browser, not shared. A follow-up (metadata contract or
-// IPFS URI in the event) would make them global — see #20 notes.
+// Build #24 put the real fix on-chain: `LaunchToken.metadataURI` is set at creation and emitted in
+// `LaunchCreated`, so a token's metadata is now global rather than per-browser. What is NOT built yet
+// is the read side — resolving that URI needs an IPFS gateway choice and a fallback avatar for
+// unpinned or mistyped URIs, both Stage 3 decisions.
+//
+// Until then this client-side map stays: it keeps images working for tokens launched before #24, and
+// gives a preview for ones launched without a metadata URI. Images stored here remain per-browser.
 
 const KEY = 'launchpad:tokenImages'
 

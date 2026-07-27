@@ -21,7 +21,7 @@ contract LaunchpadFactoryTest is Test {
     address internal v3Factory = makeAddr("v3Factory");
     address internal weth9 = makeAddr("weth9");
 
-    /// @dev Metadata URI used by the shared `_create` helper.
+    /// @dev Metadata URI used by every launch these tests create.
     string internal constant URI = "ipfs://QmTestMetadata";
 
     event LaunchCreated(
@@ -46,7 +46,7 @@ contract LaunchpadFactoryTest is Test {
 
     function _create(uint256 value) internal returns (address token) {
         vm.prank(creator);
-        token = factory.createLaunch{value: value}("Doge Killer", "DOGEK", "ipfs://QmTestMetadata");
+        token = factory.createLaunch{value: value}("Doge Killer", "DOGEK", URI);
     }
 
     function test_CreateLaunch_SplitsSupplyCurveAndReserve() public {
@@ -105,7 +105,7 @@ contract LaunchpadFactoryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE)
         );
-        factory.createLaunch{value: FEE - 1}("X", "X", "ipfs://QmTestMetadata");
+        factory.createLaunch{value: FEE - 1}("X", "X", URI);
     }
 
     function test_EmitsLaunchCreated() public {
@@ -165,7 +165,7 @@ contract LaunchpadFactoryTest is Test {
     function test_FreeCreation_WhenFeeZero() public {
         LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, weth9);
         vm.prank(creator);
-        address token = freeFactory.createLaunch{value: 0}("Free", "FREE", "ipfs://QmTestMetadata");
+        address token = freeFactory.createLaunch{value: 0}("Free", "FREE", URI);
         assertEq(IERC20(token).totalSupply(), SUPPLY);
     }
 

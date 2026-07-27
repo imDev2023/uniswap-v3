@@ -33,7 +33,7 @@ dataSources:
         - name: LaunchpadFactory
           file: ./abis/LaunchpadFactory.json
       eventHandlers:
-        - event: LaunchCreated(indexed address,indexed address,indexed address,string,string)
+        - event: LaunchCreated(indexed address,indexed address,indexed address,string,string,string,uint256,uint256,uint256,uint16,uint256,uint256)
           handler: handleLaunchCreated
   - kind: ethereum
     name: GraduationManager
@@ -75,9 +75,9 @@ templates:
         - name: BondingCurve
           file: ./abis/BondingCurve.json
       eventHandlers:
-        - event: Bought(indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
+        - event: Bought(indexed address,indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
           handler: handleBought
-        - event: Sold(indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
+        - event: Sold(indexed address,indexed address,uint256,uint256,uint256,uint256,uint256,uint256,uint256)
           handler: handleSold
         - event: Graduation(indexed address,uint256)
           handler: handleGraduation

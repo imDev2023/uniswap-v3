@@ -8,6 +8,8 @@ export const launchpadFactoryAbi = [
     inputs: [
       { name: 'name', type: 'string' },
       { name: 'symbol', type: 'string' },
+      // Permanent, set once at creation — the contract has no setter. See CreatePage.
+      { name: 'metadataURI', type: 'string' },
     ],
     outputs: [{ name: 'token', type: 'address' }],
   },
@@ -49,6 +51,15 @@ export const launchpadFactoryAbi = [
       { name: 'creator', type: 'address', indexed: true },
       { name: 'name', type: 'string', indexed: false },
       { name: 'symbol', type: 'string', indexed: false },
+      { name: 'metadataURI', type: 'string', indexed: false },
+      // The curve params frozen into this launch. Emitted so the UI can show the opening price and
+      // the anti-snipe cap without an eth_call — which the pruned RPC refuses on historical blocks.
+      { name: 'virtualEthReserve', type: 'uint256', indexed: false },
+      { name: 'virtualTokenReserve', type: 'uint256', indexed: false },
+      { name: 'curveTokenAllocation', type: 'uint256', indexed: false },
+      { name: 'tradeFeeBps', type: 'uint16', indexed: false },
+      { name: 'maxBuyPerWallet', type: 'uint256', indexed: false },
+      { name: 'antiSnipeThreshold', type: 'uint256', indexed: false },
     ],
   },
 ] as const

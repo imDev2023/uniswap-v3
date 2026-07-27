@@ -69,7 +69,7 @@ contract LpLockTest is Test, V3Deployer {
 
     /// @dev Create a launch and graduate it (fill through the anti-snipe window, then cross).
     function _graduate() internal returns (address token, address pool, uint256 tokenId) {
-        token = factory.createLaunch("Locked", "LOCK");
+        token = factory.createLaunch("Locked", "LOCK", "ipfs://QmTestMetadata");
         BondingCurve curve = BondingCurve(factory.curveOf(token));
         for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
             address filler = makeAddr(string(abi.encodePacked("filler", i)));

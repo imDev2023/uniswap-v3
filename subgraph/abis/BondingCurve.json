@@ -406,6 +406,12 @@
     "name": "Bought",
     "inputs": [
       {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "buyer",
         "type": "address",
         "indexed": true,
@@ -485,6 +491,12 @@
     "type": "event",
     "name": "Sold",
     "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
       {
         "name": "seller",
         "type": "address",

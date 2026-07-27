@@ -11,12 +11,12 @@
   },
   "robinhood-testnet": {
     "LaunchpadFactory": {
-      "address": "0xE98B99ADD42c550bf40B887Bf07A8f0119a22232",
-      "startBlock": 93090715
+      "address": "0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7",
+      "startBlock": 94091260
     },
     "GraduationManager": {
-      "address": "0xE44a178EaD9D35D4e0e6d0fE77Cee82F81F785a5",
-      "startBlock": 93090715
+      "address": "0x3e28d8838951C9F1ad229a5506584616E46D5E14",
+      "startBlock": 94091260
     }
   }
 }

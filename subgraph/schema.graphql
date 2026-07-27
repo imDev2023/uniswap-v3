@@ -34,10 +34,29 @@ type Token @entity(immutable: false) {
   creator: Bytes!
   name: String!
   symbol: String!
+  "URI of the token's off-chain JSON metadata ({name, description, image, banner, links}). Set once at creation and permanent — there is no setter on the token. May be the empty string, meaning the creator supplied no metadata; clients should fall back to a default avatar. The URI is NOT resolved or validated here: the subgraph indexes the pointer, not its contents."
+  metadataURI: String!
 
   createdAtTimestamp: BigInt!
   createdAtBlock: BigInt!
   createdAtTx: Bytes!
+
+  # --- curve parameters, frozen into this launch's BondingCurve at creation ---
+  # All six arrive in LaunchCreated (build #24), so they are known from the creation block onward
+  # without any eth_call. `setCurveParams` is future-only, so these are per-launch and NOT global:
+  # two tokens created either side of a retune legitimately carry different values.
+  "Virtual ETH reserve the curve opened at, in wei. With virtualTokenReserve this fixes the opening price."
+  virtualEthReserve: BigInt!
+  "Virtual token reserve the curve opened at. Calibration-locked, so graduation price continuity holds for any virtualEthReserve."
+  virtualTokenReserve: BigInt!
+  "Maximum tokens this curve will ever sell (the 800M allocation). progressBps is measured against this."
+  curveTokenAllocation: BigInt!
+  "Curve trade fee in basis points, charged on both buys and sells."
+  tradeFeeBps: Int!
+  "Anti-snipe per-wallet buy cap, in tokens."
+  maxBuyPerWallet: BigInt!
+  "tokensSold level at which the anti-snipe cap auto-lifts. 0 means the cap was never armed for this launch."
+  antiSnipeThreshold: BigInt!
 
   # --- live curve state, refreshed on every trade ---
   "Effective ETH reserve (virtual + real), in wei."
@@ -46,9 +65,9 @@ type Token @entity(immutable: false) {
   tokenReserve: BigInt!
   "Cumulative tokens sold by the curve (0..800M)."
   tokensSold: BigInt!
-  "Marginal price, ETH per token, scaled by 1e18."
+  "Marginal price, ETH per token, scaled by 1e18. Seeded from the virtual reserves at creation, so an untraded launch reports its true opening price rather than 0."
   priceX18: BigInt!
-  "Curve progress toward graduation, in basis points (tokensSold / 800M * 10000)."
+  "Curve progress toward graduation, in basis points (tokensSold / curveTokenAllocation * 10000)."
   progressBps: Int!
   lastTradeTimestamp: BigInt!
 

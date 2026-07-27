@@ -5,6 +5,14 @@ libs = ["lib"]
 solc = "0.8.24"
 # Robinhood Chain is an Arbitrum L2; keep our own bytecode PUSH0-free to be safe.
 evm_version = "paris"
+# Optimizer ON at the default 200 runs (build #24). Previously absent, which left LaunchpadFactory at
+# 27,594 B — over EIP-170's 24,576 and deployable only because Orbit relaxes the limit. Optimized it
+# is 15,857 B, so the deploy no longer depends on that relaxation and `forge script --broadcast` no
+# longer needs `--non-interactive` to skip the oversize prompt. Also cheaper gas on every trade.
+# These settings are part of what the auditors review: changing them changes the deployed bytecode,
+# and Blockscout verification must be given the same values.
+optimizer = true
+optimizer_runs = 200
 # Allow vm.getCode to read the official Uniswap V3 precompiled artifacts.
 fs_permissions = [{ access = "read", path = "./node_modules" }]
 

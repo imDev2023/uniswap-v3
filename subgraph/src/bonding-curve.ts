@@ -2,7 +2,7 @@ import { Address, BigInt, Bytes, dataSource } from "@graphprotocol/graph-ts";
 import { Bought, Sold, Graduation } from "../generated/templates/BondingCurve/BondingCurve";
 import { Token, Trade, Holder } from "../generated/schema";
 import { loadFactory } from "./factory";
-import { BPS, CURVE_SUPPLY, ZERO_BI, holderId } from "./constants";
+import { BPS, ZERO_BI, holderId } from "./constants";
 
 /// The token this curve belongs to, from the template's data-source context (set in factory.ts).
 function contextToken(): Bytes {
@@ -22,7 +22,13 @@ function refreshCurveState(
   token.tokenReserve = tokenReserve;
   token.tokensSold = tokensSold;
   token.priceX18 = priceX18;
-  token.progressBps = tokensSold.times(BPS).div(CURVE_SUPPLY).toI32();
+  // Progress is measured against the allocation THIS launch froze (from LaunchCreated), not a
+  // constant copied out of the Solidity source. The guard is not expected to fire — the allocation
+  // is always the 800M curve supply — but a division by zero would halt the whole subgraph
+  // deterministically, which is a disproportionate failure for an unreachable branch.
+  if (token.curveTokenAllocation.gt(ZERO_BI)) {
+    token.progressBps = tokensSold.times(BPS).div(token.curveTokenAllocation).toI32();
+  }
   token.lastTradeTimestamp = timestamp;
 }
 

@@ -140,7 +140,7 @@ contract AntiSnipeTest is Test {
 
     function test_Factory_WiresAntiSnipeDefaults() public {
         LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, 0, positionManager, v3Factory, weth9);
-        address tok = f.createLaunch("X", "X");
+        address tok = f.createLaunch("X", "X", "ipfs://QmTestMetadata");
         BondingCurve c = BondingCurve(f.curveOf(tok));
         assertEq(c.maxBuyPerWallet(), 8_000_000e18, "1% of 800M");
         assertEq(c.antiSnipeThreshold(), 120_000_000e18, "15% of 800M");
@@ -151,7 +151,7 @@ contract AntiSnipeTest is Test {
     ///         the very first buyer on a factory-created curve can't grab more than the cap.
     function test_Factory_FirstBuyRespectsCap() public {
         LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, 0, positionManager, v3Factory, weth9);
-        BondingCurve c = BondingCurve(f.curveOf(f.createLaunch("X", "X")));
+        BondingCurve c = BondingCurve(f.curveOf(f.createLaunch("X", "X", "ipfs://QmTestMetadata")));
 
         vm.deal(buyerA, 100 ether);
         // A 1 ETH first buy would pull well over the 8M-token cap while the window is active.

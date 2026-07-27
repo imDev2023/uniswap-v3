@@ -33,7 +33,7 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # fork tests hit Robinhood Chain (rpc alias: robinhood = 4663)
 ```
 
-Ticket rhythm (build tickets #12–#21, tracked as GitHub issues; the map is #1, spec is #11):
+Ticket rhythm (build tickets #12–#21 built the stack; #22 and #23 are merged; **the next branch is `build/24-<slug>` for the Stage 1 contract changes**. Tracked as GitHub issues; the map is #1, spec is #11):
 1. One ticket per branch: `build/<NN>-<slug>`, branched from `main`.
 2. Implement + write tests at the fork-test seam; keep the full suite green.
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.

@@ -21,6 +21,10 @@ export function CreatePage() {
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [image, setImage] = useState('')
+  // Goes on-chain, permanently. v1 is "bring your own URI": the creator supplies one they have
+  // already pinned. Uploading and pinning on the creator's behalf needs a pinning API key, which
+  // cannot live in a Vite bundle, so that flow needs a server-side endpoint (Stage 3).
+  const [metadataURI, setMetadataURI] = useState('')
 
   const { data: creationFee } = useReadContract({
     address: FACTORY_ADDRESS,
@@ -45,7 +49,7 @@ export function CreatePage() {
       address: FACTORY_ADDRESS,
       abi: launchpadFactoryAbi,
       functionName: 'createLaunch',
-      args: [name.trim(), symbol.trim().toUpperCase()],
+      args: [name.trim(), symbol.trim().toUpperCase(), metadataURI.trim()],
       value: creationFee,
     })
   }
@@ -117,7 +121,24 @@ export function CreatePage() {
             onChange={(e) => setImage(e.target.value)}
           />
           <div className="hint">
-            Stored in your browser for v1 — there’s no on-chain image field yet.
+            Stored in your browser only — a local preview until metadata rendering ships.
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="metadataURI">Metadata URI (optional)</label>
+          <input
+            id="metadataURI"
+            className="input"
+            placeholder="ipfs://…"
+            value={metadataURI}
+            onChange={(e) => setMetadataURI(e.target.value)}
+          />
+          <div className="hint">
+            Points to a JSON document (<code>name</code>, <code>description</code>,{' '}
+            <code>image</code>, <code>banner</code>, <code>links</code>). Written to the token
+            contract and <strong>permanent — it can never be changed or removed</strong>, by you or
+            anyone else. Leave blank to launch without metadata.
           </div>
         </div>
 

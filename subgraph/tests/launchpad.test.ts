@@ -19,11 +19,18 @@ import {
   POOL,
   bi,
   launchCreatedEvent,
+  defaultLaunchCreatedEvent,
   boughtEvent,
   soldEvent,
   graduationEvent,
   graduatedEvent,
-  holderIdHex
+  holderIdHex,
+  V_ETH,
+  V_TOKEN,
+  ALLOCATION,
+  TRADE_FEE_BPS,
+  MAX_BUY,
+  SNIPE_THRESHOLD
 } from "./helpers";
 
 // --- shared amounts ------------------------------------------------------------------------------
@@ -40,10 +47,11 @@ function setCurveContext(): void {
 
 // A launch + a buy that leaves the curve at 15% progress, held by BUYER.
 function seedLaunchAndBuy(): void {
-  handleLaunchCreated(launchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
+  handleLaunchCreated(defaultLaunchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
   setCurveContext();
   handleBought(
     boughtEvent(
+      TOKEN,
       BUYER,
       bi("1000000000000000000"), // ethIn 1 ETH
       bi("990000000000000000"), // ethToCurve
@@ -65,8 +73,8 @@ describe("LaunchCreated", () => {
     dataSourceMock.resetValues();
   });
 
-  test("creates a Token with empty curve state and bumps the Factory launch count", () => {
-    handleLaunchCreated(launchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
+  test("creates a Token with an untraded curve and bumps the Factory launch count", () => {
+    handleLaunchCreated(defaultLaunchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
 
     let id = TOKEN.toHexString();
     assert.entityCount("Token", 1);
@@ -80,6 +88,106 @@ describe("LaunchCreated", () => {
     assert.fieldEquals("Token", id, "holderCount", "0");
 
     assert.fieldEquals("Factory", "launchpad", "launchCount", "1");
+  });
+
+  test("stores the permanent metadata URI", () => {
+    handleLaunchCreated(
+      launchCreatedEvent(
+        TOKEN,
+        CURVE,
+        CREATOR,
+        "Test Token",
+        "TEST",
+        "ipfs://bafkreiabcdef",
+        bi(V_ETH),
+        bi(V_TOKEN),
+        bi(ALLOCATION),
+        TRADE_FEE_BPS,
+        bi(MAX_BUY),
+        bi(SNIPE_THRESHOLD)
+      )
+    );
+    assert.fieldEquals("Token", TOKEN.toHexString(), "metadataURI", "ipfs://bafkreiabcdef");
+  });
+
+  test("an empty metadata URI is indexed as empty rather than dropping the launch", () => {
+    handleLaunchCreated(
+      launchCreatedEvent(
+        TOKEN,
+        CURVE,
+        CREATOR,
+        "No Art",
+        "NOART",
+        "",
+        bi(V_ETH),
+        bi(V_TOKEN),
+        bi(ALLOCATION),
+        TRADE_FEE_BPS,
+        bi(MAX_BUY),
+        bi(SNIPE_THRESHOLD)
+      )
+    );
+    assert.fieldEquals("Token", TOKEN.toHexString(), "metadataURI", "");
+    assert.entityCount("Token", 1);
+  });
+
+  test("records the curve params frozen into this launch", () => {
+    handleLaunchCreated(defaultLaunchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
+
+    let id = TOKEN.toHexString();
+    assert.fieldEquals("Token", id, "virtualEthReserve", V_ETH);
+    assert.fieldEquals("Token", id, "virtualTokenReserve", V_TOKEN);
+    assert.fieldEquals("Token", id, "curveTokenAllocation", ALLOCATION);
+    assert.fieldEquals("Token", id, "tradeFeeBps", "100");
+    assert.fieldEquals("Token", id, "maxBuyPerWallet", MAX_BUY);
+    assert.fieldEquals("Token", id, "antiSnipeThreshold", SNIPE_THRESHOLD);
+  });
+
+  // The bug build #24 closes. A launch nobody has traded used to index with priceX18 == 0, because
+  // price was only ever learned from a Bought/Sold event that had not happened yet — so a brand-new
+  // token displayed a price of zero. The curve actually opens AT its virtual reserves, and those are
+  // now in the creation event.
+  test("an untraded launch has its real opening price, not zero", () => {
+    handleLaunchCreated(defaultLaunchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
+
+    let id = TOKEN.toHexString();
+    // 30e18 * 1e18 / 1066666666666666666666666666 == 28125000000 (matches BondingCurve.priceX18()).
+    assert.fieldEquals("Token", id, "priceX18", "28125000000");
+    assert.fieldEquals("Token", id, "ethReserve", V_ETH);
+    assert.fieldEquals("Token", id, "tokenReserve", V_TOKEN);
+    // ...while genuinely still untraded.
+    assert.fieldEquals("Token", id, "tokensSold", "0");
+    assert.fieldEquals("Token", id, "tradeCount", "0");
+    assert.fieldEquals("Token", id, "lastTradeTimestamp", "0");
+  });
+
+  // setCurveParams is future-only, so params are per-launch. Replaying history must attribute each
+  // launch the calibration it was actually created with.
+  test("a launch created on a retuned calibration keeps its own params", () => {
+    handleLaunchCreated(
+      launchCreatedEvent(
+        TOKEN,
+        CURVE,
+        CREATOR,
+        "Testnet Calibration",
+        "TCAL",
+        "ipfs://QmTestMetadata",
+        bi("33333333333333333"), // 1/30 ETH -> graduates for 0.1 ETH
+        bi(V_TOKEN),
+        bi(ALLOCATION),
+        250,
+        bi("25000000000000000000000000"),
+        bi("0") // anti-snipe disarmed
+      )
+    );
+
+    let id = TOKEN.toHexString();
+    assert.fieldEquals("Token", id, "virtualEthReserve", "33333333333333333");
+    assert.fieldEquals("Token", id, "tradeFeeBps", "250");
+    assert.fieldEquals("Token", id, "antiSnipeThreshold", "0");
+    // virtualTokenReserve is calibration-locked, so the opening price scales with V_eth alone.
+    assert.fieldEquals("Token", id, "virtualTokenReserve", V_TOKEN);
+    assert.fieldEquals("Token", id, "priceX18", "31249999");
   });
 });
 
@@ -122,7 +230,8 @@ describe("Bought", () => {
     seedLaunchAndBuy();
     handleBought(
       boughtEvent(
-        BUYER,
+      TOKEN,
+      BUYER,
         bi("1000000000000000000"),
         bi("990000000000000000"),
         bi("10000000000000000"),
@@ -145,13 +254,14 @@ describe("Bought", () => {
   });
 
   test("the graduation-crossing buy counts only ETH that reached the curve, not the refund", () => {
-    handleLaunchCreated(launchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
+    handleLaunchCreated(defaultLaunchCreatedEvent(TOKEN, CURVE, CREATOR, "Test Token", "TEST"));
     setCurveContext();
     // A crossing buy: msg.value (ethIn) = 5 ETH, but only ethToCurve 2.97 + fee 0.03 = 3 ETH reached
     // the curve; the other 2 ETH was refunded. Volume must be 3 ETH, not 5.
     handleBought(
       boughtEvent(
-        BUYER,
+      TOKEN,
+      BUYER,
         bi("5000000000000000000"), // ethIn (msg.value, includes 2 ETH refund)
         bi("2970000000000000000"), // ethToCurve
         bi("30000000000000000"), // fee
@@ -175,7 +285,8 @@ describe("Bought", () => {
     seedLaunchAndBuy();
     handleBought(
       boughtEvent(
-        BUYER2,
+      TOKEN,
+      BUYER2,
         bi("500000000000000000"),
         bi("495000000000000000"),
         bi("5000000000000000"),
@@ -204,6 +315,7 @@ describe("Sold", () => {
     // sell the entire 120M position back
     handleSold(
       soldEvent(
+        TOKEN,
         BUYER,
         bi(FIFTEEN_PCT), // tokensIn = whole position
         bi("980000000000000000"), // ethOut

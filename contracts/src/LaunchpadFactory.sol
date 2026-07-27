@@ -11,6 +11,16 @@ import {GraduationManager} from "./periphery/GraduationManager.sol";
 import {LPLock} from "./periphery/LPLock.sol";
 import {IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IUniswapV3Minimal.sol";
 
+/// @notice The three creator-supplied strings for a launch, bundled into one struct.
+/// @dev Purely a stack-management device (build #24). Three `string calldata` arguments occupy six
+///      stack slots (offset + length each); behind a single memory pointer they occupy one, which is
+///      what keeps `_emitLaunchCreated` inside the EVM's 16-slot reachable stack under legacy codegen.
+struct LaunchStrings {
+    string name;
+    string symbol;
+    string metadataURI;
+}
+
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
 ///      creation fee. The full 1B supply is minted to this factory as custodian — no
@@ -91,8 +101,38 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice token => its bonding curve.
     mapping(address => address) public curveOf;
 
+    /// @notice A new launch.
+    /// @dev Build #24 widened this event so it is **self-sufficient**: it carries the token's
+    ///      metadata URI plus the COMPLETE set of curve params frozen into this launch's
+    ///      `BondingCurve` immutables. An indexer or a plain-RPC client can therefore reconstruct
+    ///      the curve's entire pricing state — starting price, graduation threshold, fee, and the
+    ///      anti-snipe cap — from this single log, with no `eth_call`. That matters for two
+    ///      concrete reasons: a pruned RPC rejects historical `eth_call` during backfill, and an
+    ///      untraded launch previously indexed with `priceX18 == 0` because price was only ever
+    ///      learned from a `Bought`/`Sold` event that had not happened yet.
+    ///
+    ///      The params are snapshotted into locals in `createLaunch` before the curve is built, so
+    ///      the emitted values and the deployed curve's immutables can never disagree, even if the
+    ///      owner retunes the defaults in a later block. `virtualTokenReserve` and
+    ///      `curveTokenAllocation` are constants today but are emitted anyway — they are part of
+    ///      the frozen set, and emitting them frees consumers from hardcoding a Solidity constant
+    ///      they cannot verify.
+    ///
+    ///      Only 3 params are indexed because that is the EVM's per-event ceiling for a
+    ///      non-anonymous event; everything else is in the data section.
     event LaunchCreated(
-        address indexed token, address indexed curve, address indexed creator, string name, string symbol
+        address indexed token,
+        address indexed curve,
+        address indexed creator,
+        string name,
+        string symbol,
+        string metadataURI,
+        uint256 virtualEthReserve,
+        uint256 virtualTokenReserve,
+        uint256 curveTokenAllocation,
+        uint16 tradeFeeBps,
+        uint256 maxBuyPerWallet,
+        uint256 antiSnipeThreshold
     );
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
@@ -143,8 +183,14 @@ contract LaunchpadFactory is Ownable2Step {
 
     /// @notice Create a new token launch. The caller pays at least `creationFee`; any
     ///         excess is refunded. The full fixed supply is minted to this factory.
+    /// @param metadataURI URI of the token's off-chain JSON metadata (`{name, description, image,
+    ///        banner, links}`). Stored permanently on the token with no setter — see
+    ///        `LaunchToken.metadataURI`. Content-addressed storage (IPFS) is the intended home;
+    ///        the contract does not and cannot validate that the URI resolves, so an unreachable
+    ///        or mistyped URI is permanent. Passing an empty string is allowed and simply means
+    ///        "no metadata"; clients should fall back to a default avatar.
     /// @return token The newly deployed LaunchToken.
-    function createLaunch(string calldata name, string calldata symbol)
+    function createLaunch(string calldata name, string calldata symbol, string calldata metadataURI)
         external
         payable
         returns (address token)
@@ -152,22 +198,25 @@ contract LaunchpadFactory is Ownable2Step {
         uint256 fee = creationFee;
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
 
-        token = address(new LaunchToken(name, symbol, address(this)));
-        address curve = address(
-            new BondingCurve(
-                CurveConfig({
-                    token: IERC20(token),
-                    treasury: treasury,
-                    graduationManager: address(graduationManager),
-                    virtualEthReserve: virtualEthReserve,
-                    virtualTokenReserve: DEFAULT_VIRTUAL_TOKEN_RESERVE,
-                    curveTokenAllocation: CURVE_SUPPLY,
-                    tradeFeeBps: tradeFeeBps,
-                    maxBuyPerWallet: maxBuyPerWallet,
-                    antiSnipeThreshold: antiSnipeThreshold
-                })
-            )
-        );
+        token = address(new LaunchToken(name, symbol, metadataURI, address(this)));
+
+        // Read the owner-tunable params into ONE memory struct, then use that same struct both to
+        // construct the curve and to populate LaunchCreated. Sharing the struct (rather than
+        // re-reading storage for the event) makes it structurally impossible for the emitted params
+        // to disagree with the curve's immutables — there is only one read of each storage slot.
+        // It also keeps `createLaunch` under the stack limit.
+        CurveConfig memory cfg = CurveConfig({
+            token: IERC20(token),
+            treasury: treasury,
+            graduationManager: address(graduationManager),
+            virtualEthReserve: virtualEthReserve,
+            virtualTokenReserve: DEFAULT_VIRTUAL_TOKEN_RESERVE,
+            curveTokenAllocation: CURVE_SUPPLY,
+            tradeFeeBps: tradeFeeBps,
+            maxBuyPerWallet: maxBuyPerWallet,
+            antiSnipeThreshold: antiSnipeThreshold
+        });
+        address curve = address(new BondingCurve(cfg));
         // Register the curve before moving tokens so the GraduationManager can authorize it.
         launches.push(token);
         creatorOf[token] = msg.sender;
@@ -178,7 +227,7 @@ contract LaunchpadFactory is Ownable2Step {
         IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
         IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
 
-        emit LaunchCreated(token, curve, msg.sender, name, symbol);
+        _emitLaunchCreated(LaunchStrings(name, symbol, metadataURI), cfg);
 
         // Interactions last.
         if (fee > 0) {
@@ -190,6 +239,30 @@ contract LaunchpadFactory is Ownable2Step {
             (bool ok,) = msg.sender.call{value: refund}("");
             if (!ok) revert RefundFailed();
         }
+    }
+
+    /// @dev Emitting `LaunchCreated` is split into its own function purely for stack room: the event
+    ///      carries three dynamic strings plus six curve params, and inlining it in `createLaunch`
+    ///      (which is already holding the fee, the token, the curve and the config) overflows the
+    ///      EVM's 16-slot reachable stack. A shallow frame is a cheaper fix than switching the whole
+    ///      project to `viaIR`, which would change the bytecode of every contract right before an audit.
+    ///      For the same reason the token and curve addresses are re-derived here from `cfg` and
+    ///      `curveOf` (both already written by this point) rather than passed in as extra arguments.
+    function _emitLaunchCreated(LaunchStrings memory s, CurveConfig memory cfg) private {
+        emit LaunchCreated(
+            address(cfg.token), // same struct the curve was built from — cannot drift
+            curveOf[address(cfg.token)],
+            msg.sender,
+            s.name,
+            s.symbol,
+            s.metadataURI,
+            cfg.virtualEthReserve,
+            cfg.virtualTokenReserve,
+            cfg.curveTokenAllocation,
+            cfg.tradeFeeBps,
+            cfg.maxBuyPerWallet,
+            cfg.antiSnipeThreshold
+        );
     }
 
     /// @notice Update the creation fee (applies to future launches only).

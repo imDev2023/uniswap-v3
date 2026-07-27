@@ -49,7 +49,7 @@ contract GraduationTest is Test, V3Deployer {
     }
 
     function test_FullLifecycle_AtomicGraduation() public {
-        address token = factory.createLaunch("Graduate Me", "GRAD");
+        address token = factory.createLaunch("Graduate Me", "GRAD", "ipfs://QmTestMetadata");
         BondingCurve curve = BondingCurve(factory.curveOf(token));
 
         // Anti-snipe holds on the real create-then-buy path: a whale can't seize > cap in the window.

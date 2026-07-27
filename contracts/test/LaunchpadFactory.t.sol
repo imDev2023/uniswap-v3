@@ -21,8 +21,22 @@ contract LaunchpadFactoryTest is Test {
     address internal v3Factory = makeAddr("v3Factory");
     address internal weth9 = makeAddr("weth9");
 
+    /// @dev Metadata URI used by the shared `_create` helper.
+    string internal constant URI = "ipfs://QmTestMetadata";
+
     event LaunchCreated(
-        address indexed token, address indexed curve, address indexed creator, string name, string symbol
+        address indexed token,
+        address indexed curve,
+        address indexed creator,
+        string name,
+        string symbol,
+        string metadataURI,
+        uint256 virtualEthReserve,
+        uint256 virtualTokenReserve,
+        uint256 curveTokenAllocation,
+        uint16 tradeFeeBps,
+        uint256 maxBuyPerWallet,
+        uint256 antiSnipeThreshold
     );
 
     function setUp() public {
@@ -32,7 +46,7 @@ contract LaunchpadFactoryTest is Test {
 
     function _create(uint256 value) internal returns (address token) {
         vm.prank(creator);
-        token = factory.createLaunch{value: value}("Doge Killer", "DOGEK");
+        token = factory.createLaunch{value: value}("Doge Killer", "DOGEK", "ipfs://QmTestMetadata");
     }
 
     function test_CreateLaunch_SplitsSupplyCurveAndReserve() public {
@@ -91,14 +105,30 @@ contract LaunchpadFactoryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE)
         );
-        factory.createLaunch{value: FEE - 1}("X", "X");
+        factory.createLaunch{value: FEE - 1}("X", "X", "ipfs://QmTestMetadata");
     }
 
     function test_EmitsLaunchCreated() public {
-        vm.prank(creator);
+        // NOTE: the `factory.DEFAULT_*()` reads below are external calls, so `vm.prank` must come
+        // after them — a prank applies to the very next call and would otherwise be spent on a getter,
+        // leaving `createLaunch` to run as the test contract rather than `creator`.
         vm.expectEmit(false, false, true, true);
-        emit LaunchCreated(address(0), address(0), creator, "Doge Killer", "DOGEK");
-        factory.createLaunch{value: FEE}("Doge Killer", "DOGEK");
+        emit LaunchCreated(
+            address(0),
+            address(0),
+            creator,
+            "Doge Killer",
+            "DOGEK",
+            URI,
+            factory.DEFAULT_VIRTUAL_ETH_RESERVE(),
+            factory.DEFAULT_VIRTUAL_TOKEN_RESERVE(),
+            factory.CURVE_SUPPLY(),
+            factory.DEFAULT_TRADE_FEE_BPS(),
+            factory.DEFAULT_MAX_BUY_PER_WALLET(),
+            factory.DEFAULT_ANTI_SNIPE_THRESHOLD()
+        );
+        vm.prank(creator);
+        factory.createLaunch{value: FEE}("Doge Killer", "DOGEK", URI);
     }
 
     function test_Registry_TracksLaunches() public {
@@ -135,7 +165,7 @@ contract LaunchpadFactoryTest is Test {
     function test_FreeCreation_WhenFeeZero() public {
         LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, weth9);
         vm.prank(creator);
-        address token = freeFactory.createLaunch{value: 0}("Free", "FREE");
+        address token = freeFactory.createLaunch{value: 0}("Free", "FREE", "ipfs://QmTestMetadata");
         assertEq(IERC20(token).totalSupply(), SUPPLY);
     }
 
@@ -150,10 +180,24 @@ contract LaunchpadFactoryTest is Test {
         vm.deal(forkCreator, 1 ether);
         uint256 treasuryBefore = treasury.balance;
 
-        vm.prank(forkCreator);
+        // As above: the `forkFactory.DEFAULT_*()` reads are external calls, so the prank goes last.
         vm.expectEmit(false, false, true, true, address(forkFactory)); // event
-        emit LaunchCreated(address(0), address(0), forkCreator, "Fork Coin", "FORK");
-        address token = forkFactory.createLaunch{value: FEE}("Fork Coin", "FORK");
+        emit LaunchCreated(
+            address(0),
+            address(0),
+            forkCreator,
+            "Fork Coin",
+            "FORK",
+            URI,
+            forkFactory.DEFAULT_VIRTUAL_ETH_RESERVE(),
+            forkFactory.DEFAULT_VIRTUAL_TOKEN_RESERVE(),
+            forkFactory.CURVE_SUPPLY(),
+            forkFactory.DEFAULT_TRADE_FEE_BPS(),
+            forkFactory.DEFAULT_MAX_BUY_PER_WALLET(),
+            forkFactory.DEFAULT_ANTI_SNIPE_THRESHOLD()
+        );
+        vm.prank(forkCreator);
+        address token = forkFactory.createLaunch{value: FEE}("Fork Coin", "FORK", URI);
 
         assertEq(IERC20(token).totalSupply(), SUPPLY, "supply"); // supply
         (bool ok,) = token.call(abi.encodeWithSignature("mint(address,uint256)", forkCreator, 1e18));

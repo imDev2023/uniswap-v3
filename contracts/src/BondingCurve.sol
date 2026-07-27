@@ -71,7 +71,16 @@ contract BondingCurve is ReentrancyGuard {
     /// @notice True once the curve has graduated. All buys/sells revert afterward.
     bool public graduated;
 
+    /// @dev `token` is indexed (build #24) even though it is constant for a given curve, and is
+    ///      therefore redundant for anyone already filtering by this curve's address. It is here for
+    ///      consumers who are NOT: curve addresses are only discoverable from `LaunchCreated`, so
+    ///      without this topic a global "live trades across all launches" feed is impossible over
+    ///      plain `eth_getLogs` — you would have to enumerate every curve first and then filter by
+    ///      N addresses. With it, one filter on `Bought`/`Sold` covers every launch, forever,
+    ///      including launches that do not exist yet. That is what lets the app read trades straight
+    ///      from an RPC node instead of depending on the indexer being up.
     event Bought(
+        address indexed token,
         address indexed buyer,
         uint256 ethIn,
         uint256 ethToCurve,
@@ -82,7 +91,9 @@ contract BondingCurve is ReentrancyGuard {
         uint256 tokenReserve,
         uint256 tokensSold
     );
+    /// @dev See `Bought` for why `token` is indexed.
     event Sold(
+        address indexed token,
         address indexed seller,
         uint256 tokensIn,
         uint256 ethOut,
@@ -209,6 +220,7 @@ contract BondingCurve is ReentrancyGuard {
         if (refund > 0) _sendEth(msg.sender, refund); // before graduation so it isn't seeded into the pool
 
         emit Bought(
+            address(token),
             msg.sender,
             msg.value,
             msg.value - fee - refund,
@@ -244,7 +256,9 @@ contract BondingCurve is ReentrancyGuard {
         _sendEth(treasury, fee);
         _sendEth(msg.sender, ethOut);
 
-        emit Sold(msg.sender, tokenAmount, ethOut, fee, priceX18(), ethReserve, tokenReserve, tokensSold);
+        emit Sold(
+            address(token), msg.sender, tokenAmount, ethOut, fee, priceX18(), ethReserve, tokenReserve, tokensSold
+        );
     }
 
     /// @dev Hands 100% of the raised ETH to the GraduationManager, which seeds the locked full-range

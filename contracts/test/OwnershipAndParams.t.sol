@@ -39,7 +39,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
 
     function _create() internal returns (BondingCurve) {
         vm.prank(creator);
-        address token = factory.createLaunch("Tok", "TOK");
+        address token = factory.createLaunch("Tok", "TOK", "ipfs://QmTestMetadata");
         return BondingCurve(factory.curveOf(token));
     }
 

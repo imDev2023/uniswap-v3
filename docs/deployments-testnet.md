@@ -9,20 +9,21 @@ per the runbook in [`docs/deploy.md`](./deploy.md). Addresses are public; this f
 | RPC | `https://rpc.testnet.chain.robinhood.com` |
 | Explorer | https://explorer.testnet.chain.robinhood.com |
 | Deployer EOA | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
-| Deploy block | **93090712** (first tx) – 93090715 (last) |
-| Gas spent | ~0.00023 ETH total (deploy + `acceptOwnership`) |
+| Deploy block | **94091260** (first tx) – 94091261 (last) |
+| Gas spent | ~0.0005 ETH total (deploy + `acceptOwnership`) |
+| Build | **#24 (Build 11)** — redeployed for the Stage 1 contract changes |
 
 ## Addresses
 
 | Contract | Address | Verified |
 | --- | --- | --- |
-| `LaunchpadFactory` | `0xE98B99ADD42c550bf40B887Bf07A8f0119a22232` | ✅ Blockscout |
-| `GraduationManager` | `0xE44a178EaD9D35D4e0e6d0fE77Cee82F81F785a5` | ✅ Blockscout |
-| `LPLock` | `0xf9D783674b2F575aFe2fcd70a8BCEfe38Ea33aAd` | ✅ Blockscout |
-| `UniswapV3Factory` (ours) | `0x808088B7949877b0eF9CC514627426505CF069bA` | ⬜ see note |
-| `SwapRouter` (ours) | `0x7a9232B5af20635AbC85c5f854648E916B3b8826` | ⬜ see note |
-| `NonfungiblePositionManager` (ours) | `0x52e32e892E43b945a3FE747305CC7C2496dDbB61` | ⬜ see note |
-| `QuoterV2` (ours) | `0xC02123e9Ac2E87BDC85dB4af0664b2d694c4e857` | ⬜ see note |
+| `LaunchpadFactory` | `0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7` | ⬜ re-verify pending |
+| `GraduationManager` | `0x3e28d8838951C9F1ad229a5506584616E46D5E14` | ⬜ re-verify pending |
+| `LPLock` | `0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1` | ⬜ re-verify pending |
+| `UniswapV3Factory` (ours) | `0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD` | ⬜ see note |
+| `SwapRouter` (ours) | `0x4507B2864CEcaBE10330d927c9608AA55A00fFD3` | ⬜ see note |
+| `NonfungiblePositionManager` (ours) | `0xFc1C035Dc7e0C91ECFE8AC3bC31D1AC05d780CC4` | ⬜ see note |
+| `QuoterV2` (ours) | `0xfcfA720Fe7397cA75233C6DB7aCBDa5859835cf6` | ⬜ see note |
 | `WETH9` (canonical, pre-existing) | `0x7943e237c7F95DA44E0301572D358911207852Fa` | n/a |
 | Treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` | n/a |
 
@@ -51,14 +52,14 @@ mainnet-only. `GraduationManager.weth9()` on this deployment reads back the test
 
 | Step | Tx |
 | --- | --- |
-| Deploy `UniswapV3Factory` | `0xbc2fb6b5eeda196814d2c9506ae2ea340ece09e272b7da7b3847f47f7cbfdbc4` |
-| Deploy `SwapRouter` | `0xb57bd8c71f9530cffad9d0a472a0ab6b371ef8369370cbe34941976519b5deb1` |
-| Deploy `NonfungiblePositionManager` | `0x5df9e5bf2051fe8b4436ea10eadc88cf8cfb2a2f6cad256a563197b20f0f10d9` |
-| Deploy `LaunchpadFactory` | `0xc04d91b98620902d6020c6ff008e508890a58563fa5f5077af5d8d37dea90b21` |
-| `v3Factory.setOwner(launchpad)` | `0x7a60375cfc0fb8a485cb57697a03d60394f991ab21c999078e7d92de5b719ed8` |
-| `launchpad.transferOwnership(SAFE)` | `0xf7dbdcf9d0c492e9148b2c2f5b486202c781030c3c66a37a26a855d6f0e09bef` |
-| `launchpad.acceptOwnership()` | `0x71ba77c46ee14d863ac6592d4b835372af98619c34ee4cc10d3662ad50d57545` |
-| Deploy `QuoterV2` (later, block 93351338) | `0xbbf70529fc60ee6f33213947c6350216016b704df91455f9841fd462da73802c` |
+| Deploy `UniswapV3Factory` | `0x7e701a57e28cb5429c379b77f8c4bdb2b2e82fbedce224631fbedd5ec1918f55` |
+| Deploy `SwapRouter` | `0x3ace945a74024521af1c2f9a6b54a0a4dbc6ee581eceb9885342c91721b9ed72` |
+| Deploy `NonfungiblePositionManager` | `0xcaab481a4fa8f96c94bfe3dfe91bd2837665ea0e8562df88558a386623fea33c` |
+| Deploy `LaunchpadFactory` (+ `GraduationManager`, `LPLock`) | `0xf58e2a8d4db5c200e009c32fcae4d752aaa7d7379d4a124f2170e8502b42a535` |
+| `v3Factory.setOwner(launchpad)` | `0x6d3521a2c26f8f20697756024eabeaac13aa9b4e90d285474f47ae19bb0672a4` |
+| `launchpad.transferOwnership(SAFE)` | `0x001e09650500ba2ac7667f9759cef300a1eac26dabc40d83ddc8ab1d13d16ab1` |
+| `launchpad.acceptOwnership()` | `0x7d51a7cdb66adcd548a61f38cacd85d8879a1a9fa45a49953f09514385bc5db8` |
+| Deploy `QuoterV2` (separate script) | `0xba4125ebb47022f59c41f404b638a6853decdd1fca59e159dcaecfac8306e707` |
 
 All receipts `status = 0x1`.
 
@@ -69,7 +70,7 @@ because the quoter is a pure read-side lens: no owner, no funds, and nothing in 
 references it, so it can be added to a live deployment with zero risk to pools or the launchpad.
 
 ```
-quoter.factory() = 0x808088B7949877b0eF9CC514627426505CF069bA   # == our V3 factory ✅
+quoter.factory() = 0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD   # == our V3 factory ✅
 quoter.WETH9()   = 0x7943e237c7F95DA44E0301572D358911207852Fa   # testnet WETH9 ✅
 ```
 
@@ -86,7 +87,7 @@ Reproduce:
 
 ```bash
 EXPECTED_CHAIN_ID=46630 \
-  V3_FACTORY=0x808088B7949877b0eF9CC514627426505CF069bA \
+  V3_FACTORY=0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD \
   WETH9=0x7943e237c7F95DA44E0301572D358911207852Fa \
   forge script script/DeployQuoter.s.sol \
   --rpc-url robinhood_testnet --broadcast --non-interactive --private-key $PRIVATE_KEY
@@ -99,13 +100,13 @@ launchpad.owner()             = 0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C   # =
 launchpad.pendingOwner()      = 0x0000000000000000000000000000000000000000   # handoff complete ✅
 launchpad.treasury()          = 0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C
 launchpad.creationFee()       = 10000000000000000                            # 0.01 ETH
-launchpad.graduationManager() = 0xE44a178EaD9D35D4e0e6d0fE77Cee82F81F785a5
-launchpad.lpLock()            = 0xf9D783674b2F575aFe2fcd70a8BCEfe38Ea33aAd
-v3Factory.owner()             = 0xE98B99ADD42c550bf40B887Bf07A8f0119a22232   # == launchpad ✅
+launchpad.graduationManager() = 0x3e28d8838951C9F1ad229a5506584616E46D5E14
+launchpad.lpLock()            = 0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1
+v3Factory.owner()             = 0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7   # == launchpad ✅
 graduationManager.weth9()     = 0x7943e237c7F95DA44E0301572D358911207852Fa   # testnet WETH9 ✅
 swapRouter.WETH9()            = 0x7943e237c7F95DA44E0301572D358911207852Fa
 positionManager.WETH9()       = 0x7943e237c7F95DA44E0301572D358911207852Fa
-positionManager.factory()     = 0x808088B7949877b0eF9CC514627426505CF069bA
+positionManager.factory()     = 0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD
 ```
 
 On this testnet the deployer EOA **is** the `SAFE` value, so `acceptOwnership()` was sent from the
@@ -113,7 +114,7 @@ EOA. On mainnet the Safe multisig must execute it as a multisig transaction.
 
 ## Notes on the broadcast
 
-- `forge script --broadcast` needs **`--non-interactive`**: `LaunchpadFactory` compiles to 26,586
+- `forge script --broadcast` needs **`--non-interactive`**: `LaunchpadFactory` used to compile to 26,586
   bytes, over the EIP-170 24,576 limit, and forge otherwise opens a TTY confirmation prompt that
   fails with `IO error: not a terminal` in a non-TTY shell. (The oversize contract is our own
   `LaunchpadFactory` — **not** the position manager, which lands at 24,384.) Robinhood Chain is an
@@ -122,7 +123,42 @@ EOA. On mainnet the Safe multisig must execute it as a multisig transaction.
   `BLOCKSCOUT_API_KEY` / `BLOCKSCOUT_TESTNET_API` / `BLOCKSCOUT_MAINNET_API`. **All three** must be
   exported or forge errors on the unused mainnet one.
 
-## Smoke test — end-to-end on 46630 ✅
+## Build #24 (Build 11) redeploy — Stage 1 validation ✅
+
+This deployment **replaces** the one used for builds #12–#23. The contracts changed (widened
+`LaunchCreated`, on-chain `metadataURI`, `token`-indexed trade events, `LaunchToken.launchpad`) and
+the optimizer was switched on, so every address moved. **The launches recorded further down
+(`SMOKE`, `RDOGE`, `GRAD`, `P1ETH`, `SNIPE`, `ONEETH`) live on the SUPERSEDED factory
+`0xE98B99ADD42c550bf40B887Bf07A8f0119a22232` and are not reachable from this one.** They are kept
+because their validation records still stand for the behaviour they exercised.
+
+Calibration re-applied after deploy: `setCurveParams(33333333333333333, 100, 8e24, 0)` — graduation
+at **0.1 ETH**, anti-snipe **off**, matching the previous testnet setup.
+
+### Launch — `META`, the Stage 1 end-to-end
+
+Token `0x52eEF29C3c869b4D04F3C1451b16548dEaa923bE` · curve `0x81a14013d3F048BcBe4AF0fB8b88aF0ec25D799a`
+
+| Step | Result |
+| --- | --- |
+| `createLaunch("Meta Test","META","ipfs://bafkrei…vyku")` | ✅ 3-arg signature accepted |
+| `token.metadataURI()` over plain RPC | ✅ returns the URI exactly — **metadata is global, not per-browser** |
+| `token.launchpad()` | ✅ `0x632FD871…D1E7` — token names its own factory |
+| `launchpad.curveOf(token)` from that | ✅ resolves the curve in **two RPC calls, no indexer** |
+| `LaunchCreated` data payload | ✅ decodes to `V_eth 33333333333333333`, `V_tok 1.0666e27`, `alloc 8e26`, `fee 100`, `cap 8e24`, `threshold 0` — **identical to the curve's immutables** |
+| `curve.priceX18()` **before any trade** | ✅ `31249999` — the `priceX18 = 0` bug is dead |
+| Subgraph `Token` before any trade | ✅ `priceX18 31249999`, `tradeCount 0`, all six params + `metadataURI` indexed |
+| `buy` 0.02 ETH | ✅ 397,490,589.71 tokens; subgraph `Trade` + `Holder` indexed — **the `token`-indexed `Bought` signature works** |
+| `buy` 0.25 ETH (crossing) | ✅ graduated in-tx; `tokensSold` = 8e26 exactly; curve balance **0** |
+| Pool seeded | ✅ `0xDC27FeCB8589c0FB0328fd98963c823a1681E933` — 200M tokens + **0.0999999999999998 WETH** |
+| LP NFT 1 owner | ✅ `LPLock` `0x8FBAa12E…C0e1` |
+| `slot0().feeProtocol` | ✅ `68` (= 4 \| 4<<4) — protocol fee switched on at graduation |
+| Subgraph `Graduation` | ✅ `raisedEth` / `wethSeeded` = `100000000000000000` — **exactly 0.1 ETH, wei-for-wei** |
+| Subgraph rollups | ✅ `launchCount 1`, `graduationCount 1`, `progressBps 10000`, `metadataURI` survives graduation |
+
+Subgraph redeployed as `octopus/octopus` from `startBlock` **94091260**, synced and healthy.
+
+## Smoke test — end-to-end on 46630 ✅ (superseded deployment)
 
 Every production path was exercised on-chain against this deployment.
 

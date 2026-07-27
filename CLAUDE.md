@@ -62,10 +62,16 @@ Testnet run validated on-chain: curve create/buy/sell, the anti-snipe cap (inclu
 Contracts are immutable once deployed, so these must land **before** the audit, not after:
 
 1. **`LaunchCreated` must emit the frozen curve params** (at minimum `virtualEthReserve` + `virtualTokenReserve`; ideally the full frozen set incl. `maxBuyPerWallet`/`antiSnipeThreshold`). Kills the `priceX18 = 0` bug for untraded launches *and* lets the UI show the cap without an `eth_call` — which the pruned RPC forbids on backfill anyway.
-2. **On-chain metadata/image URI.** Today images live in `localStorage`, so **a token you launch has no image for anyone else** — a product bug, not a cosmetic one. Open design decisions (user's call, not yet answered):
-   - JSON metadata URI (NFT-standard: name/description/image/socials) vs image URI only?
-   - Immutable at creation (matches the no-rug ethos) vs mutable (creator can fix a broken link, but adds access control + a trust surface)?
-   - Event-only vs stored on the token contract? Storing it on-chain makes it readable without the indexer, which matters given we're deliberately reducing indexer dependence.
+2. **On-chain metadata URI.** Today images live in `localStorage`, so **a token you launch has no image for anyone else** — a product bug, not a cosmetic one. **All three design decisions are now settled (2026-07-27):**
+   - ✅ **JSON metadata URI**, NFT-standard shape (`{name, description, image, banner, links}`) — not an image URI. Bought once so description/socials/banner can be added later without a new contract.
+   - ✅ **Immutable at creation.** No setter, for anyone — matches the "fair launch, no rug" ethos the locked LP already establishes, and rules out bait-and-switch (clean art at launch, swapped after people buy).
+   - ✅ **Stored on the token contract** (`string public metadataURI`) **and emitted** in `LaunchCreated`. Readable over plain RPC with no indexer, which is exactly what Stage 2 needs. ~40–45k gas once at creation, negligible against the 0.01 ETH creation fee.
+
+   Shape: `createLaunch(name, symbol, metadataURI)`.
+
+   ⚠️ **Consequence — this decision creates the project's first server-side component.** Immutable + content-addressed means uploading to IPFS *before* `createLaunch`, and pinning needs an API key that **cannot** live in a Vite bundle. So the create-token flow needs either (a) a small serverless upload/pin endpoint holding the pinning secret (Pinata / web3.storage / Filebase), (b) creators bringing their own URI (bad UX, fine for v1), or (c) a client-safe upload service. Decide during Stage 3. It also adds an **IPFS gateway** as a frontend read dependency — pick one deliberately and have a fallback.
+
+   ⚠️ **Two consequences of immutability to design for:** an unpinned or typo'd URI is permanent, so the UI needs a graceful fallback avatar and the pin must be durable; and abusive imagery cannot be removed on-chain, so **moderation is a frontend denylist** — plan for one rather than discovering the need in production.
 3. **"Last call" pass over the whole contract surface** — the last moment to ask *"what will we wish we'd added?"*: missing events, anything the indexer cannot derive, anything a future UI will want.
 4. Tests + fork tests green → hand to the auditors.
 

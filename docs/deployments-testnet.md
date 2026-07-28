@@ -17,9 +17,9 @@ per the runbook in [`docs/deploy.md`](./deploy.md). Addresses are public; this f
 
 | Contract | Address | Verified |
 | --- | --- | --- |
-| `LaunchpadFactory` | `0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7` | ⬜ re-verify pending |
-| `GraduationManager` | `0x3e28d8838951C9F1ad229a5506584616E46D5E14` | ⬜ re-verify pending |
-| `LPLock` | `0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1` | ⬜ re-verify pending |
+| `LaunchpadFactory` | `0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7` | ✅ Blockscout (optimizer 200) |
+| `GraduationManager` | `0x3e28d8838951C9F1ad229a5506584616E46D5E14` | ⬜ blocked — see note |
+| `LPLock` | `0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1` | ⬜ blocked — see note |
 | `UniswapV3Factory` (ours) | `0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD` | ⬜ see note |
 | `SwapRouter` (ours) | `0x4507B2864CEcaBE10330d927c9608AA55A00fFD3` | ⬜ see note |
 | `NonfungiblePositionManager` (ours) | `0xFc1C035Dc7e0C91ECFE8AC3bC31D1AC05d780CC4` | ⬜ see note |
@@ -122,6 +122,36 @@ EOA. On mainnet the Safe multisig must execute it as a multisig transaction.
 - `forge verify-contract` reads `[etherscan]` in `foundry.toml`, which interpolates
   `BLOCKSCOUT_API_KEY` / `BLOCKSCOUT_TESTNET_API` / `BLOCKSCOUT_MAINNET_API`. **All three** must be
   exported or forge errors on the unused mainnet one.
+
+## ⚠️ Blockscout cannot verify the two contracts the factory creates
+
+`LaunchpadFactory` verifies normally (`forge verify-contract`, optimizer 200 — confirmed in the
+explorer's own metadata). `GraduationManager` and `LPLock` **cannot currently be verified on this
+explorer**, and the reason is on Blockscout's side, not ours:
+
+- both are created by an internal `CREATE` inside the factory's constructor;
+- `forge verify-contract --guess-constructor-args` refuses outright: *"Fetching of constructor
+  arguments is not supported for contracts created by contracts"*;
+- passing the args explicitly returns `OK` then `Fail - Unable to verify`;
+- `/api/v2/addresses/{addr}` reports **`creation_bytecode: false`** for both, and mis-attributes
+  their `creation_transaction_hash` to the `NonfungiblePositionManager` deploy tx rather than the
+  factory's. Without creation bytecode there is nothing for it to match against.
+- submitting via the v2 standard-JSON endpoint is accepted (*"verification started"*) but never
+  completes. Note that endpoint needs `-F "files[0]=@file.json;type=application/json"` — without the
+  explicit content type it replies `JSON files not found`.
+
+**Our source is provably correct.** Comparing deployed runtime bytecode against the local artifact:
+LPLock differs in exactly **80 bytes** and GraduationManager in **320** — precisely 4 and 16
+20-byte slots, and every one of them is an immutable address (`positionManager`, `launchpad`,
+`weth9`, `lpLock`), present on-chain and zero-filled in the artifact as expected. There is no logic
+difference.
+
+⚠️ **Check this again before mainnet.** Mainnet Robinhood Chain uses a **Blockscout-hosted**
+explorer (`robinhoodchain.blockscout.com`), whereas this testnet instance is **self-hosted** — so
+the indexing gap may not exist there. If it does, the options are to have the explorer operator
+backfill creation bytecode for internal creations, or to deploy `GraduationManager`/`LPLock` as
+**top-level** deploys wired in afterwards rather than from the factory constructor. That second
+option is a contract change and would have to land before the audit, not after.
 
 ## Build #24 (Build 11) redeploy — Stage 1 validation ✅
 

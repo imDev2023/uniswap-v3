@@ -39,7 +39,24 @@ Ticket rhythm (build tickets #12–#21 built the stack; #22–#24 are merged; **
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.
 4. Comment status on the ticket; merge the branch to `main` before the next ticket.
 
-**Testnet curve calibration:** the live 46630 factory graduates a new launch for **exactly 0.1 ETH** (`virtualEthReserve = 1/30 ETH = 33333333333333333`; ETH-to-graduate is always `3 × V_eth`), anti-snipe off. Verified on-chain via launch `P1ETH`. `setCurveParams` is future-only, so older launches keep their frozen calibration. Solidity constants are untouched — a **mainnet deploy still lands on production calibration (90 ETH)**. Restore/re-scale commands in `docs/deployments-testnet.md`.
+### Live testnet 46630 addresses (build #24 — supersedes everything earlier)
+
+| | |
+| --- | --- |
+| `LaunchpadFactory` | `0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7` ✅ verified |
+| `GraduationManager` | `0x3e28d8838951C9F1ad229a5506584616E46D5E14` ⬜ unverifiable, see below |
+| `LPLock` | `0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1` ⬜ unverifiable, see below |
+| `UniswapV3Factory` | `0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD` |
+| `SwapRouter` | `0x4507B2864CEcaBE10330d927c9608AA55A00fFD3` |
+| `NonfungiblePositionManager` | `0xFc1C035Dc7e0C91ECFE8AC3bC31D1AC05d780CC4` |
+| `QuoterV2` | `0xfcfA720Fe7397cA75233C6DB7aCBDa5859835cf6` |
+| `WETH9` (pre-existing) | `0x7943e237c7F95DA44E0301572D358911207852Fa` |
+| Deployer = SAFE = treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
+| Subgraph `startBlock` | `94091260` |
+
+`owner() == SAFE`, `pendingOwner() == 0x0`. Only launch on this factory is **`META`** (token `0x52eEF29C3c869b4D04F3C1451b16548dEaa923bE`), which is graduated — pool `0xDC27FeCB8589c0FB0328fd98963c823a1681E933`, LP NFT 1 locked. **The six older launches (`P1ETH`, `SNIPE`, `GRAD`, `RDOGE`, `SMOKE`, `ONEETH`) are on the SUPERSEDED factory `0xE98B99ADD42c550bf40B887Bf07A8f0119a22232` and are unreachable from the current one.**
+
+**Testnet curve calibration:** the live 46630 factory graduates a new launch for **exactly 0.1 ETH** (`virtualEthReserve = 1/30 ETH = 33333333333333333`; ETH-to-graduate is always `3 × V_eth`), anti-snipe off — re-applied after the #24 redeploy via `setCurveParams(33333333333333333, 100, 8e24, 0)`. `setCurveParams` is future-only, so older launches keep their frozen calibration. Solidity constants are untouched — a **mainnet deploy still lands on production calibration (90 ETH)**. Restore/re-scale commands in `docs/deployments-testnet.md`.
 
 **Current state:** #12–#21 done and merged to `main` — **the full build sequence is complete**, and the stack is **deployed and smoke-tested on testnet 46630**. Build **#24** (Stage 1: frozen curve params in `LaunchCreated`, on-chain `metadataURI`, `token`-indexed trade events, optimizer on) is merged. **`main` is pushed to `origin/main`.** Addresses, tx hashes and the full end-to-end smoke test are in **`docs/deployments-testnet.md`**; `subgraph/networks.json` and `frontend/.env.local` are wired to them. Contracts are feature-complete and **frozen for audit** (84/84 tests green); subgraph (#19) in `subgraph/`; frontend (#20/#21) in `frontend/`.
 
@@ -53,20 +70,20 @@ Testnet run validated on-chain: curve create/buy/sell, the anti-snipe cap (inclu
 
 **Multi-wallet testing is done.** `contracts/.env` holds `TEST_PK_1..6` (0.4 ETH each). Launch `SNIPE` exercised **anti-snipe across six competing wallets** — cap binding (`BuyCapExceeded`), cap-as-ceiling, sell-then-rebuy evasion blocked, the crossing buy still capped (decision #7), the cap lifting after the 120M window, and graduation with **6 holders** whose subgraph netting closes to the wei. Anti-snipe was armed for it and then **restored to the baseline** (`antiSnipeThreshold = 0`); re-arm with `setCurveParams(33333333333333333, 100, 25e24, 120e24)`. Note production (8M cap / 120M threshold) needs **≥15 distinct wallets** to traverse the window by design.
 
-## Road to mainnet (agreed 2026-07-26)
+## Road to mainnet (agreed 2026-07-26; Stage 1 closed 2026-07-27)
 
-**There is no backend left to build.** Contracts and indexer are both feature-complete and validated. What remains is two contract changes, an audit, deployment and hosting — plus the frontend redesign.
+**There is no backend left to build, and the contracts are now frozen.** What remains is the audit, the frontend redesign, deployment and hosting.
 
-**The audit is the long pole** (external dependency, unpredictable latency), and it cannot start until the contracts are final. So the sequencing is *contracts → start audit → everything else in parallel with the audit wait*. A second reason contracts come first: both changes alter the frontend's data shape, so redesigning the UI first means doing the visual work twice.
+**The audit is the long pole** (external dependency, unpredictable latency) and it could not start until the contracts were final — which they now are. So the sequencing from here is *hand to auditors → Stages 2/3/4 in parallel with the audit wait → Stage 5 deploy*. Stages 2, 3 and 4 are independent of each other and can be taken in any order; **Stage 2 is the best resilience-per-hour.**
 
 ### Stage 1 — finalise contracts ✅ DONE (build #24)
 
 **Shipped and validated on testnet 46630.** `LaunchCreated` now carries the metadata URI and all six frozen curve params; `LaunchToken` has permanent `metadataURI` plus a `launchpad` back-reference; `token` is indexed on `Bought`/`Sold`; the optimizer is on. 84/84 contract tests, 13/13 matchstick, 43/43 frontend. **`docs/audit-scope.md` is the hand-off document for the auditors** — it emphasises the graduation transition and records one real finding: the crossing-buy clamp IS reachable, costing the protocol ≤1 wei while leaving the raise exactly calibrated.
 
-The original requirements, for the record:
+What shipped, and the settled decisions behind it:
 
-1. **`LaunchCreated` must emit the frozen curve params** (at minimum `virtualEthReserve` + `virtualTokenReserve`; ideally the full frozen set incl. `maxBuyPerWallet`/`antiSnipeThreshold`). Kills the `priceX18 = 0` bug for untraded launches *and* lets the UI show the cap without an `eth_call` — which the pruned RPC forbids on backfill anyway.
-2. **On-chain metadata URI.** Today images live in `localStorage`, so **a token you launch has no image for anyone else** — a product bug, not a cosmetic one. **All three design decisions are now settled (2026-07-27):**
+1. **`LaunchCreated` emits the full frozen curve set** — `metadataURI`, `virtualEthReserve`, `virtualTokenReserve`, `curveTokenAllocation`, `tradeFeeBps`, `maxBuyPerWallet`, `antiSnipeThreshold`. `createLaunch` builds ONE `CurveConfig` in memory and uses it both to construct the curve and to populate the event, so log and immutables cannot drift. Killed the `priceX18 = 0` bug (an untraded launch now indexes its true opening price) and removed the last hardcoded Solidity constant from the subgraph mappings.
+2. **On-chain metadata URI** — `string public metadataURI` on `LaunchToken`, constructor-set, **no setter for anyone**. The three design decisions (all settled 2026-07-27):
    - ✅ **JSON metadata URI**, NFT-standard shape (`{name, description, image, banner, links}`) — not an image URI. Bought once so description/socials/banner can be added later without a new contract.
    - ✅ **Immutable at creation.** No setter, for anyone — matches the "fair launch, no rug" ethos the locked LP already establishes, and rules out bait-and-switch (clean art at launch, swapped after people buy).
    - ✅ **Stored on the token contract** (`string public metadataURI`) **and emitted** in `LaunchCreated`. Readable over plain RPC with no indexer, which is exactly what Stage 2 needs. ~40–45k gas once at creation, negligible against the 0.01 ETH creation fee.
@@ -76,12 +93,14 @@ The original requirements, for the record:
    ⚠️ **Consequence — this decision creates the project's first server-side component.** Immutable + content-addressed means uploading to IPFS *before* `createLaunch`, and pinning needs an API key that **cannot** live in a Vite bundle. So the create-token flow needs either (a) a small serverless upload/pin endpoint holding the pinning secret (Pinata / web3.storage / Filebase), (b) creators bringing their own URI (bad UX, fine for v1), or (c) a client-safe upload service. Decide during Stage 3. It also adds an **IPFS gateway** as a frontend read dependency — pick one deliberately and have a fallback.
 
    ⚠️ **Two consequences of immutability to design for:** an unpinned or typo'd URI is permanent, so the UI needs a graceful fallback avatar and the pin must be durable; and abusive imagery cannot be removed on-chain, so **moderation is a frontend denylist** — plan for one rather than discovering the need in production.
-3. **"Last call" pass over the whole contract surface** — the last moment to ask *"what will we wish we'd added?"*: missing events, anything the indexer cannot derive, anything a future UI will want.
-4. Tests + fork tests green → hand to the auditors.
+3. **Last-call pass.** Two additions accepted: **`token` indexed on `Bought`/`Sold`** (one `eth_getLogs` filter now covers every launch, including ones that don't exist yet — groundwork for Stage 2) and **`LaunchToken.launchpad`** (a token names its own factory, so `token.launchpad()` → `curveOf(token)` resolves a curve in two RPC calls with no indexer and no prior knowledge of the factory set). Two candidates **declined**: emitting cumulative `purchasedOf` in `Bought` (derivable), and changing the frozen `treasury` (documented as an owner operational constraint instead).
+4. **Optimizer switched on (200 runs)** — it had never been enabled. `LaunchpadFactory` went 27,594 B → **15,942 B, under EIP-170**, so the deploy no longer depends on Orbit's relaxed limit.
 
-**Audit is covered** — the user's Solidity-developer friends. Recommended scope emphasis: the **graduation transition** (atomic curve→pool handoff, refund arithmetic on the crossing buy, curve rounding direction). That's where custom code meets Uniswap V3, and no upstream audit covers it.
+**Audit is covered** — the user's Solidity-developer friends. **Do not propose audit vendors.** `docs/audit-scope.md` is the hand-off document: it directs reviewers at the **graduation transition** (atomic curve→pool handoff, crossing-buy refund arithmetic, curve rounding direction) — where our code meets Uniswap V3 and no upstream audit covers.
 
-### Stage 2 — decouple trading from the indexer (parallel with audit)
+⚠️ **One real finding is already recorded there: the crossing-buy clamp IS reachable.** `grossNeeded` is a `ceilDiv` and the fee is a floor division, so `grossNeeded - 1` still crosses. The **raise stays exactly calibrated** — the protocol's own fee absorbs the wei — and underpaying by 1000 wei doesn't cross at all. Pinned in `contracts/test/CrossingBuyBoundary.t.sol`. The brief asks reviewers to verify the bound rather than re-derive it.
+
+### Stage 2 — decouple trading from the indexer ⬅️ NEXT (branch `build/25-<slug>`)
 
 **Highest resilience-per-hour available (~1 day).** Right now the swap page resolves the pool address *from the subgraph*, so an indexer outage takes trading down with it. It needn't: pool addresses come from `v3Factory.getPool(token, WETH, 10000)`, curve addresses from the launchpad factory, quotes from `QuoterV2` — all plain RPC calls the app already makes. Subgraph for discovery (feeds/charts/holders), RPC for anything that moves money. Then indexer downtime degrades to "charts are stale" instead of an outage.
 
@@ -105,7 +124,7 @@ Build against the *final* Stage-1 data shape. The 🐙 wordmark is a placeholder
 
 ### Stage 5 — mainnet deploy
 
-Audit findings → fixes → deploy per `docs/deploy.md` (+ `DeployQuoter.s.sol`), remembering `WETH9=` explicitly and `--non-interactive`. **Do not deploy to mainnet 4663 without asking the user first.**
+Audit findings → fixes → deploy per `docs/deploy.md` (+ `DeployQuoter.s.sol`), remembering `WETH9=` explicitly. **Do not deploy to mainnet 4663 without asking the user first.**
 
 ### Also settle before deploy
 
@@ -113,6 +132,7 @@ Audit findings → fixes → deploy per `docs/deploy.md` (+ `DeployQuoter.s.sol`
 - **"Octopus" trademark clearance** — not done.
 - **`SAFE` must be a real multisig on mainnet.** On testnet it is the deployer EOA.
 - **Verify the V3 stack + QuoterV2 on Blockscout** — deployed via `vm.getCode`, so it needs a standard-JSON input built from the upstream `@uniswap/v3-core`/`v3-periphery` artifacts. Until then users cannot read the code they trade against.
+- ⚠️ **`GraduationManager` / `LPLock` cannot be verified on the testnet explorer at all** — they are internal `CREATE`s from the factory constructor and that self-hosted Blockscout has no `creation_bytecode` for them. **Our source is provably correct** (runtime bytecode differs from the artifact only in immutable address slots — exactly 80 and 320 bytes). `LaunchpadFactory` verifies fine. **Probe `robinhoodchain.blockscout.com` (Blockscout-HOSTED, unlike testnet) before sending the audit brief:** if the gap exists on mainnet too, the fallback is deploying those two peripherals top-level instead of from the constructor — a **contract change that would have to land before the audit, not after**. Full diagnosis in `docs/deployments-testnet.md`.
 
 ⚠️ **Fork tests against 46630 must not fork at `latest`.** The node rejects state at the newest block (`-32000 unsupported block number`) and prunes state after ~5,600 blocks (~28 min). `QuoterV2.t.sol` reads the head at runtime and forks 300 blocks back; a hardcoded block number rots within the hour.
 

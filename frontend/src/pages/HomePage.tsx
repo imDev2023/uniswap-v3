@@ -68,8 +68,12 @@ export function HomePage() {
           The launchpad contracts aren’t configured for this build yet — see the banner above.
         </p>
       ) : isError ? (
+        // Browsing the launch list is a DISCOVERY feature and genuinely needs the indexer. Trading
+        // does not (Stage 2) — so say what still works, and give a way through: anyone holding a
+        // token address can still reach its trade page directly.
         <p className="center-note">
-          Couldn’t reach the subgraph. Check <code>VITE_SUBGRAPH_URL</code> for this build.
+          Couldn’t reach the indexer, so the live-curve list can’t load. Trading is unaffected — open
+          a token directly at <code>/token/&lt;address&gt;</code> to buy, sell or swap it.
         </p>
       ) : isLoading ? (
         <div className="spinner">Loading curves…</div>

@@ -1,31 +1,45 @@
 import { Link, useParams } from 'react-router-dom'
-import { getAddress, isAddress, type Address } from 'viem'
 import { activeChain } from '../config/chain'
+import { useIndexerStatus } from '../hooks/useIndexerStatus'
+import { useOnchainToken } from '../hooks/useOnchainToken'
 import { useHolders, useToken, useTrades } from '../hooks/useSubgraph'
+import { parseTokenParam } from '../lib/address'
+import { isTradeable } from '../lib/onchainToken'
+import { isDegraded } from '../lib/indexerHealth'
 import { getTokenImage } from '../lib/tokenMeta'
 import { explorerAddressUrl, formatEth, formatPriceX18, shortAddress } from '../lib/format'
 import { Avatar } from '../components/TokenCard'
 import { CurveChart } from '../components/CurveChart'
+import { IndexedDataNotice } from '../components/IndexedDataNotice'
+import { OnchainTokenGate } from '../components/OnchainTokenGate'
 import { ProgressMeter } from '../components/ProgressMeter'
 import { TradePanel } from '../components/TradePanel'
 import { HoldersCard } from '../components/HoldersCard'
 
+// Stage 2 split: the trade path (curve address, graduation state, symbol) comes from RPC, so the
+// buy/sell panel keeps working through an indexer outage. The analytics panels (chart, curve stats,
+// holders) are indexer-derived and degrade individually to a labelled "unavailable" note.
 export function TokenPage() {
   const { address } = useParams<{ address: string }>()
-  const valid = address && isAddress(address)
+  const tokenAddr = parseTokenParam(address) ?? undefined
 
-  const { data: token, isLoading } = useToken(valid ? address : undefined)
-  const { data: trades } = useTrades(valid ? address : undefined)
-  const { data: holders } = useHolders(valid ? address : undefined)
+  const onchain = useOnchainToken(tokenAddr)
+  const indexer = useIndexerStatus()
 
-  if (!valid) return <p className="center-note">Invalid token address.</p>
-  if (isLoading) return <div className="spinner">Loading token…</div>
-  if (!token) return <p className="center-note">Token not found in the index yet.</p>
+  const { data: token } = useToken(tokenAddr)
+  const { data: trades } = useTrades(tokenAddr)
+  const { data: holders } = useHolders(tokenAddr)
 
-  const tokenAddr = getAddress(token.id) as Address
-  const curveAddr = getAddress(token.curve) as Address
-  const image = getTokenImage(token.id)
+  if (!tokenAddr) return <p className="center-note">Invalid token address.</p>
+  if (!isTradeable(onchain)) return <OnchainTokenGate token={onchain} />
+
+  const { curve, name, symbol } = onchain
+  const graduated = onchain.status !== 'on-curve'
+  const image = getTokenImage(tokenAddr)
   const explorer = activeChain.blockExplorers?.default.url ?? ''
+  // Only complain about missing indexed panels when the indexer is actually degraded. A token that
+  // simply hasn't been indexed yet (launched seconds ago) is a normal, transient empty state.
+  const indexedMissing = !token && isDegraded(indexer.state)
 
   return (
     <div>
@@ -37,31 +51,35 @@ export function TokenPage() {
         <div className="col-stack">
           <div className="card">
             <div className="token-header">
-              <Avatar image={image} symbol={token.symbol} />
+              <Avatar image={image} symbol={symbol} />
               <div style={{ flex: 1 }}>
-                <h1>{token.name}</h1>
+                <h1>{name}</h1>
                 <div className="token-symbol">
-                  {token.symbol} ·{' '}
+                  {symbol} ·{' '}
                   <a
                     className="link-accent"
                     href={explorerAddressUrl(explorer, tokenAddr)}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    {shortAddress(token.id)}
+                    {shortAddress(tokenAddr)}
                   </a>
                 </div>
               </div>
-              <span className={`badge ${token.graduated ? 'badge-grad' : 'badge-live'}`}>
-                {token.graduated ? 'Graduated' : 'Live'}
+              <span className={`badge ${graduated ? 'badge-grad' : 'badge-live'}`}>
+                {graduated ? 'Graduated' : 'Live'}
               </span>
             </div>
 
             <div style={{ marginTop: 20 }}>
-              <CurveChart trades={trades ?? []} />
+              {indexedMissing ? (
+                <IndexedDataNotice state={indexer.state} what="Price history" />
+              ) : (
+                <CurveChart trades={trades ?? []} />
+              )}
             </div>
 
-            {!token.graduated && (
+            {!graduated && token && (
               <div style={{ marginTop: 16 }}>
                 <ProgressMeter
                   progressBps={token.progressBps}
@@ -73,55 +91,75 @@ export function TokenPage() {
 
           <div className="card">
             <p className="section-title">Curve stats</p>
-            <div className="kv-grid">
-              <Kv label="Price" value={`${formatPriceX18(BigInt(token.priceX18))} ETH`} />
-              <Kv label="Volume" value={`${formatEth(BigInt(token.volumeEth))} ETH`} />
-              <Kv label="ETH reserve" value={`${formatEth(BigInt(token.ethReserve))} ETH`} />
-              <Kv label="Trades" value={String(token.tradeCount)} />
-              <Kv label="Holders" value={String(token.holderCount)} />
-              <Kv label="Buys / Sells" value={`${token.buyCount} / ${token.sellCount}`} />
-            </div>
+            {token ? (
+              <div className="kv-grid">
+                <Kv label="Price" value={`${formatPriceX18(BigInt(token.priceX18))} ETH`} />
+                <Kv label="Volume" value={`${formatEth(BigInt(token.volumeEth))} ETH`} />
+                <Kv label="ETH reserve" value={`${formatEth(BigInt(token.ethReserve))} ETH`} />
+                <Kv label="Trades" value={String(token.tradeCount)} />
+                <Kv label="Holders" value={String(token.holderCount)} />
+                <Kv label="Buys / Sells" value={`${token.buyCount} / ${token.sellCount}`} />
+              </div>
+            ) : indexedMissing ? (
+              <IndexedDataNotice state={indexer.state} what="Curve stats" />
+            ) : (
+              <p className="center-note">Not indexed yet.</p>
+            )}
           </div>
 
-          <HoldersCard holders={holders ?? []} creator={token.creator} />
+          {indexedMissing ? (
+            <div className="card">
+              <p className="section-title">Holders</p>
+              <IndexedDataNotice state={indexer.state} what="Holder table" />
+            </div>
+          ) : (
+            <HoldersCard holders={holders ?? []} creator={token?.creator} />
+          )}
         </div>
 
         <div className="col-stack" style={{ position: 'sticky', top: 84 }}>
-          <TradePanel
-            token={tokenAddr}
-            curve={curveAddr}
-            symbol={token.symbol}
-            graduated={token.graduated}
-          />
-          {token.graduated && token.graduation && (
+          {/* Curve address and graduation state are RPC-resolved, so this panel is unaffected by
+              indexer health — it quotes, caps and trades entirely on-chain. */}
+          <TradePanel token={tokenAddr} curve={curve} symbol={symbol} graduated={graduated} />
+
+          {graduated && (
             <div className="card">
               <p className="section-title">Graduated</p>
               <div className="kv-grid">
-                <Kv label="Raised" value={`${formatEth(BigInt(token.graduation.raisedEth))} ETH`} />
-                <Kv
-                  label="Pool"
-                  value={
-                    <a
-                      className="link-accent num"
-                      href={explorerAddressUrl(explorer, getAddress(token.graduation.pool) as Address)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {shortAddress(token.graduation.pool)}
-                    </a>
-                  }
-                />
+                {token?.graduation && (
+                  <Kv
+                    label="Raised"
+                    value={`${formatEth(BigInt(token.graduation.raisedEth))} ETH`}
+                  />
+                )}
+                {onchain.status === 'graduated' && (
+                  <Kv
+                    label="Pool"
+                    value={
+                      <a
+                        className="link-accent num"
+                        href={explorerAddressUrl(explorer, onchain.pool)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {shortAddress(onchain.pool)}
+                      </a>
+                    }
+                  />
+                )}
               </div>
               <p className="hint" style={{ marginTop: 12 }}>
                 Liquidity is permanently locked.
               </p>
-              <Link
-                to={`/swap/${token.id}`}
-                className="btn btn-primary"
-                style={{ display: 'block', textAlign: 'center', marginTop: 12 }}
-              >
-                Swap {token.symbol} / ETH →
-              </Link>
+              {onchain.status === 'graduated' && (
+                <Link
+                  to={`/swap/${tokenAddr}`}
+                  className="btn btn-primary"
+                  style={{ display: 'block', textAlign: 'center', marginTop: 12 }}
+                >
+                  Swap {symbol} / ETH →
+                </Link>
+              )}
             </div>
           )}
         </div>

@@ -10,11 +10,12 @@ export function HoldersCard({
   creator,
 }: {
   holders: HolderRow[]
-  creator: string
+  /** Undefined when the creator isn't known - the indexer supplies it, and it may be unavailable. */
+  creator: string | undefined
 }) {
   const { address } = useAccount()
   const you = address?.toLowerCase()
-  const creatorLc = creator.toLowerCase()
+  const creatorLc = creator?.toLowerCase()
 
   const creatorHolder = holders.find((h) => h.account.toLowerCase() === creatorLc)
   const creatorShare = creatorHolder ? shareOfCurveSupply(BigInt(creatorHolder.balance)) : 0
@@ -36,7 +37,7 @@ export function HoldersCard({
         <div>
           <div className="kv-label">Creator holdings</div>
           <div className="num" style={{ marginTop: 2 }} title={creator}>
-            {shortAddress(creator)}
+            {creator ? shortAddress(creator) : 'unknown'}
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>

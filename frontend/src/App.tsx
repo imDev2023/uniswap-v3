@@ -1,12 +1,18 @@
 import { Link, Route, Routes } from 'react-router-dom'
 import { ConnectButton } from './components/ConnectButton'
 import { ConfigBanner } from './components/ConfigBanner'
+import { IndexerBanner } from './components/IndexerBanner'
+import { useIndexerStatus } from './hooks/useIndexerStatus'
 import { HomePage } from './pages/HomePage'
 import { CreatePage } from './pages/CreatePage'
 import { TokenPage } from './pages/TokenPage'
 import { SwapPage } from './pages/SwapPage'
 
 export function App() {
+  // One global statement of indexer health (Stage 2). Trading runs on RPC, so an outage is a
+  // partial degradation — saying so once, at the top, beats each panel failing on its own.
+  const indexer = useIndexerStatus()
+
   return (
     <div className="app">
       <header className="topbar">
@@ -27,6 +33,7 @@ export function App() {
       </header>
 
       <ConfigBanner />
+      <IndexerBanner status={indexer} />
 
       <main className="main">
         <Routes>

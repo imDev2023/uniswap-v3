@@ -41,6 +41,15 @@ export const launchpadFactoryAbi = [
     inputs: [{ name: '', type: 'address' }],
     outputs: [{ name: '', type: 'address' }],
   },
+  // Immutable. The launchpad names its own V3 factory, so the graduated-pool address is reachable
+  // from the launchpad address alone (Stage 2) — one configured address, no second env var to drift.
+  {
+    type: 'function',
+    name: 'v3Factory',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
   {
     type: 'event',
     name: 'LaunchCreated',

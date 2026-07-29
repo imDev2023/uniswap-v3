@@ -123,35 +123,76 @@ EOA. On mainnet the Safe multisig must execute it as a multisig transaction.
   `BLOCKSCOUT_API_KEY` / `BLOCKSCOUT_TESTNET_API` / `BLOCKSCOUT_MAINNET_API`. **All three** must be
   exported or forge errors on the unused mainnet one.
 
-## ⚠️ Blockscout cannot verify the two contracts the factory creates
+## ✅ RESOLVED (2026-07-28) — all three contracts are verified; no contract change needed
 
-`LaunchpadFactory` verifies normally (`forge verify-contract`, optimizer 200 — confirmed in the
-explorer's own metadata). `GraduationManager` and `LPLock` **cannot currently be verified on this
-explorer**, and the reason is on Blockscout's side, not ours:
+**Every contract in the launchpad stack is now Blockscout-verified on testnet 46630**, including the
+two the factory creates internally. The earlier diagnosis below is **stale** and is kept only as a
+record of what was tried.
+
+| Contract | Address | Verified |
+| --- | --- | --- |
+| `LaunchpadFactory` | `0x632FD871…D1E7` | ✅ solc 0.8.24, optimizer 200 |
+| `GraduationManager` | `0x3e28d883…5E14` | ✅ solc 0.8.24, optimizer 200 |
+| `LPLock` | `0x8FBAa12E…C0E1` | ✅ solc 0.8.24, optimizer 200 |
+
+Both internally-created contracts verified on the **first attempt**, with no workaround, using the
+ordinary command and explicit constructor args:
+
+```bash
+forge verify-contract 0x3e28d8838951C9F1ad229a5506584616E46D5E14 \
+  src/periphery/GraduationManager.sol:GraduationManager \
+  --chain 46630 --verifier blockscout --verifier-url "$BLOCKSCOUT_TESTNET_API" \
+  --constructor-args $(cast abi-encode "constructor(address,address,address,address)" \
+    $LAUNCHPAD $NPM $WETH9 $LPLOCK) --watch
+# -> Pass - Verified
+
+forge verify-contract 0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1 \
+  src/periphery/LPLock.sol:LPLock \
+  --chain 46630 --verifier blockscout --verifier-url "$BLOCKSCOUT_TESTNET_API" \
+  --constructor-args $(cast abi-encode "constructor(address,address)" $NPM $LAUNCHPAD) --watch
+# -> Pass - Verified
+```
+
+**What changed:** the explorer now has the creation bytecode it previously lacked. `/api?module=
+contract&action=getcontractcreation` returns, for `GraduationManager`, a full `creationBytecode`
+(runtime + constructor args) **and** a `contractFactory` field naming `LaunchpadFactory` — a field
+that did not exist in the response before. `creator_address_hash` is now attributed to the factory
+rather than to an unrelated deploy tx. Either the instance was upgraded or its internal-transaction
+index was backfilled; either way the missing input is present and matching succeeds.
+
+**Mainnet is not at risk.** `robinhoodchain.blockscout.com` runs a *newer* Blockscout
+(`v11.2.3` vs testnet's `v10.2.6`), reports `indexed_internal_transactions_ratio: 1.00`, and already
+hosts verified factory-created contracts: of 20 sampled verified mainnet contracts, **18 were created
+by another contract**, every one with full creation bytecode recorded.
+
+➡️ **Consequence: the proposed fallback is dropped.** Deploying `GraduationManager` / `LPLock` as
+top-level contracts instead of from the factory constructor would have been a **contract change
+required before the audit**. It is not needed. The contracts stay frozen exactly as audited.
+
+<details>
+<summary>Superseded diagnosis (kept for the record)</summary>
+
+`GraduationManager` and `LPLock` could not be verified on this explorer, and the reason was on
+Blockscout's side, not ours:
 
 - both are created by an internal `CREATE` inside the factory's constructor;
-- `forge verify-contract --guess-constructor-args` refuses outright: *"Fetching of constructor
+- `forge verify-contract --guess-constructor-args` refused outright: *"Fetching of constructor
   arguments is not supported for contracts created by contracts"*;
-- passing the args explicitly returns `OK` then `Fail - Unable to verify`;
-- `/api/v2/addresses/{addr}` reports **`creation_bytecode: false`** for both, and mis-attributes
+- passing the args explicitly returned `OK` then `Fail - Unable to verify`;
+- `/api/v2/addresses/{addr}` reported **`creation_bytecode: false`** for both, and mis-attributed
   their `creation_transaction_hash` to the `NonfungiblePositionManager` deploy tx rather than the
-  factory's. Without creation bytecode there is nothing for it to match against.
-- submitting via the v2 standard-JSON endpoint is accepted (*"verification started"*) but never
-  completes. Note that endpoint needs `-F "files[0]=@file.json;type=application/json"` — without the
+  factory's. Without creation bytecode there was nothing for it to match against.
+- submitting via the v2 standard-JSON endpoint was accepted (*"verification started"*) but never
+  completed. Note that endpoint needs `-F "files[0]=@file.json;type=application/json"` — without the
   explicit content type it replies `JSON files not found`.
 
-**Our source is provably correct.** Comparing deployed runtime bytecode against the local artifact:
-LPLock differs in exactly **80 bytes** and GraduationManager in **320** — precisely 4 and 16
-20-byte slots, and every one of them is an immutable address (`positionManager`, `launchpad`,
-`weth9`, `lpLock`), present on-chain and zero-filled in the artifact as expected. There is no logic
-difference.
+**Our source was provably correct even then.** Comparing deployed runtime bytecode against the local
+artifact: LPLock differed in exactly **80 bytes** and GraduationManager in **320** — precisely 4 and
+16 20-byte slots, every one an immutable address (`positionManager`, `launchpad`, `weth9`, `lpLock`),
+present on-chain and zero-filled in the artifact as expected. No logic difference. The successful
+verification above confirms that conclusion independently.
 
-⚠️ **Check this again before mainnet.** Mainnet Robinhood Chain uses a **Blockscout-hosted**
-explorer (`robinhoodchain.blockscout.com`), whereas this testnet instance is **self-hosted** — so
-the indexing gap may not exist there. If it does, the options are to have the explorer operator
-backfill creation bytecode for internal creations, or to deploy `GraduationManager`/`LPLock` as
-**top-level** deploys wired in afterwards rather than from the factory constructor. That second
-option is a contract change and would have to land before the audit, not after.
+</details>
 
 ## Build #24 (Build 11) redeploy — Stage 1 validation ✅
 

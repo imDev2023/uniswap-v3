@@ -54,7 +54,7 @@ Ticket rhythm (build tickets #12–#21 built the stack; #22–#25 are merged; **
 | Deployer = SAFE = treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
 | Subgraph `startBlock` | `94091260` |
 
-`owner() == SAFE`, `pendingOwner() == 0x0`. Only launch on this factory is **`META`** (token `0x52eEF29C3c869b4D04F3C1451b16548dEaa923bE`), which is graduated — pool `0xDC27FeCB8589c0FB0328fd98963c823a1681E933`, LP NFT 1 locked. **The six older launches (`P1ETH`, `SNIPE`, `GRAD`, `RDOGE`, `SMOKE`, `ONEETH`) are on the SUPERSEDED factory `0xE98B99ADD42c550bf40B887Bf07A8f0119a22232` and are unreachable from the current one.**
+`owner() == SAFE`, `pendingOwner() == 0x0`. Only launch on this factory is **`META`** (token `0x52eEF29c3c869B4D04F3c1451b16548DEAA923bE`), which is graduated — pool `0xDC27FeCB8589c0FB0328fd98963c823a1681E933`, LP NFT 1 locked. **The six older launches (`P1ETH`, `SNIPE`, `GRAD`, `RDOGE`, `SMOKE`, `ONEETH`) are on the SUPERSEDED factory `0xE98B99ADD42c550bf40B887Bf07A8f0119a22232` and are unreachable from the current one.**
 
 **Testnet curve calibration:** the live 46630 factory graduates a new launch for **exactly 0.1 ETH** (`virtualEthReserve = 1/30 ETH = 33333333333333333`; ETH-to-graduate is always `3 × V_eth`), anti-snipe off — re-applied after the #24 redeploy via `setCurveParams(33333333333333333, 100, 8e24, 0)`. `setCurveParams` is future-only, so older launches keep their frozen calibration. Solidity constants are untouched — a **mainnet deploy still lands on production calibration (90 ETH)**. Restore/re-scale commands in `docs/deployments-testnet.md`.
 

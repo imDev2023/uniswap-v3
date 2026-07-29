@@ -208,7 +208,7 @@ at **0.1 ETH**, anti-snipe **off**, matching the previous testnet setup.
 
 ### Launch — `META`, the Stage 1 end-to-end
 
-Token `0x52eEF29C3c869b4D04F3C1451b16548dEaa923bE` · curve `0x81a14013d3F048BcBe4AF0fB8b88aF0ec25D799a`
+Token `0x52eEF29c3c869B4D04F3c1451b16548DEAA923bE` · curve `0x81a14013d3F048BcBe4AF0fB8b88aF0ec25D799a`
 
 | Step | Result |
 | --- | --- |
@@ -282,7 +282,7 @@ continuity property is exercised faithfully — only the absolute ETH scale diff
 
 ### Launch C — `P1ETH`, 0.1 ETH calibration, graduated
 
-Token `0x99fa21DCC0BAA3EFE125b32CCeEDa9AbcA4F90b8` · curve `0xFa3506cE7e4450dD50CAA6063cB0Ca98BaD42fC0`
+Token `0x99fa21dCc0Baa3EfE125b32ccEeDa9aBCa4f90b8` · curve `0xFA3506Ce7e4450DD50CAA6063Cb0cA98bAd42fC0`
 
 The first launch created **after** the 0.1 ETH re-calibration, so it graduates on the live testnet
 config rather than a bespoke one. It sat at 99.74% and was completed with one small buy.
@@ -323,7 +323,7 @@ Exercised on locked position **NFT id 1** (the `GRAD` pool), which had accrued r
 
 ### Launch D — `SNIPE`, six wallets, anti-snipe armed ✅
 
-Token `0xca77ffb346Be5945e6D745ed6723d7d794317c8F` · curve `0x41068c3d86dA330ba2Ac00Dc0FbDd08974b5f072`
+Token `0xcA77FFb346be5945E6d745Ed6723D7D794317c8F` · curve `0x41068c3D86da330bA2Ac00dc0FBDd08974B5F072`
 · pool `0x03D5597ad23eBda088a5F22353dd3ea5D56Efe15` · LP NFT **id 3** locked in `LPLock`
 
 The first launch traded by **more than one wallet**. Anti-snipe was armed for it via
@@ -395,8 +395,8 @@ calibration-locked at `CURVE_SUPPLY² / (CURVE_SUPPLY - GRADUATION_RESERVE)`, wh
 `finalEthReserve = 4 × V_eth`. So **ETH-to-graduate = 3 × V_eth**, always. 30 ETH → 90; 1/3 ETH → 1;
 1/30 ETH → 0.1.
 
-Verified on launch `P1ETH` (token `0x99fa21DCC0BAA3EFE125b32CCeEDa9AbcA4F90b8`, curve
-`0xFa3506cE7e4450dD50CAA6063cB0Ca98BaD42fC0`, tx
+Verified on launch `P1ETH` (token `0x99fa21dCc0Baa3EfE125b32ccEeDa9aBCa4f90b8`, curve
+`0xFA3506Ce7e4450DD50CAA6063Cb0cA98bAd42fC0`, tx
 `0x4125c4db1d618a23a705ead6878b81fe1902a505c1feada33efa75473e52c6a1`) — read straight off the curve:
 
 ```

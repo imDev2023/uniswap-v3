@@ -189,6 +189,21 @@ export const HOLDERS_QUERY = gql`
   }
 `
 
+// graph-node's built-in health field. `block.timestamp` is a CHAIN timestamp, so comparing it to the
+// RPC head's timestamp gives real lag with no clock skew — unlike `synced`, which compares against
+// graph-node's own ingested head and reads true while genuinely behind.
+export const META_QUERY = gql`
+  query IndexerMeta {
+    _meta {
+      block {
+        number
+        timestamp
+      }
+      hasIndexingErrors
+    }
+  }
+`
+
 export const FACTORY_QUERY = gql`
   query FactoryStats {
     factory(id: "launchpad") {
@@ -244,6 +259,17 @@ export async function fetchHolders(token: string, first = 100): Promise<HolderRo
     first,
   })
   return data.holders
+}
+
+export interface MetaRow {
+  block: { number: number; timestamp: number | null }
+  hasIndexingErrors: boolean
+}
+
+/** Indexer head + health. Throws when the endpoint is unreachable — that throw IS the "down" signal. */
+export async function fetchMeta(): Promise<MetaRow | null> {
+  const data = await subgraphClient.request<{ _meta: MetaRow | null }>(META_QUERY)
+  return data._meta
 }
 
 export async function fetchFactory(): Promise<FactoryRow | null> {

@@ -6,6 +6,12 @@ import { defineChain } from 'viem'
 
 const DEFAULT_RPC = import.meta.env.VITE_RPC_URL || undefined
 
+// Multicall3 is deployed at its canonical CREATE2 address on BOTH Robinhood chains — confirmed with
+// eth_getCode against 4663 and 46630 (same 7.6 kB runtime). Declaring it lets viem fold the
+// RPC-first trade reads (curveOf / graduated / getPool) into a single eth_call evaluated at one
+// block: fewer round-trips, and a consistent snapshot rather than a torn read across blocks.
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11' as const
+
 // Endpoints are the public documented values from research/robinhood-chain-compat.md. VITE_RPC_URL
 // overrides the RPC (e.g. an Alchemy key) for reliability under load.
 export const robinhoodMainnet = defineChain({
@@ -18,6 +24,7 @@ export const robinhoodMainnet = defineChain({
   blockExplorers: {
     default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' },
   },
+  contracts: { multicall3: { address: MULTICALL3_ADDRESS } },
 })
 
 export const robinhoodTestnet = defineChain({
@@ -31,6 +38,7 @@ export const robinhoodTestnet = defineChain({
   blockExplorers: {
     default: { name: 'Blockscout', url: 'https://explorer.testnet.chain.robinhood.com' },
   },
+  contracts: { multicall3: { address: MULTICALL3_ADDRESS } },
 })
 
 const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 46630)

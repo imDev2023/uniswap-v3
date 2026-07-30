@@ -33,10 +33,16 @@ import {
  * `retryCount: 0` on inner transports and retries from the first one. It is not redundancy until
  * VITE_RPC_URL_2 is set.
  */
+/**
+ * Exported so tests exercise the SAME options the app ships. Constructing `fallback` with different
+ * options in a test proves something about viem, but not about this app.
+ */
+export const FALLBACK_OPTIONS = { rank: false } as const
+
 export const failover = (urls: string[]) =>
   fallback(
     urls.map((url) => http(url)),
-    { rank: false },
+    FALLBACK_OPTIONS,
   )
 
 export const wagmiConfig = createConfig({

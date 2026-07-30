@@ -22,10 +22,10 @@
 //   node scripts/rpc-probe.mjs https://some-candidate-provider.example/rpc
 //   node scripts/rpc-probe.mjs mainnet --json probe-mainnet.json
 //   node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
+//   node scripts/rpc-probe.mjs --self-test        # offline; no network, no endpoint needed
 //
-// Pacing self-tunes: each throttle response raises a floor on the gap between calls, so an
-// aggressively rate-limited candidate gets measured slowly rather than written off as broken.
-// --min-interval sets that floor up front when the provider's published limit is already known.
+// --min-interval sets a floor on the gap between calls, for a candidate whose published limit is
+// already known. The floor also self-tunes upward on throttling; see the "pacing" section below.
 // A full run is ~150 calls, so budget accordingly (10 s floor => ~25 min).
 //
 // No dependencies; needs Node 18+ for global fetch.
@@ -105,15 +105,69 @@ function bumpPace() {
  * bare string rather than a JSON-RPC error object. Both look like garbage to a strict parser, which
  * is how a throttle ends up reported as a protocol failure.
  */
-const RATE_LIMIT_PATTERN = /rate.?limit|too many requests|quota|exceeded.*(limit|plan)|429/i
+// Deliberately NARROW. An earlier version also matched a bare "429" and the word "quota", which made
+// any successful reply whose result merely contained those characters - a block number like 0x429ab1
+// - read as a refusal. A false throttle is worse than a missed one: it retries a call that already
+// succeeded and ratchets the global pace on the strength of a coincidence.
+const RATE_LIMIT_PATTERN = /rate.?limit|too many requests|slow down|request quota/i
+
+/** Statuses that mean "throttled/blocked" even when the body is an opaque HTML page. */
+const THROTTLE_STATUSES = new Set([403, 429, 503])
+
+// Some providers report throttling as a properly-enveloped JSON-RPC error rather than an HTTP status
+// - Alchemy returns HTTP 200 with `{ code: 429 }`, and -32005 is the standard "limit exceeded". viem
+// special-cases these same two codes for the same reason. Without them a throttle from the provider
+// we are most likely to evaluate next would read as a real node answer, and the probe would never
+// back off. Note -32000 is deliberately absent: the eth_getLogs cap refusal uses it, and that is a
+// query-too-big signal which must keep its own meaning (see trap #3).
+const THROTTLE_RPC_CODES = new Set([429, -32005])
 
 /**
  * A CDN interstitial (Cloudflare challenge, WAF block, 5xx page) arrives as HTML, sometimes under
- * HTTP 200. Measured on a real candidate: it serves JSON-RPC when idle and an HTML page under load,
- * so treating HTML as a hard protocol failure retires a working endpoint on the strength of our own
- * traffic. Naming it as a CDN page - and backing off instead of giving up - is the honest reading.
+ * HTTP 200. Measured on a real candidate: it serves JSON-RPC when idle and an HTML page under load.
  */
 const isHtmlBody = (text) => /^\s*(<!doctype html|<html|<\?xml)/i.test(text)
+
+/**
+ * Decide what a reply IS before deciding what it means.
+ *
+ * Trap #4 cuts both ways and this is where both edges live. Treating a throttle as an incapability
+ * retires a working provider; treating "not an RPC endpoint at all" as a throttle is just as wrong -
+ * it tells the operator to slow down when the real problem is a typo'd URL, and burns the full
+ * throttle-retry ladder doing it. So an HTML body only counts as throttling when it SAYS so or
+ * arrives under a status that means so. Otherwise it is simply not JSON-RPC.
+ */
+function classifyReply(status, text) {
+  if (status === 429) return 'throttled'
+  const signalsThrottle = RATE_LIMIT_PATTERN.test(text)
+  if (isHtmlBody(text)) {
+    return THROTTLE_STATUSES.has(status) || signalsThrottle ? 'throttled' : 'not-rpc'
+  }
+  const body = text.trimStart()
+  const jsonShaped = body.startsWith('{') || body.startsWith('[')
+  if (jsonShaped) {
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      // Malformed JSON is handled by the caller's own parse; fall through to the text heuristics.
+    }
+    const code =
+      parsed && !Array.isArray(parsed) && parsed.error && typeof parsed.error === 'object'
+        ? parsed.error.code
+        : undefined
+    if (typeof code === 'number' && THROTTLE_RPC_CODES.has(code)) return 'throttled'
+  }
+  // Any remaining throttle wording counts, wherever it sits: a bare string in `error` instead of a
+  // JSON-RPC error object, a plain-text body, or a throttle reported under a non-standard code.
+  // This used to additionally require the JSON-RPC envelope to be ABSENT, as a guard against a
+  // legitimate result being misread. Mutation testing showed that guard was unreachable once
+  // RATE_LIMIT_PATTERN was narrowed, and dropping it is strictly better: a throttle message carried
+  // under a non-standard error code now backs off instead of being taken for a node answer.
+  if (signalsThrottle) return 'throttled'
+  if (!jsonShaped) return 'not-rpc'
+  return 'proceed'
+}
 
 /** Seconds to a readable age. Retention windows range from minutes to weeks. */
 function humanizeAge(sec) {
@@ -152,14 +206,19 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
 
       // Throttling is detected from status OR body, because providers signal it both ways - some
       // return HTTP 200 with a rate-limit payload, which a status-only check reads as a valid reply.
-      const notJsonRpc = !text.trimStart().startsWith('{') && !text.trimStart().startsWith('[')
-      const html = isHtmlBody(text)
-      const looksThrottled =
-        res.status === 429 ||
-        html ||
-        (notJsonRpc && RATE_LIMIT_PATTERN.test(text)) ||
-        (res.status === 200 && !text.startsWith('{"jsonrpc') && RATE_LIMIT_PATTERN.test(text))
-      if (looksThrottled) {
+      const kind = classifyReply(res.status, text)
+      if (kind === 'not-rpc') {
+        // A real dead end, not a rate limit: this URL answered, but not with JSON-RPC. Retrying it
+        // cannot help, so fail fast and let the caller report it as unusable.
+        return {
+          ok: false,
+          transport: isHtmlBody(text)
+            ? `not a JSON-RPC endpoint (HTML page, HTTP ${res.status}) - check the URL; a CDN page can also appear under heavy load`
+            : `not a JSON-RPC endpoint (HTTP ${res.status})`,
+          body: text.slice(0, 200),
+        }
+      }
+      if (kind === 'throttled') {
         stats.rateLimited++
         throttled = true
         if (attempt < throttleRetries) {
@@ -173,7 +232,7 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
         }
         return {
           ok: false,
-          transport: html
+          transport: isHtmlBody(text)
             ? `CDN interstitial (HTML, HTTP ${res.status}) - challenge or throttle, not JSON-RPC`
             : 'rate limited',
           throttled: true,
@@ -198,6 +257,10 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
       // which must not be reported as though the chain refused the query.
       if (json.error !== undefined && json.error !== null) {
         if (typeof json.error === 'object' && typeof json.error.code === 'number') {
+          // Deliberately does NOT carry `throttled` forward. A JSON-RPC error object is the node
+          // answering the question, so the endpoint is usable and the error is about the request.
+          // Flagging it as throttled would make probeIdentity print THROTTLED for a genuine
+          // "method does not exist", which is the opposite of the distinction being drawn here.
           return { ok: false, error: json.error }
         }
         const message = typeof json.error === 'string' ? json.error : JSON.stringify(json.error)
@@ -777,13 +840,75 @@ async function probeOptionalMethods(ctx) {
   report.sections.optionalMethods = methods
 }
 
+// -------------------------------------------------------------------- self test
+//
+// classifyReply decides whether a reply is a throttle, a non-RPC endpoint, or real data, and it has
+// already been wrong in both directions: it once read a successful result containing "429" as a
+// refusal, and once read a typo'd URL's HTML homepage as a rate limit. Both were confident and both
+// were silent. The bodies below are the real ones observed from Robinhood Chain and from two
+// candidate providers, so this pins the behaviour offline, with no network and no dependencies.
+//
+//   node scripts/rpc-probe.mjs --self-test
+
+const SELF_TEST_CASES = [
+  ['HTTP 429 with a JSON rate-limit payload', 429, '{"error":"rate_limited","message":"Free public limit reached (1 req/10s per IP)"}', 'throttled'],
+  ['HTTP 200 with a rate-limit payload, no JSON-RPC envelope', 200, '{"error":"rate_limited","message":"limit"}', 'throttled'],
+  ['Cloudflare HTML naming a rate limit', 429, '<!DOCTYPE html><html><body>error code: 1015</body></html>', 'throttled'],
+  ['Cloudflare HTML under a throttling status, no signal', 503, '<!DOCTYPE html><html><body>checking your browser</body></html>', 'throttled'],
+  ['HTML 200 that says it is rate limiting', 200, '<html><body>You are being rate limited</body></html>', 'throttled'],
+  ['plain-text rate limit', 200, 'rate limit exceeded', 'throttled'],
+  ['a typo\'d URL serving an ordinary web page', 200, '<!doctype html><html><head><title>Example Domain</title></head></html>', 'not-rpc'],
+  ['HTML under 405, no throttle signal', 405, '<!doctype html><html>nope</html>', 'not-rpc'],
+  ['empty body', 200, '', 'not-rpc'],
+  ['a good result whose value contains "429"', 200, '{"jsonrpc":"2.0","id":1,"result":"0x429ab1"}', 'proceed'],
+  ['the same, with id before jsonrpc', 200, '{"id":1,"jsonrpc":"2.0","result":"0x429ab1"}', 'proceed'],
+  // This one guards the PATTERN rather than the envelope check. Every other "proceed" case carries a
+  // `jsonrpc` field, which short-circuits the pattern entirely - so without a case like this,
+  // widening RATE_LIMIT_PATTERN back to a bare "429" passes the whole suite. Found by mutation.
+  ['a batch reply whose elements omit the jsonrpc field', 200, '[{"id":1,"result":"0x429ab1"}]', 'proceed'],
+  ['a real JSON-RPC error object', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"missing trie node"}}', 'proceed'],
+  ['a plan refusal carried in a JSON-RPC envelope', 400, '{"id":1,"jsonrpc":"2.0","error":{"message":"chain is not available on free plan, please upgrade to paid plan","code":35}}', 'proceed'],
+  // Enveloped throttles. Alchemy - the provider most likely to be evaluated next - reports rate
+  // limiting this way, with HTTP 200, so a status-only or text-only check misses it entirely.
+  ['an enveloped throttle, JSON-RPC code 429', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":429,"message":"Too Many Requests"}}', 'throttled'],
+  ['an enveloped throttle, JSON-RPC code -32005', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":-32005,"message":"limit exceeded"}}', 'throttled'],
+  ['a throttle message carried under a non-standard code', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"rate limit exceeded"}}', 'throttled'],
+  // The single most important negative case. The eth_getLogs cap refusal is a -32000 whose message
+  // contains "exceeds limit", and it must stay a query-too-big signal: the probe shrinks its window
+  // in response, and per trap #3 a cap refusal PROVES logs exist at that depth. Reading it as a
+  // throttle would silently break the log-cap and retention measurements at once.
+  ['a log-cap refusal, which is not throttling', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"logs matched by query exceeds limit of 10000"}}', 'proceed'],
+]
+
+function runSelfTest() {
+  let failed = 0
+  for (const [name, status, body, want] of SELF_TEST_CASES) {
+    const got = classifyReply(status, body)
+    const ok = got === want
+    if (!ok) failed++
+    console.log(`${ok ? '  ok  ' : '  FAIL'}  ${name}  ->  ${got}${ok ? '' : `  (expected ${want})`}`)
+  }
+  console.log(
+    failed === 0
+      ? `\nall ${SELF_TEST_CASES.length} reply-classification cases pass`
+      : `\n${failed} of ${SELF_TEST_CASES.length} FAILED`,
+  )
+  return failed === 0
+}
+
 // ------------------------------------------------------------------------ main
 
 async function main() {
   const args = process.argv.slice(2)
+  if (args.includes('--self-test')) {
+    process.exit(runSelfTest() ? 0 : 1)
+  }
   const target = args[0]
   if (!target) {
-    console.error('usage: node scripts/rpc-probe.mjs <mainnet|testnet|url> [--json out.json]')
+    console.error(
+      'usage: node scripts/rpc-probe.mjs <mainnet|testnet|url> [--json out.json] [--min-interval ms]\n' +
+        '       node scripts/rpc-probe.mjs --self-test',
+    )
     process.exit(2)
   }
   const jsonIdx = args.indexOf('--json')

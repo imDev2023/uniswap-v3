@@ -16,13 +16,22 @@ node scripts/rpc-probe.mjs mainnet
 node scripts/rpc-probe.mjs testnet
 node scripts/rpc-probe.mjs https://candidate-provider.example/rpc --json out.json
 node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
+node scripts/rpc-probe.mjs --self-test
 ```
+
+`--self-test` runs offline with no network and no endpoint.
+It pins how the probe classifies a reply - throttle, not-a-JSON-RPC-endpoint, or real data - against the actual bodies observed from this chain and from candidate providers.
+That classifier has been wrong in both directions twice, so run it after touching the detection logic.
 
 The script has no dependencies and needs Node 18+.
 Pacing self-tunes: each throttle response raises a floor on the gap between calls, so a hard rate-limited candidate is measured slowly instead of being written off as broken.
 `--min-interval` sets that floor up front when the provider's published limit is already known.
 A full run is ~150 calls, so a 10 s floor means roughly 25 minutes.
 All output is emitted at the end, so a run killed early prints nothing.
+
+⚠️ **Repeated back-to-back runs trip the official endpoint's own limiter**, after which the adaptive floor ratchets toward its 20 s ceiling and a run that normally takes two minutes takes closer to an hour, silently.
+That is the pacing working as intended, but it means a burst of consecutive runs measures a degraded endpoint.
+Space runs out, and treat timing-derived figures from a self-throttled run as not comparable.
 It is strictly read-only and never signs or sends a transaction.
 It accepts any URL, so it doubles as the evaluation harness for candidate providers.
 Re-run it before picking a provider and after any node upgrade.
@@ -209,7 +218,8 @@ This one was found by pointing the probe at its first real candidate rather than
 
 The probe's `Identity` section used to issue its four calls concurrently.
 Against a candidate allowing **one request every ten seconds**, three of the four were refused, and the probe reported `FATAL endpoint unusable`.
-The endpoint was fine. We were talking too fast, and the probe had blamed the endpoint for our own traffic.
+The endpoint was fine.
+We were talking too fast, and the probe had blamed the endpoint for our own traffic.
 
 That is the same shape as the three traps above, and more dangerous now that this script is the provider-evaluation harness: taken at face value it would reject every aggressively rate-limited candidate, which describes most free tiers.
 
@@ -223,7 +233,13 @@ The probe now:
 - reports `THROTTLED` distinctly from `FATAL`, and prints the provider's own words,
 - detects throttling from the body as well as the status, including HTML interstitials and string-valued `error` fields,
 - **raises a global pacing floor on every throttle and keeps going** at the slower rate, rather than concluding the endpoint is broken (`--min-interval` sets that floor up front),
-- and **skips the concurrency burst entirely when pacing is active**, because a paced burst measures the probe's own pacer. Reporting that number as the endpoint's concurrency would be a confident statement about the wrong thing.
+- and **skips the concurrency burst entirely when pacing is active**, because a paced burst measures the probe's own pacer.
+  Reporting that number as the endpoint's concurrency would be a confident statement about the wrong thing.
+
+The inverse error is just as easy, and the first fix walked straight into it: treating *any* HTML body as throttling.
+A typo'd URL then reports as `THROTTLED` and advises slowing down, after burning the whole retry ladder to get there.
+An HTML body now counts as throttling only when it says so or arrives under a status that means so (403/429/503), and is otherwise reported as "not a JSON-RPC endpoint".
+For the same reason the rate-limit pattern is deliberately narrow: an earlier version matched a bare `429`, so a reply whose *result* contained those characters - a block number like `0x429ab1` - was read as a refusal.
 
 **Corollary for reading provider documentation: measure it, do not trust it.**
 On the one candidate measured here the published page was wrong in both directions - the stated rate limit was 20x more generous than reality, and heavy methods documented as key-gated were served without a key.
@@ -274,13 +290,17 @@ That is wrong here: the last entry is always the rate-limited public endpoint, a
 
 **A single-URL `fallback` is not redundancy.**
 viem forces `retryCount: 0` on the inner transports and retries from the first one, so one URL wrapped in `fallback` behaves exactly like a bare `http()`.
-`hasFailover()` exists so nothing claims redundancy that does not exist.
+Failover only begins to exist at two distinct endpoints, which is why `VITE_RPC_URL_2` is the setting that matters rather than the transport change itself.
 
 **The deep-state miss fails over, and a revert does not.**
 This is the property that makes a second provider worth having, and it is a narrow one:
 
-- The pruned-state errors measured above (`missing trie node`, `metadata is not found`) come back as **`-32000`**. That code is **not** in viem's retry set, so no amount of retrying a single endpoint recovers it - the intermittency documented above cannot be retried away against one URL. It also does not match `fallback`'s `shouldThrow`, so `fallback` **advances to the next provider**. A genuinely independent second endpoint is therefore what converts that failure into a served request.
-- A genuine `execution reverted` **does** match `shouldThrow`, so a reverting call fails fast on the first endpoint instead of being replayed against every provider. Without that, every failed quote would multiply load and latency across the whole list.
+- The pruned-state errors measured above (`missing trie node`, `metadata is not found`) come back as **`-32000`**.
+  That code is **not** in viem's retry set, so no amount of retrying a single endpoint recovers it - the intermittency documented above cannot be retried away against one URL.
+  It also does not match `fallback`'s `shouldThrow`, so `fallback` **advances to the next provider**.
+  A genuinely independent second endpoint is therefore what converts that failure into a served request.
+- A genuine `execution reverted` **does** match `shouldThrow`, so a reverting call fails fast on the first endpoint instead of being replayed against every provider.
+  Without that, every failed quote would multiply load and latency across the whole list.
 
 Note viem decides the second case on the **message**, not the code: `ExecutionRevertedError.code` (3) is not in `shouldThrow`'s code list at all, only its message regex.
 That matters on Nitro, which reports many conditions under `-32000` - including reverts.

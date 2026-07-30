@@ -2,7 +2,7 @@ import { getClient } from 'wagmi/actions'
 import { RpcRequestError, createPublicClient, custom, fallback } from 'viem'
 import { describe, expect, it } from 'vitest'
 import { MAINNET_RPC_URLS, TESTNET_RPC_URLS, activeChain, robinhoodMainnet } from '../config/chain'
-import { failover, wagmiConfig } from './wagmi'
+import { FALLBACK_OPTIONS, failover, wagmiConfig } from './wagmi'
 
 // These tests pin viem's FAILOVER SEMANTICS, not our code. That is deliberate: the whole value of
 // the fallback transport in src/lib/wagmi.ts rests on exactly which errors make viem advance to the
@@ -37,10 +37,13 @@ function serving(result: unknown, log: string[], name: string) {
   })
 }
 
+// FALLBACK_OPTIONS is imported from wagmi.ts rather than restated, so these assertions describe the
+// transport the app actually ships. An earlier version passed `retryCount: 0` here while production
+// used viem's default of 3, which meant the tests could not have caught a retry-behaviour change.
 const clientOver = (transports: ReturnType<typeof custom>[]) =>
   createPublicClient({
     chain: robinhoodMainnet,
-    transport: fallback(transports, { rank: false, retryCount: 0 }),
+    transport: fallback(transports, FALLBACK_OPTIONS),
   })
 
 describe('fallback transport behaviour on real Robinhood Chain errors', () => {

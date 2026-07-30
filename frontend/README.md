@@ -32,11 +32,30 @@ Copy `.env.example` to `.env.local` and fill in after the contracts + subgraph a
 | Var | Meaning |
 | --- | --- |
 | `VITE_CHAIN_ID` | `4663` (mainnet) or `46630` (testnet, default) |
-| `VITE_RPC_URL` | JSON-RPC endpoint (falls back to the chain's public RPC) |
+| `VITE_RPC_URL` | Preferred JSON-RPC endpoint. Optional; the chain's public RPC is always the last resort |
+| `VITE_RPC_URL_2` | Optional independent SECOND provider, tried only when the first fails |
+| `VITE_QUOTER_ADDRESS` | The platform's own `QuoterV2`. Optional; without it the swap page falls back to a labelled `slot0` estimate |
+| `VITE_WETH9_ADDRESS` | Canonical WETH9. Optional; selected per `VITE_CHAIN_ID`, since mainnet and testnet WETH9 differ |
 | `VITE_FACTORY_ADDRESS` | `LaunchpadFactory` address (see `docs/deploy.md`) |
 | `VITE_GRADUATION_MANAGER_ADDRESS` | `GraduationManager` address |
 | `VITE_SWAP_ROUTER_ADDRESS` | The platform's own Uniswap V3 `SwapRouter` (enables the swap page) |
 | `VITE_SUBGRAPH_URL` | GraphQL endpoint of the self-hosted graph-node (see `../subgraph/README.md`) |
+
+### RPC endpoints and failover
+
+The two RPC vars are tried in strict order: `VITE_RPC_URL`, then `VITE_RPC_URL_2`, then the chain's
+documented public endpoint, deduplicated.
+They are wired into viem's `fallback` transport with ranking off, so a healthy first endpoint serves
+every request and the others exist only for failure (`src/lib/wagmi.ts`).
+
+Setting `VITE_RPC_URL_2` matters more than it looks.
+The official endpoint is a pool of nodes with differing history retention, so a historical read can
+miss on one provider and succeed on another - see `docs/rpc-capability.md`.
+A single endpoint cannot recover from that, because the error it returns is not one viem retries.
+
+> ⚠️ **Both RPC vars ship inside the browser bundle and cannot hold a secret.**
+> Every `VITE_`-prefixed value is baked into the built JS and is public.
+> Use a domain-allowlisted key or a proxy for anything metered.
 
 Until `VITE_FACTORY_ADDRESS` is a real address the app runs in **preview mode**: a banner shows and
 trading/creation are disabled instead of firing doomed calls.

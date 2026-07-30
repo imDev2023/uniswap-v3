@@ -50,13 +50,3 @@ export function resolveRpcUrls({ primary, secondary, publicDefault }: RpcEndpoin
   if (urls.length === 0) throw new Error('resolveRpcUrls: no usable RPC endpoint')
   return urls
 }
-
-/**
- * True when the resolved list gives real failover, i.e. more than one distinct endpoint.
- *
- * Worth stating explicitly because a single-entry `fallback` is NOT failover: viem forces
- * `retryCount: 0` on the inner transports and retries from the first one, so one URL wrapped in
- * `fallback` behaves exactly like a bare `http()`. The UI uses this to avoid claiming redundancy it
- * does not have.
- */
-export const hasFailover = (urls: string[]): boolean => urls.length > 1

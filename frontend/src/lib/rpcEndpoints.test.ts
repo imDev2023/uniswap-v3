@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasFailover, resolveRpcUrls } from './rpcEndpoints'
+import { resolveRpcUrls } from './rpcEndpoints'
 
 const PUBLIC = 'https://rpc.mainnet.chain.robinhood.com'
 const ALCHEMY = 'https://robinhood-mainnet.g.alchemy.com/v2/key'
@@ -60,20 +60,12 @@ describe('resolveRpcUrls', () => {
     // An empty transport list fails inside viem, far from the misconfiguration that caused it.
     expect(() => resolveRpcUrls({ publicDefault: '  ' })).toThrow(/no usable RPC endpoint/)
   })
-})
 
-describe('hasFailover', () => {
-  it('is false for a single endpoint', () => {
-    // One URL wrapped in viem's fallback is NOT redundancy: fallback forces retryCount 0 on the
-    // inner transports and retries from the first, so it behaves like a bare http().
-    expect(hasFailover(resolveRpcUrls({ publicDefault: PUBLIC }))).toBe(false)
-  })
-
-  it('is true once a genuinely different endpoint is configured', () => {
-    expect(hasFailover(resolveRpcUrls({ primary: ALCHEMY, publicDefault: PUBLIC }))).toBe(true)
-  })
-
-  it('is false when the configured primary only duplicates the public endpoint', () => {
-    expect(hasFailover(resolveRpcUrls({ primary: PUBLIC, publicDefault: PUBLIC }))).toBe(false)
+  it('yields a single endpoint when nothing distinct is configured', () => {
+    // Recorded because one URL wrapped in viem's fallback is NOT redundancy: fallback forces
+    // retryCount 0 on the inner transports and retries from the first, so it behaves like a bare
+    // http(). Failover only begins to exist at length 2.
+    expect(resolveRpcUrls({ primary: PUBLIC, publicDefault: PUBLIC })).toHaveLength(1)
+    expect(resolveRpcUrls({ primary: ALCHEMY, publicDefault: PUBLIC })).toHaveLength(2)
   })
 })

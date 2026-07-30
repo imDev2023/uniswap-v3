@@ -10,6 +10,10 @@ contracts/broadcast/
 # secrets / env
 .env
 .env.*
+# ...but the template is documentation, not a secret. Without this exception `.env.*` swallowed
+# frontend/.env.example, so a fresh clone had nothing to copy and the README's "copy .env.example
+# to .env.local" instruction could not be followed.
+!.env.example
 *.local
 
 # os

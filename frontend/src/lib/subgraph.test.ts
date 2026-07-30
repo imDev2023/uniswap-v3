@@ -17,9 +17,14 @@ describe('subgraph queries', () => {
     expect(TOKEN_QUERY).toContain('pool')
   })
 
-  it('tokens list filters by graduation and orders newest-first', () => {
+  it('tokens list filters by graduation and takes its ordering from a variable', () => {
+    // orderBy became a VARIABLE in build #28. The board is paged, so a hardcoded
+    // createdAtTimestamp would mean every sort mode ranked only the newest page: a curve at 95%
+    // older than that window could never appear under "Closest".
     expect(TOKENS_QUERY).toContain('graduated: $graduated')
-    expect(TOKENS_QUERY).toContain('orderBy: createdAtTimestamp')
+    expect(TOKENS_QUERY).toContain('$orderBy: Token_orderBy!')
+    expect(TOKENS_QUERY).toContain('orderBy: $orderBy')
+    expect(TOKENS_QUERY).not.toContain('orderBy: createdAtTimestamp')
     expect(TOKENS_QUERY).toContain('orderDirection: desc')
   })
 

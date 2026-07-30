@@ -1,4 +1,4 @@
-import type { TokenRow } from './subgraph'
+import type { TokenOrderBy, TokenRow } from './subgraph'
 
 /**
  * Board sort modes. `new` is the default because a launchpad's core promise is "something just
@@ -15,6 +15,25 @@ export const SORT_MODES: { id: SortMode; label: string; title: string }[] = [
 ]
 
 export const DEFAULT_SORT: SortMode = 'new'
+
+/**
+ * Which subgraph field each mode orders by SERVER-side.
+ *
+ * The board is paged, so this is what makes a sort correct rather than cosmetic: ordering the query
+ * newest-first and re-sorting the returned page would rank only the newest N launches, and the
+ * curve at 95% that happens to be older than that window would never surface under "Closest".
+ * `sortTokens` still runs over the result, but only to apply the deterministic tiebreak.
+ */
+const ORDER_BY: Record<SortMode, TokenOrderBy> = {
+  new: 'createdAtTimestamp',
+  progress: 'progressBps',
+  volume: 'volumeEth',
+  trades: 'tradeCount',
+}
+
+export function orderByFor(mode: SortMode): TokenOrderBy {
+  return ORDER_BY[mode] ?? ORDER_BY[DEFAULT_SORT]
+}
 
 /** Narrow an arbitrary string (URL param, stored preference) to a real mode. */
 export function parseSortMode(raw: string | null | undefined): SortMode {

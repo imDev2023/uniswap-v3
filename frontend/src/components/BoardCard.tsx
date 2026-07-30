@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { TokenRow } from '../lib/subgraph'
 import { getTokenImage } from '../lib/tokenMeta'
-import { formatAge, formatEth } from '../lib/format'
+import { formatAge, formatEth, formatPercent } from '../lib/format'
 import { heatColor, heatPercent, meterWidthPercent } from '../lib/heat'
 import { Avatar } from './Avatar'
 import { Price } from './Price'
@@ -14,7 +14,16 @@ import { Price } from './Price'
  * figure attached. Here progress is the visual centre, carrying both length and heat colour, and
  * the supporting numbers are compressed into a single footer row.
  */
-export function BoardCard({ token, now }: { token: TokenRow; now: number }) {
+export function BoardCard({
+  token,
+  now,
+  isNew = false,
+}: {
+  token: TokenRow
+  now: number
+  /** Arrived since the last poll - animates in so a changing board is noticeable. */
+  isNew?: boolean
+}) {
   const image = getTokenImage(token.id)
   const pct = heatPercent(token.progressBps)
   const heat = heatColor(token.progressBps)
@@ -23,7 +32,7 @@ export function BoardCard({ token, now }: { token: TokenRow; now: number }) {
   return (
     <Link
       to={`/token/${token.id}`}
-      className={`tcard${token.graduated ? ' tcard-graduated' : ''}`}
+      className={`tcard${token.graduated ? ' tcard-graduated' : ''}${isNew ? ' tcard-new' : ''}`}
       // Drives the top hairline, the meter fill and the percentage label from one value, so they
       // can never disagree about how hot this curve is.
       style={{ '--heat': heat } as React.CSSProperties}
@@ -92,9 +101,10 @@ export function BoardCard({ token, now }: { token: TokenRow; now: number }) {
   )
 }
 
-/** Whole percents once past 1%, one decimal below it, so a 0.3% position is not shown as "0%". */
+/**
+ * Whole percents once past 1%, one decimal below it, so a sub-1% position is not shown as "0%".
+ * Delegates the actual formatting to lib/format so there is one percentage renderer in the app.
+ */
 function formatPct(pct: number): string {
-  if (pct === 0) return '0%'
-  if (pct < 1) return `${pct.toFixed(1)}%`
-  return `${Math.round(pct)}%`
+  return formatPercent(pct / 100, pct > 0 && pct < 1 ? 1 : 0)
 }

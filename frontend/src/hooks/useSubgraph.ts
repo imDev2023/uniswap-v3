@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import type { TokenOrderBy } from '../lib/subgraph'
 import {
   fetchActiveTokens,
   fetchFactory,
@@ -14,11 +15,27 @@ import {
 
 const LIVE_REFETCH_MS = 5_000
 
-export function useActiveTokens() {
+/**
+ * How many live curves the board asks for. Exported so the page can tell "this is everything" from
+ * "this is the first page" and label the count honestly rather than presenting a capped number as
+ * the total.
+ */
+export const BOARD_PAGE_SIZE = 50
+
+/**
+ * Live curves for the board.
+ *
+ * `orderBy` is part of the query key AND the request: the board is paged, so changing sort has to
+ * re-ask the server for a different top N, not just reshuffle the page already in hand.
+ * `placeholderData` keeps the previous page on screen while the new one loads, so switching sort
+ * does not flash the whole board through a skeleton.
+ */
+export function useActiveTokens(orderBy: TokenOrderBy = 'createdAtTimestamp') {
   return useQuery({
-    queryKey: ['activeTokens'],
-    queryFn: () => fetchActiveTokens(),
+    queryKey: ['activeTokens', orderBy],
+    queryFn: () => fetchActiveTokens(BOARD_PAGE_SIZE, orderBy),
     refetchInterval: LIVE_REFETCH_MS,
+    placeholderData: keepPreviousData,
   })
 }
 

@@ -375,6 +375,16 @@ code {
 .ticker::-webkit-scrollbar {
   display: none;
 }
+/* Degraded ticker: same shell, no celebration colour. It must not look like a graduation. */
+.ticker-degraded {
+  background: none;
+  border-color: var(--border);
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+}
+.ticker-degraded .ticker-label {
+  color: var(--text-dim);
+}
 .ticker-label {
   display: flex;
   align-items: center;
@@ -777,6 +787,36 @@ code {
   text-align: right;
 }
 
+/* --- arrivals ----------------------------------------------------------------------------- */
+/* The board is dense and polls every five seconds, so without a cue new trades and new launches
+   just appear and are missed. Both animations run ONCE on arrival and are purely additive, so the
+   reduced-motion rule at the top of this file disables them safely. */
+.trade-row-new {
+  animation: arrive-row 1.1s var(--ease) 1;
+}
+@keyframes arrive-row {
+  0% {
+    background: rgba(41, 229, 154, 0.22);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.tcard-new {
+  animation: arrive-card 1.4s var(--ease) 1;
+}
+@keyframes arrive-card {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+}
+
 /* --- empty / degraded -------------------------------------------------------------------- */
 /* These are product states, not error pages. An unstyled paragraph in the middle of a designed
    board reads as breakage even when the message says everything is fine. */
@@ -854,60 +894,7 @@ code {
   margin-top: 6px;
 }
 
-/* --- legacy home classes (still referenced by other pages) -------------------------------- */
-.hero {
-  margin-bottom: var(--s-8);
-}
-.hero h1 {
-  font-size: var(--fs-2xl);
-  margin: 0 0 var(--s-2);
-  letter-spacing: -0.02em;
-}
-.hero p {
-  color: var(--text-dim);
-  max-width: 620px;
-  margin: 0;
-}
-.stat-row {
-  display: flex;
-  gap: 28px;
-  margin-top: var(--s-5);
-  flex-wrap: wrap;
-}
-.stat .stat-value {
-  font-family: var(--mono);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-}
-.stat .stat-label {
-  font-size: var(--fs-sm);
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.token-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: var(--s-4);
-}
-
-.token-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--s-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  transition:
-    border-color var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
-}
-.token-card:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-2px);
-}
+/* --- shared token identity (token page, swap page) ---------------------------------------- */
 .token-head {
   display: flex;
   align-items: center;
@@ -933,10 +920,6 @@ code {
   height: 30px;
   border-radius: 7px;
   font-size: var(--fs-xs);
-}
-.token-name {
-  font-weight: 600;
-  line-height: 1.2;
 }
 .token-symbol {
   color: var(--text-faint);

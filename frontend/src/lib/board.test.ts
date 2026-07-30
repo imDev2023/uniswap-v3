@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SORT, parseSortMode, sortTokens } from './board'
+import { DEFAULT_SORT, orderByFor, parseSortMode, sortTokens } from './board'
 import type { TokenRow } from './subgraph'
 
 function token(over: Partial<TokenRow> & { id: string }): TokenRow {
@@ -33,6 +33,23 @@ describe('parseSortMode', () => {
     expect(parseSortMode('nonsense')).toBe(DEFAULT_SORT)
     expect(parseSortMode(null)).toBe(DEFAULT_SORT)
     expect(parseSortMode(undefined)).toBe(DEFAULT_SORT)
+  })
+})
+
+describe('orderByFor', () => {
+  it('maps every sort mode to the subgraph field the SERVER must order by', () => {
+    // The board is paged, so this mapping is what makes a sort correct rather than cosmetic: order
+    // the query newest-first and re-sort the page, and a 95% curve outside the newest N never
+    // surfaces under "Closest".
+    expect(orderByFor('new')).toBe('createdAtTimestamp')
+    expect(orderByFor('progress')).toBe('progressBps')
+    expect(orderByFor('volume')).toBe('volumeEth')
+    expect(orderByFor('trades')).toBe('tradeCount')
+  })
+
+  it('falls back to the default rather than sending an undefined orderBy', () => {
+    // An unknown orderBy is a hard query error from graph-node, which would blank the whole board.
+    expect(orderByFor('bogus' as never)).toBe(orderByFor(DEFAULT_SORT))
   })
 })
 

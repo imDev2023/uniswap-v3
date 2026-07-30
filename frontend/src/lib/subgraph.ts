@@ -80,6 +80,13 @@ export interface FactoryRow {
   totalRaisedEth: string
 }
 
+/**
+ * Token fields the board can order by, server-side. Narrowed to the four the sort control exposes
+ * rather than mirroring graph-node's whole `Token_orderBy` enum: an unsupported value is a query
+ * error at runtime, so the type is the guard.
+ */
+export type TokenOrderBy = 'createdAtTimestamp' | 'progressBps' | 'volumeEth' | 'tradeCount'
+
 // --- queries ---
 
 const TOKEN_FIELDS = gql`
@@ -105,12 +112,16 @@ const TOKEN_FIELDS = gql`
   }
 `
 
+// `orderBy` is a VARIABLE, not a constant, because the board pages this query. Ordering
+// newest-first here and re-sorting the returned window client-side would rank only the 50 newest
+// launches: the 51st-newest curve sitting at 95% would never appear under "Closest", which is the
+// one view where it matters most. Letting the server order means each mode gets the true top N.
 export const TOKENS_QUERY = gql`
   ${TOKEN_FIELDS}
-  query Tokens($first: Int!, $graduated: Boolean) {
+  query Tokens($first: Int!, $graduated: Boolean, $orderBy: Token_orderBy!) {
     tokens(
       first: $first
-      orderBy: createdAtTimestamp
+      orderBy: $orderBy
       orderDirection: desc
       where: { graduated: $graduated }
     ) {
@@ -249,10 +260,14 @@ export const FACTORY_QUERY = gql`
 
 // --- fetchers ---
 
-export async function fetchActiveTokens(first = 50): Promise<TokenRow[]> {
+export async function fetchActiveTokens(
+  first = 50,
+  orderBy: TokenOrderBy = 'createdAtTimestamp',
+): Promise<TokenRow[]> {
   const data = await subgraphClient.request<{ tokens: TokenRow[] }>(TOKENS_QUERY, {
     first,
     graduated: false,
+    orderBy,
   })
   return data.tokens
 }

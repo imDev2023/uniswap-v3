@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { RecentTradeRow, TokenRow } from '../lib/subgraph'
 
@@ -160,6 +160,31 @@ describe('HomePage board', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New' }))
     expect(boardOrder()).toEqual(['QUIET', 'DIAMOND', 'RDOGE'])
+  })
+
+  it('re-queries the server when the sort changes, rather than reshuffling one page', async () => {
+    await renderHome()
+    await screen.findByText('RDOGE')
+    expect(fetchActiveTokens).toHaveBeenCalledWith(50, 'createdAtTimestamp')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Closest' }))
+    // The board is paged: without a server-side orderBy, a 95% curve outside the newest page could
+    // never appear under "Closest" no matter how the client sorts.
+    await waitFor(() => expect(fetchActiveTokens).toHaveBeenCalledWith(50, 'progressBps'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Volume' }))
+    await waitFor(() => expect(fetchActiveTokens).toHaveBeenCalledWith(50, 'volumeEth'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Busiest' }))
+    await waitFor(() => expect(fetchActiveTokens).toHaveBeenCalledWith(50, 'tradeCount'))
+  })
+
+  it('keeps graduations visible as a labelled notice when only that query fails', async () => {
+    fetchGraduatedTokens.mockRejectedValue(SUBGRAPH_DOWN)
+    await renderHome()
+    await screen.findByText('RDOGE')
+    // Vanishing silently would claim nothing has ever graduated.
+    expect(await screen.findByText(/unavailable - the indexer is unreachable/i)).toBeInTheDocument()
   })
 
   it('marks the active sort for assistive tech, not just visually', async () => {

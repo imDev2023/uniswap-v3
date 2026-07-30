@@ -20,22 +20,6 @@ export function formatTokenAmount(wei: bigint, maxDecimals = 2): string {
 }
 
 /**
- * ETH price per whole token from a priceX18 (ETH-per-token scaled by 1e18). These prices are tiny
- * (e.g. ~3.75e-8 ETH), so render with enough precision or in exponential form.
- *
- * @deprecated Prefer {@link formatPriceParts} for anything a user reads. Exponential notation is
- * unreadable at a glance and, because launchpad prices are essentially always below the 1e-6
- * threshold, it was the format on EVERY price on the board. Kept only for chart tooltips and
- * non-visual callers that want a single flat string.
- */
-export function formatPriceX18(priceX18: bigint): string {
-  const price = Number(priceX18) / 1e18
-  if (price === 0) return '0'
-  if (price < 1e-6) return price.toExponential(3)
-  return trimNumber(price, 9)
-}
-
-/**
  * A price broken into renderable pieces. `subzero` is the compact leading-zero notation used across
  * DEX UIs: 0.0₁₀3125 means "0.", then ten zeros, then the significant digits - far easier to compare
  * at a glance than 3.125e-11, and it keeps prices sortable by eye down a column.
@@ -118,9 +102,8 @@ export function formatPriceCompactText(priceX18: bigint): string {
 /**
  * Compact relative age, e.g. "12s", "5m", "3h", "2d".
  *
- * @dev `now` is injected rather than read from Date.now() inside, so the board's ages are testable
- *      and so every row in one render shares a single clock - computing "now" per row makes a long
- *      list drift against itself.
+ * @dev `now` is injected rather than read from Date.now() inside, so ages are testable and so every
+ *      row in one render shares a single clock. See {@link useNowSeconds} for why that matters.
  *
  *      Chain timestamps can sit slightly ahead of the browser clock (block timestamps have ~1s of
  *      slack, and users' clocks are not synchronised), which would otherwise render as a negative

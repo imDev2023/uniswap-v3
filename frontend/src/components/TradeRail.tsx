@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import type { RecentTradeRow } from '../lib/subgraph'
 import { formatAge, formatEth } from '../lib/format'
+import { useArrivals } from '../hooks/useArrivals'
 import { Notice } from './Notice'
 
 /**
@@ -22,6 +24,11 @@ export function TradeRail({
   isError: boolean
   isLoading: boolean
 }) {
+  // Memoised: useArrivals depends on this array's identity, and a fresh array every render would
+  // re-run its effect on every tick of the shared clock.
+  const ids = useMemo(() => (trades ?? []).map((t) => t.id), [trades])
+  const arrivals = useArrivals(ids)
+
   return (
     <aside className="rail" aria-label="Recent trades">
       <div className="rail-head">
@@ -44,7 +51,11 @@ export function TradeRail({
       ) : (
         <div className="rail-scroll">
           {trades.map((t) => (
-            <Link key={t.id} to={`/token/${t.token.id}`} className="trade-row">
+            <Link
+              key={t.id}
+              to={`/token/${t.token.id}`}
+              className={`trade-row${arrivals.has(t.id) ? ' trade-row-new' : ''}`}
+            >
               <span className={`trade-side ${t.type === 'BUY' ? 'trade-side-buy' : 'trade-side-sell'}`}>
                 {t.type === 'BUY' ? 'buy' : 'sell'}
               </span>

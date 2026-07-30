@@ -10,8 +10,30 @@ import { formatAge, formatEth } from '../lib/format'
  * still the product's proudest moment (liquidity locked forever), so it keeps a distinct, celebratory
  * treatment; it just no longer outranks the board.
  */
-export function GraduationTicker({ tokens, now }: { tokens: TokenRow[]; now: number }) {
-  if (tokens.length === 0) return null
+export function GraduationTicker({
+  tokens,
+  now,
+  isError,
+}: {
+  tokens: TokenRow[] | undefined
+  now: number
+  isError?: boolean
+}) {
+  // Rendering nothing on failure would claim "nothing has graduated", which is exactly the lie the
+  // Stage 2 degradation rule exists to prevent: every indexed panel says why it is empty rather
+  // than silently vanishing. An empty list, by contrast, IS the honest answer on a fresh chain.
+  if (isError) {
+    return (
+      <div className="ticker ticker-degraded">
+        <span className="ticker-label">Graduated</span>
+        <span className="ticker-meta">
+          Unavailable - the indexer is unreachable. Trading still works.
+        </span>
+      </div>
+    )
+  }
+
+  if (!tokens || tokens.length === 0) return null
 
   return (
     <div className="ticker">

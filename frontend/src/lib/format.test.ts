@@ -6,7 +6,6 @@ import {
   formatEth,
   formatPercent,
   formatPriceParts,
-  formatPriceX18,
   formatTokenAmount,
   priceEthPerToken,
   shortAddress,
@@ -31,17 +30,6 @@ describe('formatTokenAmount', () => {
   })
   it('shows small amounts directly', () => {
     expect(formatTokenAmount(42n * 10n ** 18n)).toBe('42')
-  })
-})
-
-describe('formatPriceX18', () => {
-  it('renders tiny prices in exponential form', () => {
-    // 3.75e-8 ETH per token expressed as priceX18
-    const priceX18 = 37_500_000_000n // 3.75e-8 * 1e18
-    expect(formatPriceX18(priceX18)).toBe('3.750e-8')
-  })
-  it('renders zero as 0', () => {
-    expect(formatPriceX18(0n)).toBe('0')
   })
 })
 

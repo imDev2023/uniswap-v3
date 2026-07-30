@@ -13,7 +13,12 @@ after graduation**. Built as a React + Vite SPA per the spec's frontend decision
   links to the swap page.
 - **Swap** (`/swap/:address`) — trade a graduated TOKEN/WETH pool through the platform's own
   Uniswap V3 `SwapRouter` (#21).
-- **Explore** (`/`) — a "just graduated" feed, live curves, and protocol rollups from the subgraph.
+- **Board** (`/`) — the live-curve board (#28). Curves lead the page, sortable by New / Closest /
+  Volume / Busiest; graduations run as a ticker above it and a cross-launch live trade feed sits
+  alongside. The sort drives the subgraph query's `orderBy`, not just the rendered order, because
+  the board is paged: ranking one page client-side would hide a nearly-graduated curve that happens
+  to be older than the newest N. Every panel here is indexer-derived discovery and degrades to its
+  own labelled notice; trading never depends on this page.
 
 ## Stack
 

@@ -2,14 +2,16 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { isLaunchpadConfigured } from '../config/contracts'
 import {
+  BOARD_PAGE_SIZE,
   useActiveTokens,
   useFactoryStats,
   useGraduatedTokens,
   useRecentTrades,
 } from '../hooks/useSubgraph'
 import { useNowSeconds } from '../hooks/useNowSeconds'
+import { useArrivals } from '../hooks/useArrivals'
 import { formatEth } from '../lib/format'
-import { DEFAULT_SORT, SORT_MODES, sortTokens, type SortMode } from '../lib/board'
+import { DEFAULT_SORT, SORT_MODES, orderByFor, sortTokens, type SortMode } from '../lib/board'
 import { BoardCard } from '../components/BoardCard'
 import { GraduationTicker } from '../components/GraduationTicker'
 import { TradeRail } from '../components/TradeRail'
@@ -28,16 +30,29 @@ import { Notice } from '../components/Notice'
  * degrades to its own labelled notice. Trading never depends on this page.
  */
 export function HomePage() {
-  const { data: tokens, isLoading, isError } = useActiveTokens()
-  const { data: graduated } = useGraduatedTokens()
+  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT)
+
+  // The sort drives the QUERY, not just the rendered order: the board is paged, so ranking has to
+  // happen server-side or "Closest" would only ever rank the newest page.
+  const { data: tokens, isLoading, isError } = useActiveTokens(orderByFor(sort))
+  const { data: graduated, isError: graduatedError } = useGraduatedTokens()
   const { data: stats } = useFactoryStats()
   const { data: trades, isError: tradesError, isLoading: tradesLoading } = useRecentTrades()
-  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT)
 
   // One clock for the whole render, so every age on the page agrees with every other.
   const now = useNowSeconds()
 
+  // The server has already ranked these; sortTokens only applies the deterministic tiebreak so
+  // equal-keyed rows (nine untraded launches from one block) hold still between polls.
   const sorted = useMemo(() => sortTokens(tokens ?? [], sort), [tokens, sort])
+
+  // New launches flash in, so a board that changes while you are looking at it says so.
+  const boardIds = useMemo(() => sorted.map((t) => t.id), [sorted])
+  const arrivals = useArrivals(boardIds)
+
+  // The factory rollup knows the real total; `sorted.length` is only the page we asked for.
+  const liveTotal = stats ? stats.launchCount - stats.graduationCount : undefined
+  const boardCount = sorted.length >= BOARD_PAGE_SIZE && liveTotal ? liveTotal : sorted.length
 
   return (
     <>
@@ -60,14 +75,14 @@ export function HomePage() {
           </div>
           <div>
             <div className="mstat-value num">
-              {stats ? formatEth(BigInt(stats.totalVolumeEth)) : '—'}
+              {stats ? formatEth(BigInt(stats.totalVolumeEth)) : '-'}
             </div>
             <div className="mstat-label">Volume (ETH)</div>
           </div>
         </div>
       </section>
 
-      {graduated && graduated.length > 0 && <GraduationTicker tokens={graduated} now={now} />}
+      <GraduationTicker tokens={graduated} now={now} isError={graduatedError} />
 
       <div className="board-layout">
         <main>
@@ -75,7 +90,7 @@ export function HomePage() {
             <h2 className="board-title">
               <span className="live-dot" aria-hidden="true" />
               Live curves
-              {sorted.length > 0 && <span className="board-count">{sorted.length}</span>}
+              {sorted.length > 0 && <span className="board-count">{boardCount}</span>}
             </h2>
             <div className="sorts" role="group" aria-label="Sort live curves">
               {SORT_MODES.map((m) => (
@@ -121,7 +136,7 @@ export function HomePage() {
           ) : (
             <div className="board-grid">
               {sorted.map((t) => (
-                <BoardCard key={t.id} token={t} now={now} />
+                <BoardCard key={t.id} token={t} now={now} isNew={arrivals.has(t.id)} />
               ))}
             </div>
           )}

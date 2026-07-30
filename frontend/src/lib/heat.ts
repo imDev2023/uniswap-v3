@@ -26,9 +26,10 @@ export function heatPercent(progressBps: number): number {
 }
 
 /**
- * Bars below this are widened to a visible stub. A curve with a real but tiny position (0.3% on
- * RUGPRF) would otherwise render as an empty track, indistinguishable from a launch that has never
- * traded - two genuinely different states that must not look identical.
+ * Bars below this are widened to a visible stub. A curve with a real but sub-1.5% position would
+ * otherwise render as an empty track, indistinguishable from a launch that has never traded - two
+ * genuinely different states that must not look identical. (The seeded RUGPRF sits at 3%, above
+ * this threshold; the case this guards is the first buy on a fresh curve.)
  */
 const MIN_VISIBLE_PCT = 1.5
 

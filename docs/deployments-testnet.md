@@ -456,3 +456,44 @@ EXPECTED_CHAIN_ID=46630 WETH9=0x7943e237c7F95DA44E0301572D358911207852Fa \
   forge script script/DeployLaunchpad.s.sol \
   --rpc-url robinhood_testnet --broadcast --non-interactive --private-key $PRIVATE_KEY
 ```
+
+## Seeding a board to look at (build #28)
+
+`contracts/script/SeedTestnet.s.sol` populates the launchpad with a realistic spread of launches.
+It exists because the live board (Stage 3) is a density problem: against a single graduated token
+the board renders as one card in an empty grid, which proves nothing about layout, sort order,
+progress meters or the trade feed.
+It seeds the **chain**, not fixtures, so what the UI shows is real contract state.
+
+⚠️ **Testnet only.** The script hard-reverts on mainnet 4663.
+It spends real ETH across seven keys and creates permanent, unremovable launches, and `metadataURI`
+has no setter by design, so a stray mainnet run would be public forever.
+
+```bash
+export PATH="$HOME/.foundry/bin:$PATH"
+cd contracts
+export LAUNCHPAD=0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7
+
+# Create the launch table and buy each curve up to its target progress.
+forge script script/SeedTestnet.s.sol:SeedTestnet --sig 'run()' \
+  --rpc-url robinhood_testnet --broadcast --slow
+
+# Trade a little on every live curve, to refresh "recent trades" while iterating on the feed.
+# Safe to repeat; it never buys enough to graduate anything.
+forge script script/SeedTestnet.s.sol:SeedTestnet --sig 'churn()' \
+  --rpc-url robinhood_testnet --broadcast --slow
+```
+
+`--slow` matters: it waits for each transaction to land before sending the next.
+Without it, nonce-ordered submission on a 0.3 s-block chain can have a buy arrive before the
+creation it depends on.
+
+The spread deliberately includes the cases design forgets: a launch with **no** metadata URI (the
+common case, since v1 is bring-your-own-URI), a launch whose `ipfs://` URI does **not** resolve, an
+**untraded** launch at 0% (also the regression guard for the `priceX18 = 0` bug fixed in #24), one
+launch that **graduates** on its crossing buy, and curves at both ends of the progress meter.
+Buy amounts are derived from the curve's own invariant rather than a hardcoded table, so the script
+stays correct if the testnet calibration is re-scaled with `setCurveParams`.
+
+The 2026-07-30 run created 11 launches (total cost ~0.47 ETH across the six `TEST_PK_*` wallets),
+taking the factory to 12 launches / 2 graduations / 23 trades.

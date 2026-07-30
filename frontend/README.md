@@ -8,11 +8,13 @@ after graduation**. Built as a React + Vite SPA per the spec's frontend decision
   `LaunchpadFactory.createLaunch(name, symbol, metadataURI)`. The metadata URI is written to the token
   contract and is permanent; v1 is "bring your own URI" (uploading on the creator's behalf needs a
   pinning key that cannot live in a Vite bundle). The separate image field is a local-only preview.
-- **Curve** (`/token/:address`) — live price chart + graduation progress from the subgraph, an
-  on-chain-quoted buy/sell panel, and transparent creator + holder positions. After graduation it
-  links to the swap page.
+- **Curve** (`/token/:address`) - a time-proportional stepped price chart + graduation progress from
+  the subgraph, an on-chain-quoted buy/sell panel with pay/receive legs, a per-token live trade feed,
+  and transparent creator + holder positions. Once the curve closes, the rail collapses to a single
+  "Graduated" card carrying the pool facts and the route to the swap page (#29).
 - **Swap** (`/swap/:address`) — trade a graduated TOKEN/WETH pool through the platform's own
-  Uniswap V3 `SwapRouter` (#21).
+  Uniswap V3 `SwapRouter` (#21), with pool facts (spot price, fee tier, locked liquidity) read
+  straight from RPC so they survive an indexer outage (#29).
 - **Board** (`/`) — the live-curve board (#28). Curves lead the page, sortable by New / Closest /
   Volume / Busiest; graduations run as a ticker above it and a cross-launch live trade feed sits
   alongside. The sort drives the subgraph query's `orderBy`, not just the rendered order, because
@@ -25,7 +27,13 @@ after graduation**. Built as a React + Vite SPA per the spec's frontend decision
 - **wagmi + viem** — wallet (browser-injected connector only in v1) and contract reads/writes.
 - **@tanstack/react-query** — data fetching + live polling (curve state refreshes every ~5s).
 - **graphql-request** — reads the Build 08 subgraph (`../subgraph`), the canonical data layer.
-- **recharts** — the curve price chart.
+- **lightweight-charts** (TradingView) - the curve price chart. Replaced recharts in #29: it is
+  built for irregular financial time series, supplies the real time scale the chart was missing, and
+  costs ~45 kB gzip less - recharts was 42% of the whole JS bundle for this one chart.
+
+  ⚠️ Its time scale is **ordinal** (one equal-width slot per point), so raw events would still render
+  evenly spaced however far apart they happened. `lib/priceSeries.ts` resamples onto a fixed time
+  grid with carry-forward prices, which is what makes screen distance mean elapsed time.
 
 Contract ABIs are minimal hand-written slices under `src/abi/` (the members the UI touches); the
 full generated ABIs live in `../subgraph/abis/`.

@@ -4,10 +4,12 @@ import { POOL_FEE_TIER, TOKEN_DECIMALS } from '../config/constants'
 // Pure swap-pricing helpers for graduated TOKEN/WETH pools. Both the LaunchToken and WETH9 are
 // 18-decimal, so the decimal adjustment between token0/token1 cancels and price ratios are direct.
 //
-// No Quoter is deployed with the platform's V3 stack (see contracts/script/DeployLaunchpad), so the
-// UI prices off the pool's live slot0 spot price and estimates output as amountIn * spot. This
-// ignores price impact — fine as a labelled estimate for a "simple swap page" (spec #8); execution
-// is protected on-chain by the slippage-derived amountOutMinimum, computed with applySlippage.
+// These helpers price off the pool's live slot0 spot price and estimate output as amountIn * spot,
+// which ignores price impact. That is the FALLBACK path: a QuoterV2 is deployed alongside the V3
+// stack (contracts/script/DeployQuoter.s.sol) and SwapPanel prefers its exact quote whenever
+// VITE_QUOTER_ADDRESS is set, labelling the spot figure as an estimate when it is not. Either way
+// execution is protected on-chain by the slippage-derived amountOutMinimum, computed with
+// applySlippage. spotPriceFromSqrtX96 is also what PoolFacts shows as the headline pool price.
 
 const Q96 = 2 ** 96
 

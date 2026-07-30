@@ -300,6 +300,22 @@ code {
   border-radius: var(--radius);
   padding: var(--s-5);
 }
+/* A card whose children own their own padding - feed rows and section heads that must run edge to
+   edge so their dividers meet the border instead of stopping short of it. */
+.card-flush {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+/* Full-width call to action. Was three repeated inline styles (block/centre/margin) on every
+   button that needed it. */
+.btn-block {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
 
 .section-title {
   font-size: var(--fs-sm);
@@ -709,9 +725,12 @@ code {
 }
 /* The feed clips at a row boundary, which reads as "that's all of them" rather than "there is
    more". A fade over the last few pixels is the affordance that says: keep scrolling. */
-/* Scoped with :has so the fade appears only over an actual scrolling feed - it would otherwise sit
-   on top of the empty and indexer-down notices, dimming the very text explaining what happened. */
-.rail:has(.rail-scroll)::after {
+/* Gated on `data-scrollable`, set by useIsScrollable from a real overflow measurement. `:has` alone
+   only proves the scroll container exists: it still fired for a four-row feed that fits, dimming the
+   last row for no reason, and it sat on top of the empty and indexer-down notices - dimming the very
+   text explaining what happened. */
+.rail:has(.rail-scroll[data-scrollable='true'])::after,
+.card-flush:has(.rail-scroll[data-scrollable='true'])::after {
   content: '';
   position: absolute;
   left: 0;
@@ -951,6 +970,17 @@ code {
   flex-direction: column;
   gap: var(--s-5);
 }
+/* The token page's right rail. Sticks while the long left column scrolls, and releases once the
+   layout collapses to one column - a sticky element in a single-column flow just blocks the page. */
+.rail-sticky {
+  position: sticky;
+  top: 84px;
+}
+@media (max-width: 900px) {
+  .rail-sticky {
+    position: static;
+  }
+}
 
 .token-header {
   display: flex;
@@ -1148,9 +1178,183 @@ code {
 .back-link:hover {
   color: var(--text);
 }
+/* The canvas sizes itself from this box (lightweight-charts `autoSize`), so the height lives here
+   and the chart never reports a zero-height container on first paint. */
 .chart-wrap {
-  height: 260px;
-  margin: 0 -6px;
+  height: 280px;
+  width: 100%;
+}
+/* --- trade legs (buy/sell and swap) -------------------------------------------------------- */
+/* Both panels previously showed a single amount box and pushed the other side of the trade into a
+   run of text lines below, so "what am I actually getting" was the least prominent thing on a panel
+   whose entire job is to answer it. Two legs, stacked, with the direction control between them. */
+.legs {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  /* Owns the gap down to whatever follows (slippage row, or the action button directly when no
+     amount is entered yet), so the button never sits flush against the receive leg. */
+  margin-bottom: var(--s-4);
+}
+.leg {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--s-3) var(--s-4);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.leg:focus-within {
+  border-color: var(--accent-dim);
+}
+.leg-label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+.leg-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+/* The amount and the asset ticker share a baseline so the pair reads as one value, not as a field
+   with a label bolted beside it. */
+.leg-amount {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-2xl);
+  line-height: 1.2;
+  width: 100%;
+}
+.leg-amount:focus {
+  outline: none;
+}
+.leg-amount::placeholder {
+  color: var(--text-faint);
+}
+.leg-amount-out {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A quote that hasn't arrived must not look like a real zero. */
+.leg-amount-pending {
+  color: var(--text-faint);
+}
+.leg-asset {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-raised-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+}
+.leg-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+/* React renders a false branch as no node at all, so an inactive meta row is genuinely empty and
+   collapses rather than reserving a strip of dead space under every amount. */
+.leg-meta:empty {
+  display: none;
+}
+.leg-meta-right {
+  margin-left: auto;
+}
+/* Sits in the gutter between the two legs, overlapping both. */
+.leg-flip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised-2);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.leg-flip:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+
+/* --- swap page --------------------------------------------------------------------------- */
+/* Was an inline `maxWidth: 460` repeated on all four return branches of SwapPage. Slightly wider
+   now that the page carries market data above the panel rather than just an amount box. */
+.swap-layout {
+  max-width: 520px;
+  margin: 0 auto;
+}
+.swap-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+}
+/* Pool facts read as a spec sheet, so they align on a label column rather than sitting in a grid -
+   there are only four and they are scanned top to bottom, not compared across. */
+.pool-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.pool-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+.pool-fact-label {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pool-fact-value {
+  font-size: var(--fs-md);
+}
+.pool-facts-note {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+}
+
+.chart-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+/* Says what the line means. A stepped line reads as "missing data" to anyone expecting the smooth
+   curve every other DEX draws, when in fact the steps are the honest shape. */
+.chart-caption {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
 }
 .row-between {
   display: flex;

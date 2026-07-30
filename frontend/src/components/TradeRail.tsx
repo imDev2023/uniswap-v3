@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { RecentTradeRow } from '../lib/subgraph'
 import { formatAge, formatEth } from '../lib/format'
 import { useArrivals } from '../hooks/useArrivals'
+import { useIsScrollable } from '../hooks/useIsScrollable'
 import { Notice } from './Notice'
 
 /**
@@ -28,6 +29,7 @@ export function TradeRail({
   // re-run its effect on every tick of the shared clock.
   const ids = useMemo(() => (trades ?? []).map((t) => t.id), [trades])
   const arrivals = useArrivals(ids)
+  const [scrollRef, scrollable] = useIsScrollable()
 
   return (
     <aside className="rail" aria-label="Recent trades">
@@ -49,7 +51,7 @@ export function TradeRail({
           No trades yet. The first buy shows up here.
         </Notice>
       ) : (
-        <div className="rail-scroll">
+        <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>
           {trades.map((t) => (
             <Link
               key={t.id}

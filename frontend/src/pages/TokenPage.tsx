@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { activeChain } from '../config/chain'
 import { useIndexerStatus } from '../hooks/useIndexerStatus'
+import { useNowSeconds } from '../hooks/useNowSeconds'
 import { useOnchainToken } from '../hooks/useOnchainToken'
 import { useHolders, useToken, useTrades } from '../hooks/useSubgraph'
 import { parseTokenParam } from '../lib/address'
@@ -15,6 +16,7 @@ import { IndexedDataNotice } from '../components/IndexedDataNotice'
 import { OnchainTokenGate } from '../components/OnchainTokenGate'
 import { ProgressMeter } from '../components/ProgressMeter'
 import { TradePanel } from '../components/TradePanel'
+import { TokenTradeFeed } from '../components/TokenTradeFeed'
 import { HoldersCard } from '../components/HoldersCard'
 
 // Stage 2 split: the trade path (curve address, graduation state, symbol) comes from RPC, so the
@@ -28,8 +30,10 @@ export function TokenPage() {
   const indexer = useIndexerStatus()
 
   const { data: token } = useToken(tokenAddr)
-  const { data: trades } = useTrades(tokenAddr)
+  const tradesQuery = useTrades(tokenAddr)
   const { data: holders } = useHolders(tokenAddr)
+  const trades = tradesQuery.data
+  const now = useNowSeconds()
 
   if (!tokenAddr) return <p className="center-note">Invalid token address.</p>
   if (!isTradeable(onchain)) return <OnchainTokenGate token={onchain} />
@@ -76,7 +80,7 @@ export function TokenPage() {
               {indexedMissing ? (
                 <IndexedDataNotice state={indexer.state} what="Price history" />
               ) : (
-                <CurveChart trades={trades ?? []} />
+                <CurveChart trades={trades ?? []} graduated={graduated} />
               )}
             </div>
 
@@ -118,15 +122,18 @@ export function TokenPage() {
           )}
         </div>
 
-        <div className="col-stack" style={{ position: 'sticky', top: 84 }}>
-          {/* Curve address and graduation state are RPC-resolved, so this panel is unaffected by
-              indexer health — it quotes, caps and trades entirely on-chain. */}
-          <TradePanel token={tokenAddr} curve={curve} symbol={symbol} graduated={graduated} />
-
-          {graduated && (
+        <div className="col-stack rail-sticky">
+          {/* One card, not two. A graduated token used to render a "Trade" card whose entire content
+              was "curve trading is closed" directly above a "Graduated" card that said the same
+              thing and then did something useful. The state has one meaning, so it gets one card. */}
+          {graduated ? (
             <div className="card">
               <p className="section-title">Graduated</p>
-              <div className="kv-grid">
+              <p className="muted" style={{ marginTop: 0 }}>
+                Curve trading is closed. {symbol} now trades in a permanently locked V3 pool.
+              </p>
+
+              <div className="kv-grid" style={{ marginTop: 'var(--s-4)' }}>
                 {token?.graduation && (
                   <Kv
                     label="Raised"
@@ -149,20 +156,32 @@ export function TokenPage() {
                   />
                 )}
               </div>
-              <p className="hint" style={{ marginTop: 12 }}>
-                Liquidity is permanently locked.
-              </p>
+
               {onchain.status === 'graduated' && (
                 <Link
                   to={`/swap/${tokenAddr}`}
-                  className="btn btn-primary"
-                  style={{ display: 'block', textAlign: 'center', marginTop: 12 }}
+                  className="btn btn-primary btn-block"
+                  style={{ marginTop: 'var(--s-4)' }}
                 >
                   Swap {symbol} / ETH →
                 </Link>
               )}
             </div>
+          ) : (
+            /* Curve address and graduation state are RPC-resolved, so this panel is unaffected by
+               indexer health — it quotes, caps and trades entirely on-chain. */
+            <TradePanel token={tokenAddr} curve={curve} symbol={symbol} />
           )}
+
+          <TokenTradeFeed
+            trades={trades}
+            symbol={symbol}
+            now={now}
+            explorer={explorer}
+            indexerState={indexer.state}
+            isError={tradesQuery.isError}
+            isLoading={tradesQuery.isLoading}
+          />
         </div>
       </div>
     </div>

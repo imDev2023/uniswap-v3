@@ -106,7 +106,9 @@ describe('SwapPage with the indexer down', () => {
     await screen.findByRole('heading', { name: /swap meta \/ eth/i })
     // "N ETH seeded" is the one subgraph-sourced fragment on this page.
     expect(screen.queryByText(/ETH seeded/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/liquidity locked/i)).toBeInTheDocument()
+    // Everything in the pool-facts panel is RPC-derived, so it must survive the outage intact.
+    expect(screen.getByText(/locked forever/i)).toBeInTheDocument()
+    expect(screen.getByText(/pool fee/i)).toBeInTheDocument()
   })
 
   it('never asks the subgraph for anything the trade path needs', async () => {

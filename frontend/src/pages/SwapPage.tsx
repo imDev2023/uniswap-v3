@@ -5,9 +5,10 @@ import { useToken } from '../hooks/useSubgraph'
 import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
 import { getTokenImage } from '../lib/tokenMeta'
-import { explorerAddressUrl, formatEth, shortAddress } from '../lib/format'
+import { explorerAddressUrl, formatEth } from '../lib/format'
 import { Avatar } from '../components/Avatar'
 import { OnchainTokenGate } from '../components/OnchainTokenGate'
+import { PoolFacts } from '../components/PoolFacts'
 import { SwapPanel } from '../components/SwapPanel'
 
 // Stage 2: this page moves money, so every address it uses comes from RPC.
@@ -31,7 +32,7 @@ export function SwapPage() {
 
   if (onchain.status === 'on-curve') {
     return (
-      <div style={{ maxWidth: 460, margin: '0 auto' }}>
+      <div className="swap-layout">
         <Link to={`/token/${tokenAddr}`} className="back-link">
           ← Back to the curve
         </Link>
@@ -47,7 +48,7 @@ export function SwapPage() {
 
   if (onchain.status === 'graduated-pool-missing') {
     return (
-      <div style={{ maxWidth: 460, margin: '0 auto' }}>
+      <div className="swap-layout">
         <Link to={`/token/${tokenAddr}`} className="back-link">
           ← Back to {onchain.symbol}
         </Link>
@@ -68,33 +69,31 @@ export function SwapPage() {
     )
   }
 
-  const { pool, symbol } = onchain
+  const { pool, symbol, name } = onchain
   const raised = indexed?.graduation?.raisedEth
 
   return (
-    <div style={{ maxWidth: 460, margin: '0 auto' }}>
+    <div className="swap-layout">
       <Link to={`/token/${tokenAddr}`} className="back-link">
         ← Back to {symbol}
       </Link>
 
-      <div className="token-header" style={{ marginBottom: 20 }}>
+      {/* The subtitle used to be one run-on line ("Pool 0x… · liquidity locked · 0.1 ETH seeded")
+          which wrapped under the avatar at this width. The pool facts below own those details now,
+          so the header carries identity only. */}
+      <div className="token-header" style={{ marginBottom: 'var(--s-5)' }}>
         <Avatar image={getTokenImage(tokenAddr)} symbol={symbol} address={tokenAddr} />
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 22, margin: 0 }}>Swap {symbol} / ETH</h1>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 className="swap-title">Swap {symbol} / ETH</h1>
           <div className="token-symbol">
-            Pool{' '}
-            <a
-              className="link-accent"
-              href={explorerAddressUrl(explorer, pool)}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {shortAddress(pool)}
-            </a>{' '}
-            · liquidity locked
-            {raised ? ` · ${formatEth(BigInt(raised))} ETH seeded` : ''}
+            {name}
+            {raised ? ` · ${formatEth(BigInt(raised))} ETH seeded at graduation` : ''}
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 'var(--s-5)' }}>
+        <PoolFacts token={tokenAddr} symbol={symbol} pool={pool} explorer={explorer} />
       </div>
 
       <SwapPanel token={tokenAddr} symbol={symbol} pool={pool} />

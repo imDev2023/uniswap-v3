@@ -19,16 +19,16 @@ import { SlippageSelector } from './SlippageSelector'
 
 type Side = 'buy' | 'sell'
 
+// Only ever rendered for a live curve: TokenPage shows a single "Graduated" card instead once the
+// curve closes, so this panel no longer carries a graduated branch of its own.
 export function TradePanel({
   token,
   curve,
   symbol,
-  graduated,
 }: {
   token: Address
   curve: Address
   symbol: string
-  graduated: boolean
 }) {
   const { address, isConnected } = useAccount()
   const [side, setSide] = useState<Side>('buy')
@@ -46,14 +46,14 @@ export function TradePanel({
     abi: bondingCurveAbi,
     functionName: 'quoteBuy',
     args: enabled && side === 'buy' ? [parsed] : undefined,
-    query: { enabled: enabled && side === 'buy' && !graduated },
+    query: { enabled: enabled && side === 'buy' },
   })
   const { data: sellQuote } = useReadContract({
     address: curve,
     abi: bondingCurveAbi,
     functionName: 'quoteSell',
     args: enabled && side === 'sell' ? [parsed] : undefined,
-    query: { enabled: enabled && side === 'sell' && !graduated },
+    query: { enabled: enabled && side === 'sell' },
   })
 
   // --- anti-snipe context ---
@@ -61,7 +61,6 @@ export function TradePanel({
     address: curve,
     abi: bondingCurveAbi,
     functionName: 'buyCapActive',
-    query: { enabled: !graduated },
   })
   const { data: maxBuy } = useReadContract({
     address: curve,
@@ -75,7 +74,7 @@ export function TradePanel({
     abi: bondingCurveAbi,
     functionName: 'purchasedOf',
     args: address ? [address] : undefined,
-    query: { enabled: !!address && !graduated },
+    query: { enabled: !!address },
   })
 
   // --- balances / allowance ---
@@ -114,6 +113,28 @@ export function TradePanel({
   const buyFee = buyQuote?.[1]
   const ethOut = sellQuote?.[0]
   const sellFee = sellQuote?.[1]
+
+  // The receiving leg shows one figure whichever side is active. `null` means "quote not in yet",
+  // which must render differently from a real zero - a greyed placeholder, not a confident 0.0.
+  const receiveText = !enabled
+    ? null
+    : side === 'buy'
+      ? tokensOut !== undefined
+        ? formatTokenAmount(tokensOut)
+        : null
+      : ethOut !== undefined
+        ? formatEth(ethOut, 6)
+        : null
+
+  const feeText = !enabled
+    ? null
+    : side === 'buy'
+      ? buyFee !== undefined
+        ? formatEth(buyFee, 6)
+        : null
+      : sellFee !== undefined
+        ? formatEth(sellFee, 6)
+        : null
 
   // Warn when this buy would push the wallet's *cumulative* purchases past the anti-snipe cap.
   const capWarning =
@@ -160,17 +181,6 @@ export function TradePanel({
     })
   }
 
-  if (graduated) {
-    return (
-      <div className="card">
-        <p className="section-title">Trade</p>
-        <p className="muted">
-          This token has graduated. Curve trading is closed — trade it on the DEX pool instead.
-        </p>
-      </div>
-    )
-  }
-
   return (
     <div className="card">
       <div className="tabs">
@@ -188,62 +198,64 @@ export function TradePanel({
         </button>
       </div>
 
-      <div className="field">
-        <label>{side === 'buy' ? 'You pay (ETH)' : `You sell (${symbol})`}</label>
-        <input
-          className="input-amount num"
-          inputMode="decimal"
-          placeholder="0.0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-        />
-        {side === 'sell' && tokenBalance !== undefined && (
-          <div className="pill-row">
-            {[25, 50, 100].map((pct) => (
-              <button
-                key={pct}
-                className="pill"
-                onClick={() =>
-                  setAmount(formatUnits((tokenBalance * BigInt(pct)) / 100n, TOKEN_DECIMALS))
-                }
-              >
-                {pct}%
-              </button>
-            ))}
-            <span className="pill" style={{ cursor: 'default' }}>
-              bal {formatTokenAmount(tokenBalance)}
-            </span>
+      <div className="legs">
+        <div className="leg">
+          <label className="leg-label" htmlFor="trade-pay">
+            {side === 'buy' ? 'You pay' : 'You sell'}
+          </label>
+          <div className="leg-row">
+            <input
+              id="trade-pay"
+              className="leg-amount"
+              inputMode="decimal"
+              placeholder="0.0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            />
+            <span className="leg-asset">{side === 'buy' ? 'ETH' : symbol}</span>
           </div>
-        )}
+          <div className="leg-meta">
+            {side === 'sell' && tokenBalance !== undefined && (
+              <>
+                <span>bal {formatTokenAmount(tokenBalance)}</span>
+                <span className="leg-meta-right" style={{ display: 'flex', gap: 'var(--s-2)' }}>
+                  {[25, 50, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      className="pill"
+                      onClick={() =>
+                        setAmount(formatUnits((tokenBalance * BigInt(pct)) / 100n, TOKEN_DECIMALS))
+                      }
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Deliberately NOT a flip control: buy and sell are separate curve entry points with
+            different approval and cap rules, so the tabs above own direction. */}
+        <div className="leg">
+          <span className="leg-label">You receive</span>
+          <div className="leg-row">
+            <span
+              className={`leg-amount leg-amount-out${receiveText === null ? ' leg-amount-pending' : ''}`}
+            >
+              {receiveText ?? '0.0'}
+            </span>
+            <span className="leg-asset">{side === 'buy' ? symbol : 'ETH'}</span>
+          </div>
+          <div className="leg-meta">
+            {enabled && feeText !== null && <span>curve fee {feeText} ETH</span>}
+          </div>
+        </div>
       </div>
 
       {enabled && (
-        <div style={{ margin: '12px 0' }}>
-          {side === 'buy' ? (
-            <>
-              <div className="quote-line">
-                <span>You receive</span>
-                <span className="num">
-                  {tokensOut !== undefined ? `${formatTokenAmount(tokensOut)} ${symbol}` : '…'}
-                </span>
-              </div>
-              <div className="quote-line">
-                <span>Curve fee</span>
-                <span className="num">{buyFee !== undefined ? `${formatEth(buyFee, 6)} ETH` : '…'}</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="quote-line">
-                <span>You receive</span>
-                <span className="num">{ethOut !== undefined ? `${formatEth(ethOut, 6)} ETH` : '…'}</span>
-              </div>
-              <div className="quote-line">
-                <span>Curve fee</span>
-                <span className="num">{sellFee !== undefined ? `${formatEth(sellFee, 6)} ETH` : '…'}</span>
-              </div>
-            </>
-          )}
+        <div style={{ marginBottom: 'var(--s-4)' }}>
           <div className="quote-line">
             <span>Max slippage</span>
             <SlippageSelector value={slippagePct} onChange={setSlippagePct} />
@@ -261,7 +273,7 @@ export function TradePanel({
       )}
 
       {!isConnected ? (
-        <ConnectButton />
+        <ConnectButton block />
       ) : wrongChain ? (
         <button className="btn btn-warn" style={{ width: '100%' }} disabled>
           Wrong network

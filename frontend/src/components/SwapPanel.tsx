@@ -213,73 +213,88 @@ export function SwapPanel({
     )
   }
 
-  const payLabel = dir === 'ethToToken' ? 'You pay (ETH)' : `You pay (${symbol})`
+  const paySymbol = dir === 'ethToToken' ? 'ETH' : symbol
   const recvSymbol = dir === 'ethToToken' ? symbol : 'ETH'
   const bal = dir === 'ethToToken' ? ethBalance?.value : (tokenBalance as bigint | undefined)
 
+  const formatOut = (v: bigint) =>
+    recvSymbol === 'ETH' ? formatEth(v, 6) : formatTokenAmount(v)
+
   return (
     <div className="card">
-      <div className="row-between" style={{ marginBottom: 16 }}>
-        <p className="section-title" style={{ margin: 0 }}>
-          Swap
-        </p>
+      <p className="section-title">Swap</p>
+
+      <div className="legs">
+        <div className="leg">
+          <label className="leg-label" htmlFor="swap-pay">
+            You pay
+          </label>
+          <div className="leg-row">
+            <input
+              id="swap-pay"
+              className="leg-amount"
+              inputMode="decimal"
+              placeholder="0.0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+            />
+            <span className="leg-asset">{paySymbol}</span>
+          </div>
+          <div className="leg-meta">
+            {bal !== undefined && (
+              <>
+                <span>
+                  bal{' '}
+                  {dir === 'ethToToken'
+                    ? `${formatEth(bal)} ETH`
+                    : `${formatTokenAmount(bal)} ${symbol}`}
+                </span>
+                {/* No "max" on the ETH leg — spending the whole balance leaves nothing for gas. */}
+                {dir === 'tokenToEth' && (
+                  <button
+                    className="pill leg-meta-right"
+                    onClick={() => setAmount(formatUnits(bal, TOKEN_DECIMALS))}
+                  >
+                    max
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
         <button
-          className="pill"
+          className="leg-flip"
+          aria-label={`Swap direction to pay ${recvSymbol}`}
           onClick={() => setDir((d) => (d === 'ethToToken' ? 'tokenToEth' : 'ethToToken'))}
         >
-          ⇅ flip
+          ⇅
         </button>
-      </div>
 
-      <div className="field">
-        <label>{payLabel}</label>
-        <input
-          className="input-amount num"
-          inputMode="decimal"
-          placeholder="0.0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-        />
-        {bal !== undefined && (
-          <div className="pill-row">
-            {/* No "max" on the ETH leg — spending the whole balance leaves nothing for gas. */}
-            {dir === 'tokenToEth' && (
-              <button className="pill" onClick={() => setAmount(formatUnits(bal, TOKEN_DECIMALS))}>
-                max
-              </button>
-            )}
-            <span className="pill" style={{ cursor: 'default' }}>
-              bal{' '}
-              {dir === 'ethToToken'
-                ? `${formatEth(bal)} ETH`
-                : `${formatTokenAmount(bal)} ${symbol}`}
+        <div className="leg">
+          <span className="leg-label">
+            You receive{!isExactQuote && estOut !== undefined ? ' (est.)' : ''}
+          </span>
+          <div className="leg-row">
+            <span
+              className={`leg-amount leg-amount-out${estOut === undefined ? ' leg-amount-pending' : ''}`}
+            >
+              {estOut !== undefined ? formatOut(estOut) : enabled && isQuoting ? '…' : '0.0'}
             </span>
+            <span className="leg-asset">{recvSymbol}</span>
           </div>
-        )}
+          <div className="leg-meta">
+            {enabled && estOut !== undefined && (
+              <span>
+                min {formatOut(minOut)} {recvSymbol} after slippage
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       {enabled && (
-        <div style={{ margin: '12px 0' }}>
-          <div className="quote-line">
-            <span>{isExactQuote ? 'You receive' : 'You receive (est.)'}</span>
-            <span className="num">
-              {estOut !== undefined
-                ? recvSymbol === 'ETH'
-                  ? `${formatEth(estOut, 6)} ETH`
-                  : `${formatTokenAmount(estOut)} ${symbol}`
-                : isQuoting
-                  ? 'quoting…'
-                  : '…'}
-            </span>
-          </div>
-          <div className="quote-line">
-            <span>Minimum received</span>
-            <span className="num">
-              {recvSymbol === 'ETH'
-                ? `${formatEth(minOut, 6)} ETH`
-                : `${formatTokenAmount(minOut)} ${symbol}`}
-            </span>
-          </div>
+        <div style={{ marginBottom: 'var(--s-4)' }}>
           <div className="quote-line">
             <span>Max slippage</span>
             <SlippageSelector value={slippagePct} onChange={setSlippagePct} />
@@ -293,7 +308,7 @@ export function SwapPanel({
       )}
 
       {!isConnected ? (
-        <ConnectButton />
+        <ConnectButton block />
       ) : wrongChain ? (
         <button className="btn btn-warn" style={{ width: '100%' }} disabled>
           Wrong network

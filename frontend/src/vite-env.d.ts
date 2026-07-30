@@ -3,10 +3,12 @@
 interface ImportMetaEnv {
   readonly VITE_CHAIN_ID?: string
   readonly VITE_RPC_URL?: string
+  readonly VITE_RPC_URL_2?: string
   readonly VITE_FACTORY_ADDRESS?: string
   readonly VITE_GRADUATION_MANAGER_ADDRESS?: string
   readonly VITE_SWAP_ROUTER_ADDRESS?: string
   readonly VITE_QUOTER_ADDRESS?: string
+  readonly VITE_WETH9_ADDRESS?: string
   readonly VITE_SUBGRAPH_URL?: string
 }
 

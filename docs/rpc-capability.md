@@ -15,9 +15,14 @@ Everything here was previously unknown for mainnet.
 node scripts/rpc-probe.mjs mainnet
 node scripts/rpc-probe.mjs testnet
 node scripts/rpc-probe.mjs https://candidate-provider.example/rpc --json out.json
+node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
 ```
 
 The script has no dependencies and needs Node 18+.
+Pacing self-tunes: each throttle response raises a floor on the gap between calls, so a hard rate-limited candidate is measured slowly instead of being written off as broken.
+`--min-interval` sets that floor up front when the provider's published limit is already known.
+A full run is ~150 calls, so a 10 s floor means roughly 25 minutes.
+All output is emitted at the end, so a run killed early prints nothing.
 It is strictly read-only and never signs or sends a transaction.
 It accepts any URL, so it doubles as the evaluation harness for candidate providers.
 Re-run it before picking a provider and after any node upgrade.
@@ -171,9 +176,9 @@ Sustained heavy log probing did trip HTTP 429 a handful of times per run.
 The probe counts 429s explicitly rather than hiding them inside retries, so the number in the Summary section is trustworthy.
 The limit's exact shape is still uncharacterised, which matters because browser traffic scales with users.
 
-## Three measurement traps
+## Four measurement traps
 
-All three produced confidently wrong readings before being caught.
+All four produced confidently wrong readings before being caught.
 They are recorded because any future probe, ours or a provider's own documentation, can fall into them.
 
 ### `eth_getBalance` reports success on pruned state
@@ -198,12 +203,94 @@ A fixed 5,000-block window blew the log cap at every sampled depth on mainnet, s
 Worse, a cap refusal actually *proves* logs exist at that depth, so counting it as evidence of pruning inverts its meaning.
 The probe now shrinks the window until the node answers, and classifies cap refusals separately from real failures.
 
+### A throttle looks exactly like an incapability
+
+This one was found by pointing the probe at its first real candidate rather than at the official endpoint.
+
+The probe's `Identity` section used to issue its four calls concurrently.
+Against a candidate allowing **one request every ten seconds**, three of the four were refused, and the probe reported `FATAL endpoint unusable`.
+The endpoint was fine. We were talking too fast, and the probe had blamed the endpoint for our own traffic.
+
+That is the same shape as the three traps above, and more dangerous now that this script is the provider-evaluation harness: taken at face value it would reject every aggressively rate-limited candidate, which describes most free tiers.
+
+The refusal is also easy to misparse.
+The same endpoint replies in at least three different ways depending on load: a JSON-RPC result, an HTTP 429 with a JSON body whose `error` is a bare **string** rather than a JSON-RPC error object, and - under sustained load - an **HTML Cloudflare interstitial under HTTP 200**.
+A strict parser calls the last two "non-JSON response" and a status-only check calls the third one success.
+
+The probe now:
+
+- issues identity calls **sequentially**, since there was never anything to gain by racing four cheap calls,
+- reports `THROTTLED` distinctly from `FATAL`, and prints the provider's own words,
+- detects throttling from the body as well as the status, including HTML interstitials and string-valued `error` fields,
+- **raises a global pacing floor on every throttle and keeps going** at the slower rate, rather than concluding the endpoint is broken (`--min-interval` sets that floor up front),
+- and **skips the concurrency burst entirely when pacing is active**, because a paced burst measures the probe's own pacer. Reporting that number as the endpoint's concurrency would be a confident statement about the wrong thing.
+
+**Corollary for reading provider documentation: measure it, do not trust it.**
+On the one candidate measured here the published page was wrong in both directions - the stated rate limit was 20x more generous than reality, and heavy methods documented as key-gated were served without a key.
+
+## Second endpoint: candidate survey
+
+**Measured 2026-07-30.**
+Stage 4 wants two endpoints with failover.
+Every candidate below was checked directly rather than taken from a listicle.
+
+| candidate | chain 4663 | keyless | verdict |
+| --- | --- | --- | --- |
+| `rpc.mainnet.chain.robinhood.com` (official) | yes | yes | the current primary; a load-balanced pool, so not independent failover |
+| **NodeFlare** `rpc.nodeflare.app/robinhood/public` | yes | yes | functional but **1 req / 10 s per IP** - unusable for browser traffic |
+| **dRPC** `robinhood-mainnet.drpc.org` | yes | no | `chain is not available on free plan` - paid only |
+| **thirdweb** `4663.rpc.thirdweb.com` | **no** | - | `Invalid chain` |
+| **Ankr** `rpc.ankr.com/robinhood` | no | - | key required and chain not permitted |
+| `sequencer.mainnet.chain.robinhood.com` | n/a | yes | reachable but tx-submission only (`eth_blockNumber does not exist`) |
+| **Alchemy** (Robinhood's recommendation), QuickNode, Blockdaemon, Validation Cloud | yes | no | account required; not yet measured |
+
+Two things follow.
+
+**There is no usable keyless second endpoint.**
+Sourcing real redundancy requires an account, which is a decision with a billing tail rather than a task to execute.
+Robinhood's own docs recommend Alchemy and it is the only provider documented with both mainnet and testnet URLs plus archive support.
+
+**NodeFlare's paid-free tier is the cheapest plausible secondary.**
+Its keyless tier already served `eth_getLogs` and `eth_call` correctly, so the capability is there; a free API key is advertised at 10 req/s.
+That is far too slow to be a primary but adequate as a failover target, which is the role that matters.
+
+Note that both `VITE_RPC_URL` and `VITE_RPC_URL_2` ship inside the browser bundle and therefore cannot hold a secret.
+Any metered key needs domain allowlisting or a proxy.
+
+## How the frontend consumes two endpoints
+
+`frontend/src/lib/wagmi.ts` wires the resolved endpoint list into viem's `fallback` transport.
+`frontend/src/lib/rpcEndpoints.ts` owns the ordering as a pure function: `VITE_RPC_URL`, then `VITE_RPC_URL_2`, then the chain's documented public endpoint, deduplicated.
+
+The public endpoint is always appended as a last resort.
+It is rate limited and Robinhood states it is unsuitable for production, but RPC is the one dependency with no degraded mode, and a throttled app beats a dead one.
+
+Three decisions worth recording, because each depends on viem's actual behaviour rather than on what the API suggests.
+All three are pinned by tests in `frontend/src/lib/rpcFailover.test.ts`, which assert viem's semantics deliberately - a viem upgrade that changed them would otherwise turn this redundancy into either dead weight or a correctness bug.
+
+**`rank: false`, i.e. strict preference rather than latency-ranked.**
+Ranking would periodically measure each endpoint and reorder by score.
+That is wrong here: the last entry is always the rate-limited public endpoint, and a latency probe can make it look attractive at exactly the moment the dedicated primary is busy.
+
+**A single-URL `fallback` is not redundancy.**
+viem forces `retryCount: 0` on the inner transports and retries from the first one, so one URL wrapped in `fallback` behaves exactly like a bare `http()`.
+`hasFailover()` exists so nothing claims redundancy that does not exist.
+
+**The deep-state miss fails over, and a revert does not.**
+This is the property that makes a second provider worth having, and it is a narrow one:
+
+- The pruned-state errors measured above (`missing trie node`, `metadata is not found`) come back as **`-32000`**. That code is **not** in viem's retry set, so no amount of retrying a single endpoint recovers it - the intermittency documented above cannot be retried away against one URL. It also does not match `fallback`'s `shouldThrow`, so `fallback` **advances to the next provider**. A genuinely independent second endpoint is therefore what converts that failure into a served request.
+- A genuine `execution reverted` **does** match `shouldThrow`, so a reverting call fails fast on the first endpoint instead of being replayed against every provider. Without that, every failed quote would multiply load and latency across the whole list.
+
+Note viem decides the second case on the **message**, not the code: `ExecutionRevertedError.code` (3) is not in `shouldThrow`'s code list at all, only its message regex.
+That matters on Nitro, which reports many conditions under `-32000` - including reverts.
+
 ## Open Stage 4 items this does not answer
 
-- **A second endpoint has not been sourced.**
-  Stage 4 calls for two endpoints with failover, and only the official public URL has been measured.
-  It is already a load-balanced pool, but that is one operator behind one DNS name and is not independent failover.
-  The state-availability variance above makes a second, more consistent provider more valuable than it first appeared.
+- **A second endpoint is still not sourced, but it is no longer unscoped.**
+  The candidate survey above settles which providers are even possible, and the answer is that every viable one needs an account.
+  The frontend side is already built and waiting: `VITE_RPC_URL_2` feeds a viem `fallback` transport (`frontend/src/lib/wagmi.ts`), so adding a second endpoint is a config change rather than a code change.
+  What remains is the account decision.
 - **Rate limits are not characterised.**
   429s were observed and counted, but the limit's shape (per second, per IP, burst allowance) is unmeasured.
 - **Postgres `C` collation** for any managed provider is still unverified, and can only be set at cluster creation.

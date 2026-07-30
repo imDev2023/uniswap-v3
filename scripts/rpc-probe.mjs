@@ -21,6 +21,12 @@
 //   node scripts/rpc-probe.mjs testnet
 //   node scripts/rpc-probe.mjs https://some-candidate-provider.example/rpc
 //   node scripts/rpc-probe.mjs mainnet --json probe-mainnet.json
+//   node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
+//
+// Pacing self-tunes: each throttle response raises a floor on the gap between calls, so an
+// aggressively rate-limited candidate gets measured slowly rather than written off as broken.
+// --min-interval sets that floor up front when the provider's published limit is already known.
+// A full run is ~150 calls, so budget accordingly (10 s floor => ~25 min).
 //
 // No dependencies; needs Node 18+ for global fetch.
 
@@ -44,11 +50,70 @@ const USDG_MAINNET = '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
 
 // ---------------------------------------------------------------- rpc plumbing
 
-const stats = { calls: 0, rateLimited: 0, timeouts: 0 }
+const stats = { calls: 0, rateLimited: 0, timeouts: 0, paceBumps: 0 }
 
 const hex = (n) => '0x' + BigInt(n).toString(16)
 const toNum = (h) => Number(BigInt(h))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// ------------------------------------------------------------------------ pacing
+//
+// Candidate providers throttle far harder than the official endpoint, and the FIRST version of this
+// probe reported one of them as "endpoint unusable" when it was merely slow: NodeFlare's keyless
+// endpoint allows 1 request per 10 s, so the four concurrent identity calls all 429'd and the probe
+// gave up. That is measurement trap #4 - a throttle misread as an incapability - and it matters more
+// now that this script is the provider-EVALUATION harness, because it would silently reject every
+// aggressively-rate-limited candidate.
+//
+// So pacing is adaptive: every 429 raises a global floor on the interval between calls, and the
+// probe keeps going at the slower rate instead of concluding the endpoint is broken. --min-interval
+// sets that floor up front when the published limit is already known.
+
+const PACE_CEILING_MS = 20_000
+
+let minIntervalMs = 0
+let lastCallAt = 0
+let paceChain = Promise.resolve()
+
+/**
+ * Wait for this call's turn. Acquisition is serialized through a promise chain so that pacing still
+ * holds when callers fire requests concurrently - otherwise the burst test would defeat it.
+ */
+function acquirePace() {
+  if (minIntervalMs <= 0) return Promise.resolve()
+  const turn = paceChain.then(async () => {
+    const waitMs = lastCallAt + minIntervalMs - Date.now()
+    if (waitMs > 0) await sleep(waitMs)
+    lastCallAt = Date.now()
+  })
+  paceChain = turn.catch(() => {})
+  return turn
+}
+
+/** Raise the pacing floor after a throttle response. Returns the new interval. */
+function bumpPace() {
+  const next = Math.min(minIntervalMs === 0 ? 1_000 : minIntervalMs * 2, PACE_CEILING_MS)
+  if (next !== minIntervalMs) {
+    minIntervalMs = next
+    stats.paceBumps++
+  }
+  return minIntervalMs
+}
+
+/**
+ * Some providers signal throttling in the BODY with HTTP 200, or with a JSON body whose `error` is a
+ * bare string rather than a JSON-RPC error object. Both look like garbage to a strict parser, which
+ * is how a throttle ends up reported as a protocol failure.
+ */
+const RATE_LIMIT_PATTERN = /rate.?limit|too many requests|quota|exceeded.*(limit|plan)|429/i
+
+/**
+ * A CDN interstitial (Cloudflare challenge, WAF block, 5xx page) arrives as HTML, sometimes under
+ * HTTP 200. Measured on a real candidate: it serves JSON-RPC when idle and an HTML page under load,
+ * so treating HTML as a hard protocol failure retires a working endpoint on the strength of our own
+ * traffic. Naming it as a CDN page - and backing off instead of giving up - is the honest reading.
+ */
+const isHtmlBody = (text) => /^\s*(<!doctype html|<html|<\?xml)/i.test(text)
 
 /** Seconds to a readable age. Retention windows range from minutes to weeks. */
 function humanizeAge(sec) {
@@ -64,8 +129,16 @@ function humanizeAge(sec) {
  * so the transport section can report them instead of guessing.
  */
 async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } = {}) {
+  // Throttles get more patience than other failures, because the backoff has to be able to exceed
+  // the provider's window (10 s on at least one real candidate) or every attempt burns inside it.
+  // But `retries: 0` must stay honest: the burst test passes it precisely to get a raw per-request
+  // verdict, and silently retrying throttles there would report "30/30 ok" for an endpoint that
+  // refused most of the burst - turning the concurrency measurement into fiction.
+  const throttleRetries = retries === 0 ? 0 : retries + 4
+  let throttled = false
   for (let attempt = 0; ; attempt++) {
     stats.calls++
+    await acquirePace()
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
@@ -76,11 +149,39 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
         signal: ctrl.signal,
       })
       const text = await res.text()
-      if (res.status === 429) stats.rateLimited++
-      if (res.status === 429 || res.status >= 500) {
+
+      // Throttling is detected from status OR body, because providers signal it both ways - some
+      // return HTTP 200 with a rate-limit payload, which a status-only check reads as a valid reply.
+      const notJsonRpc = !text.trimStart().startsWith('{') && !text.trimStart().startsWith('[')
+      const html = isHtmlBody(text)
+      const looksThrottled =
+        res.status === 429 ||
+        html ||
+        (notJsonRpc && RATE_LIMIT_PATTERN.test(text)) ||
+        (res.status === 200 && !text.startsWith('{"jsonrpc') && RATE_LIMIT_PATTERN.test(text))
+      if (looksThrottled) {
+        stats.rateLimited++
+        throttled = true
+        if (attempt < throttleRetries) {
+          // The wait is the (rising) pacing floor rather than a fixed ramp, so the probe converges on
+          // the provider's actual rate. Note the floor is raised ONLY on a path that retries: the
+          // burst test throttles deliberately, and letting it ratchet the global pace would slow
+          // every later section and report self-inflicted throttling as the provider's behaviour.
+          const interval = bumpPace()
+          await sleep(Math.max(interval, 1_500 * (attempt + 1)))
+          continue
+        }
+        return {
+          ok: false,
+          transport: html
+            ? `CDN interstitial (HTML, HTTP ${res.status}) - challenge or throttle, not JSON-RPC`
+            : 'rate limited',
+          throttled: true,
+          body: text.slice(0, 200),
+        }
+      }
+      if (res.status >= 500) {
         if (attempt < retries) {
-          // Heavy log probing trips rate limiting readily. Back off generously so a
-          // self-inflicted 429 is not mistaken for a capability limit.
           await sleep(1500 * (attempt + 1))
           continue
         }
@@ -90,9 +191,27 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
       try {
         json = JSON.parse(text)
       } catch {
-        return { ok: false, transport: 'non-JSON response', body: text.slice(0, 200) }
+        return { ok: false, transport: 'non-JSON response', body: text.slice(0, 200), throttled }
       }
-      if (json.error) return { ok: false, error: json.error }
+      // A JSON-RPC error object has a numeric `code`. A bare string (or any other shape) is the
+      // provider talking about itself rather than about the request - usually an auth or plan error,
+      // which must not be reported as though the chain refused the query.
+      if (json.error !== undefined && json.error !== null) {
+        if (typeof json.error === 'object' && typeof json.error.code === 'number') {
+          return { ok: false, error: json.error }
+        }
+        const message = typeof json.error === 'string' ? json.error : JSON.stringify(json.error)
+        const detail = typeof json.message === 'string' ? `: ${json.message}` : ''
+        return {
+          ok: false,
+          transport: `provider error (${message}${detail})`,
+          throttled: throttled || RATE_LIMIT_PATTERN.test(text),
+          body: text.slice(0, 200),
+        }
+      }
+      if (json.result === undefined) {
+        return { ok: false, transport: 'reply had neither result nor error', body: text.slice(0, 200) }
+      }
       return { ok: true, result: json.result }
     } catch (err) {
       const timedOut = err.name === 'AbortError'
@@ -101,14 +220,20 @@ async function rpc(url, method, params = [], { timeoutMs = 30000, retries = 3 } 
         await sleep(500 * (attempt + 1))
         continue
       }
-      return { ok: false, transport: timedOut ? 'timeout' : String(err) }
+      return { ok: false, transport: timedOut ? 'timeout' : String(err), throttled }
     } finally {
       clearTimeout(timer)
     }
   }
 }
 
-const why = (r) => (r.error ? `${r.error.message} (code ${r.error.code})` : r.transport)
+const why = (r) => {
+  if (r.error) {
+    const code = r.error.code === undefined ? '?' : r.error.code
+    return `${r.error.message ?? JSON.stringify(r.error)} (code ${code})`
+  }
+  return r.transport
+}
 
 /** True when the failure is the node refusing an over-large query, not a real outage. */
 const isQueryTooBig = (r) => /exceeds limit|too many logs|response too large|timeout|timed out/i.test(why(r))
@@ -147,14 +272,33 @@ function emit(jsonOut) {
 
 async function probeIdentity(url) {
   section('Identity')
-  const [chainId, clientVersion, blockNumber, syncing] = await Promise.all([
-    rpc(url, 'eth_chainId'),
-    rpc(url, 'web3_clientVersion'),
-    rpc(url, 'eth_blockNumber'),
-    rpc(url, 'eth_syncing'),
-  ])
+  // Deliberately SEQUENTIAL. These four used to run concurrently, which is four requests in one
+  // instant - enough to trip a strict per-IP limiter on the very first thing the probe does, and the
+  // resulting 429 was then reported as "endpoint unusable". Identity is four cheap calls; there is
+  // nothing to gain by racing them and a whole candidate to lose.
+  const chainId = await rpc(url, 'eth_chainId')
+  const clientVersion = await rpc(url, 'web3_clientVersion')
+  const blockNumber = await rpc(url, 'eth_blockNumber')
+  const syncing = await rpc(url, 'eth_syncing')
+
   if (!chainId.ok || !blockNumber.ok) {
-    row('FATAL', `endpoint unusable: ${why(chainId.ok ? blockNumber : chainId)}`)
+    const failure = chainId.ok ? blockNumber : chainId
+    if (failure.throttled) {
+      // The distinction that matters for provider evaluation: this endpoint WORKS, we are just not
+      // allowed to talk to it this fast. Reporting it as unusable would discard a viable candidate.
+      row('THROTTLED', `cannot complete identity at this rate: ${why(failure)}`)
+      if (failure.body) note(`  provider said: ${failure.body}`)
+      note('  The endpoint is responding, not broken. Re-run with a slower floor, e.g.')
+      note(`  --min-interval 10000, or use an API key to lift the limit.`)
+    } else {
+      row('FATAL', `endpoint unusable: ${why(failure)}`)
+      if (failure.body) note(`  provider said: ${failure.body}`)
+    }
+    report.sections.identity = {
+      reachable: false,
+      throttled: Boolean(failure.throttled),
+      reason: why(failure),
+    }
     return null
   }
   const chain = toNum(chainId.result)
@@ -576,17 +720,38 @@ async function probeTransport(ctx) {
   row('JSON-RPC batch', batch)
 
   const BURST = 30
+  // A concurrency measurement is meaningless once pacing is on: acquirePace serializes the requests,
+  // so this would time the probe's own pacer and report it as the endpoint's concurrency. Skipping it
+  // and saying so is the honest option - the alternative is a confident number about the wrong thing,
+  // which is the failure mode the rest of this script exists to avoid.
+  if (minIntervalMs > 0) {
+    row(`burst of ${BURST} concurrent`, 'SKIPPED - pacing is active, so this would measure the pacer')
+    note(`  Re-run without --min-interval (and against a limit that allows it) to measure this.`)
+    report.sections.transport = { batch, burstSkippedForPacing: true }
+    return
+  }
+
   const t0 = Date.now()
   const burst = await Promise.all(
     Array.from({ length: BURST }, () => rpc(ctx.url, 'eth_blockNumber', [], { retries: 0 })),
   )
   const failed = burst.filter((r) => !r.ok)
+  const throttledCount = failed.filter((r) => r.throttled).length
   row(
     `burst of ${BURST} concurrent`,
     `${BURST - failed.length}/${BURST} ok in ${Date.now() - t0} ms` +
       (failed.length ? ` - first failure: ${why(failed[0])}` : ''),
   )
-  report.sections.transport = { batch, burstOk: BURST - failed.length, burstTotal: BURST }
+  if (throttledCount > 0) {
+    // Distinguish "the endpoint cannot take 30 at once" from "we are not allowed 30 at once".
+    note(`  ${throttledCount} of ${failed.length} failures were rate limits, not errors.`)
+  }
+  report.sections.transport = {
+    batch,
+    burstOk: BURST - failed.length,
+    burstTotal: BURST,
+    burstThrottled: throttledCount,
+  }
 }
 
 async function probeOptionalMethods(ctx) {
@@ -623,10 +788,24 @@ async function main() {
   }
   const jsonIdx = args.indexOf('--json')
   const jsonOut = jsonIdx >= 0 ? args[jsonIdx + 1] : null
+  const paceIdx = args.indexOf('--min-interval')
+  if (paceIdx >= 0) {
+    const ms = Number(args[paceIdx + 1])
+    if (!Number.isFinite(ms) || ms < 0) {
+      console.error('--min-interval expects milliseconds, e.g. --min-interval 10000')
+      process.exit(2)
+    }
+    minIntervalMs = ms
+  }
   const url = ALIASES[target] ?? target
   report.endpoint = url
 
   lines.push('Octopus RPC capability probe', `endpoint: ${url}`, `probed:   ${report.probedAt}`)
+  if (minIntervalMs > 0) {
+    lines.push(
+      `pacing:   >= ${minIntervalMs} ms between calls (~${Math.ceil((minIntervalMs * 150) / 60000)} min for a full run)`,
+    )
+  }
 
   const ctx = await probeIdentity(url)
   if (!ctx) {
@@ -645,7 +824,17 @@ async function main() {
   row('rpc calls made', `${stats.calls}`)
   row('rate limited (HTTP 429)', `${stats.rateLimited}`)
   row('timeouts', `${stats.timeouts}`)
-  report.sections.summary = { ...stats }
+  if (minIntervalMs > 0) {
+    row('final pacing floor', `${minIntervalMs} ms between calls`)
+    if (stats.paceBumps > 0) {
+      // Say this out loud: a run that self-throttled is not comparable to one that did not, and the
+      // throughput-flavoured numbers above were measured under a different regime.
+      note(`  Raised ${stats.paceBumps}x in response to throttling, from an initial 0 ms.`)
+      note('  This endpoint rate limits harder than the official one. Numbers above are still')
+      note('  valid capability results, but timing-derived ones are not comparable across runs.')
+    }
+  }
+  report.sections.summary = { ...stats, finalPaceIntervalMs: minIntervalMs }
 
   emit(jsonOut)
 }

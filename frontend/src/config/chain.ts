@@ -1,10 +1,32 @@
 import { defineChain } from 'viem'
+import { resolveRpcUrls } from '../lib/rpcEndpoints'
 
 // Robinhood Chain is an Arbitrum L2 with native ETH gas (spec #11). The Graph's hosted nets don't
 // support 4663, so data comes from a self-hosted subgraph (see subgraph/README.md) and RPC is
 // configured per-deployment.
 
-const DEFAULT_RPC = import.meta.env.VITE_RPC_URL || undefined
+// Documented public endpoints, per docs.robinhood.com/chain/connecting. Rate limited and stated to
+// be unsuitable for production, so they serve as the last-resort entry rather than the preferred
+// one - see resolveRpcUrls for the ordering policy.
+const PUBLIC_RPC_BY_CHAIN: Record<number, string> = {
+  4663: 'https://rpc.mainnet.chain.robinhood.com',
+  46630: 'https://rpc.testnet.chain.robinhood.com',
+}
+
+// Two endpoints with failover is a Stage 4 requirement: RPC is the only component with no graceful
+// degradation, and the official endpoint is a load-balanced pool whose nodes retain different
+// history, so a deep-state read can fail on one node and succeed on another (docs/rpc-capability.md).
+// A `-32000` state miss is not in viem's retry set, but it also does not stop `fallback` advancing,
+// so a genuinely independent second provider is what converts that failure into a served request.
+const rpcUrlsFor = (chainId: number): string[] =>
+  resolveRpcUrls({
+    primary: import.meta.env.VITE_RPC_URL,
+    secondary: import.meta.env.VITE_RPC_URL_2,
+    publicDefault: PUBLIC_RPC_BY_CHAIN[chainId],
+  })
+
+export const MAINNET_RPC_URLS = rpcUrlsFor(4663)
+export const TESTNET_RPC_URLS = rpcUrlsFor(46630)
 
 // Multicall3 is deployed at its canonical CREATE2 address on BOTH Robinhood chains — confirmed with
 // eth_getCode against 4663 and 46630 (same 7.6 kB runtime). Declaring it lets viem fold the
@@ -12,14 +34,14 @@ const DEFAULT_RPC = import.meta.env.VITE_RPC_URL || undefined
 // block: fewer round-trips, and a consistent snapshot rather than a torn read across blocks.
 const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11' as const
 
-// Endpoints are the public documented values from research/robinhood-chain-compat.md. VITE_RPC_URL
-// overrides the RPC (e.g. an Alchemy key) for reliability under load.
+// VITE_RPC_URL overrides the preferred RPC (e.g. an Alchemy key) for reliability under load, and
+// VITE_RPC_URL_2 adds an independent second provider for failover.
 export const robinhoodMainnet = defineChain({
   id: 4663,
   name: 'Robinhood Chain',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: [DEFAULT_RPC ?? 'https://rpc.mainnet.chain.robinhood.com'] },
+    default: { http: MAINNET_RPC_URLS },
   },
   blockExplorers: {
     default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' },
@@ -33,7 +55,7 @@ export const robinhoodTestnet = defineChain({
   testnet: true,
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
-    default: { http: [DEFAULT_RPC ?? 'https://rpc.testnet.chain.robinhood.com'] },
+    default: { http: TESTNET_RPC_URLS },
   },
   blockExplorers: {
     default: { name: 'Blockscout', url: 'https://explorer.testnet.chain.robinhood.com' },

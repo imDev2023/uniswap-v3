@@ -33,7 +33,7 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # fork tests hit Robinhood Chain (rpc alias: robinhood = 4663)
 ```
 
-Ticket rhythm (build tickets #12–#21 built the stack; #22–#26 are merged; **Stages 1 and 2 are done. `build/27-rpc-failover` (Stage 4, RPC failover + provider survey) is BUILT AND REVIEWED but NOT YET MERGED - 2 commits, working tree clean. The next branch is `build/28-<slug>`**; remaining work is Stage 3 (frontend redesign) or more of Stage 4, both in parallel with the audit wait. Tracked as GitHub issues; the map is #1, spec is #11 - note #26 and #27 have no issues of their own, they were scoped in-session):
+Ticket rhythm (build tickets #12–#21 built the stack; #22–#26 are merged; **Stages 1 and 2 are done. `build/27-rpc-failover` (Stage 4, RPC failover + provider survey) is BUILT AND REVIEWED but NOT YET MERGED - 2 commits, working tree clean. The next branch is `build/28-<slug>`**; remaining work is Stage 3 (frontend redesign) or more of Stage 4 — and as of 2026-07-30 that work is the critical path, since the audit was moved to **after** project completion and the user's own testing pass. Tracked as GitHub issues; the map is #1, spec is #11 - note #26 and #27 have no issues of their own, they were scoped in-session):
 1. One ticket per branch: `build/<NN>-<slug>`, branched from `main`.
 2. Implement + write tests at the fork-test seam; keep the full suite green.
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.
@@ -72,13 +72,15 @@ Testnet run validated on-chain: curve create/buy/sell, the anti-snipe cap (inclu
 
 **Multi-wallet testing is done.** `contracts/.env` holds `TEST_PK_1..6` (0.4 ETH each). Launch `SNIPE` exercised **anti-snipe across six competing wallets** — cap binding (`BuyCapExceeded`), cap-as-ceiling, sell-then-rebuy evasion blocked, the crossing buy still capped (decision #7), the cap lifting after the 120M window, and graduation with **6 holders** whose subgraph netting closes to the wei. Anti-snipe was armed for it and then **restored to the baseline** (`antiSnipeThreshold = 0`); re-arm with `setCurveParams(33333333333333333, 100, 25e24, 120e24)`. Note production (8M cap / 120M threshold) needs **≥15 distinct wallets** to traverse the window by design.
 
-## Road to mainnet (agreed 2026-07-26; Stage 1 closed 2026-07-27, Stage 2 closed 2026-07-29)
+## Road to mainnet (agreed 2026-07-26; Stage 1 closed 2026-07-27, Stage 2 closed 2026-07-29; **sequencing revised 2026-07-30 — audit moved to LAST**)
 
-**There is no backend left to build, and the contracts are now frozen.** What remains is the audit, the frontend redesign, deployment and hosting.
+**There is no backend left to build, and the contracts are now frozen.** What remains is the frontend redesign, deployment and hosting, and then the audit.
 
-**Stages 1 and 2 are done.** Nothing now blocks handing the contracts to the auditors — the last open question that could have forced a pre-audit contract change (verifying the two constructor-created peripherals) was resolved on 2026-07-28 in favour of no change. Stages 3 and 4 are independent of each other and of the audit; take them in either order.
+**Stages 1 and 2 are done.** Stages 3 and 4 are independent of each other; take them in either order.
 
-**The audit is the long pole** (external dependency, unpredictable latency) and it could not start until the contracts were final — which they now are. So the sequencing from here is *hand to auditors → Stages 2/3/4 in parallel with the audit wait → Stage 5 deploy*. Stages 2, 3 and 4 are independent of each other and can be taken in any order; **Stage 2 is the best resilience-per-hour.**
+🔴 **THE AUDIT NOW COMES LAST, AFTER THE PROJECT IS COMPLETE AND THE USER HAS TESTED IT HIMSELF. Do not ask about the audit, do not propose starting it, and do not treat it as a parallel track — until every remaining stage is finished.** Decided 2026-07-30, superseding the original plan (which was *hand to auditors → remaining stages in parallel with the audit wait*). The reason is social, not technical: the audit is a favour from the user's Solidity-developer friends, and the user will not spend their time on something they have not first driven end to end themselves and judged worth those friends' attention. The user will raise the audit when ready.
+
+**Consequence for sequencing: remaining engineering is now the critical path in its own right, not something absorbed by an audit wait.** Audit plus remediation lands *after* Stages 3/4/5 rather than overlapping them, so the calendar is additive — do not present the remaining work as "free" schedule-wise. **Contracts nevertheless stay frozen:** the freeze was always about not redoing frontend work against a shifting data shape, and that reason is untouched by the resequencing.
 
 ### Stage 1 — finalise contracts ✅ DONE (build #24)
 
@@ -121,13 +123,13 @@ Settled decisions:
 
 **Two Stage-2-adjacent items deliberately NOT done** (flagged, awaiting a decision — see *Open decisions*): an RPC fallback for the homepage token list, and RPC-derived curve progress on the token page.
 
-### Stage 3 — frontend redesign ⬅️ NEXT candidate (parallel with audit; largest remaining chunk)
+### Stage 3 — frontend redesign ⬅️ NEXT candidate (largest remaining chunk, and now on the critical path)
 
 Build against the *final* Stage-1 data shape. The 🐙 wordmark is a placeholder and the CSS is deliberately plain. Open framing questions, unanswered: high-energy pump.fun-style board vs restrained/credible; keep the emoji wordmark or commission a real identity; visual pass only vs re-thinking flows (the homepage currently front-loads "Just graduated" above live curves, arguably backwards for a launchpad). Also queued: trim the ~883 kB bundle (wagmi pulls unused WalletConnect/MetaMask SDK).
 
 **Stage 2 changed the starting point for this work.** The pages now split cleanly into an RPC-resolved trade path and indexer-derived analytics panels, with `OnchainTokenGate` owning every "nothing to trade here" state and `IndexerBanner` / `IndexedDataNotice` owning every degraded state. A redesign should preserve that split rather than re-entangle it — and the degraded states need visual design too, not just the happy path.
 
-### Stage 4 — infrastructure ⬅️ IN PROGRESS (parallel with audit)
+### Stage 4 — infrastructure ⬅️ IN PROGRESS (now on the critical path)
 
 **Build #26 closed the one item that could have invalidated the whole approach: the mainnet RPC probe.** See the ✅ bullet below and `docs/rpc-capability.md`. **Build #27 then built the failover wiring and surveyed the provider field**, which reduces the "second endpoint" item to a single decision the user has to make: create an Alchemy account. Still fully open: **hosting** (frontend + indexer), **monitoring**, **Postgres `C` collation**, whether any managed subgraph host supports 4663 at all, and **indexer tuning for 0.1 s blocks** - which the probe flagged as the likeliest operational surprise in this stage and which nothing has touched yet.
 
@@ -159,7 +161,7 @@ Audit findings → fixes → deploy per `docs/deploy.md` (+ `DeployQuoter.s.sol`
 
 These are the user's calls, carried forward across sessions. Ask rather than assume.
 
-- 🔴 **HAS THE AUDIT ACTUALLY BEEN HANDED OVER?** Unknown as of 2026-07-30, and it is **the critical path**. The contracts have been frozen and audit-ready since Stage 1 closed on 2026-07-27, and `docs/audit-scope.md` is written and waiting. Nothing in the repo records the hand-off happening. This matters more than any remaining engineering task: Stages 3 and 4 run *in parallel* with the audit wait, so every day the hand-off sits undone is a day added directly to the end date rather than absorbed. **Ask first, before proposing any other work.** (Audit is covered by the user's Solidity-developer friends - do not propose vendors.)
+- ✅ **SETTLED 2026-07-30 — the audit hand-off is deliberately NOT yet done, and is not a question to raise.** The user will complete the whole project, test it end to end themselves, and only then decide it is worth their Solidity-developer friends' time. `docs/audit-scope.md` stays written and waiting. **Do not ask about the audit again until every remaining stage is finished; do not propose vendors, ever.** See the resequencing note at the top of *Road to mainnet*.
 - **Root `LICENSE` file** — the repo has none and declares none, while all Solidity is `GPL-2.0-or-later`. Choosing the project licence is the user's call.
 - **"Octopus" trademark clearance** — not done.
 - **Frontend design direction (Stage 3)** — high-energy pump.fun-style board vs restrained and credible; keep the placeholder 🐙 wordmark or commission a real identity; visual pass only vs re-thinking flows (the homepage front-loads "Just graduated" above live curves, arguably backwards for a launchpad).

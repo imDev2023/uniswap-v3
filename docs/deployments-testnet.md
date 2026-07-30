@@ -497,3 +497,31 @@ stays correct if the testnet calibration is re-scaled with `setCurveParams`.
 
 The 2026-07-30 run created 11 launches (total cost ~0.47 ETH across the six `TEST_PK_*` wallets),
 taking the factory to 12 launches / 2 graduations / 23 trades.
+
+### Seeded launch table (as of 2026-07-30, after `run()` + one `churn()`)
+
+Progress moves whenever `churn()` is run again, so treat the percentages as indicative.
+
+| Symbol | Token | Progress | Graduated |
+| --- | --- | --- | --- |
+| `META` | `0x52eEF29c3c869B4D04F3c1451b16548DEAA923bE` | 100% | ✅ pool `0xDC27FeCB8589c0FB0328fd98963c823a1681E933`, LP NFT 1 |
+| `SEND` | `0xF92A5Cd2F903750B83CF507897E5c5768Fc50Ebb` | 100% | ✅ pool `0x65F3aC73CeE1e0cF7130AA4b7974633Aff465D3f` |
+| `RDOGE` | `0x11E0d50dB0f8F8fc635C159898EDBDF7113c635a` | 97% | |
+| `OCAT` | `0x19ae982840Ad1FB9e166742f682Ade566495531c` | 75% | metadata URI set, does **not** resolve |
+| `CANDLE` | `0xF5fDFD8A677E8b7587685706eb68E7F51b1a35d0` | 63% | |
+| `DIAMOND` | `0x4f34e3A28076a35933f8E87c962d1eCC5CFD26E1` | 60% | |
+| `BOOTS` | `0xb97c60F6D38aA8Bb7272cb5075dF90940149b107` | 46% | metadata URI set, does **not** resolve |
+| `COURAGE` | `0x745877C5ce6769D9Ac017c1949A4A3C6788c1333` | 21% | |
+| `TENT` | `0x935B14EF40C8bD8bEcee2F1ac1C8893DB94F3877` | 21% | |
+| `PAPER` | `0x1C9738C6af152fe7b70B177c0498f6A27BE40ffc` | 12% | |
+| `RUGPRF` | `0xA2d638E797dD6Aabe57e8994e80C5bB822CEC2d5` | 3% | |
+| `QUIET` | `0x8554b5011685E3F81502E8bE9cc9AF7f9c0486ec` | 2% | launched untraded; `churn()` has since bought it |
+
+⚠️ This set reuses the ticker **`RDOGE`** at a different address from the one on the superseded
+factory. They are unrelated launches.
+
+⚠️ **There is no longer a never-traded launch on testnet.** `QUIET` was created untraded on purpose
+(it is the regression case for the `priceX18 = 0` bug fixed in #24, and for the board's "New" card
+state), but `churn()` bought it up to ~2%. Create a fresh one with `createLaunch` and simply do not
+buy it if that state needs to be exercised by hand again. The board's untraded rendering is covered
+by `HomePage.test.tsx` regardless.

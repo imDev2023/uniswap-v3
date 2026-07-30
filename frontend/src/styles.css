@@ -1,21 +1,75 @@
+/* ============================================================================================
+   Octopus design tokens (build #28, Stage 3).
+   Direction: high-energy live board - dense, kinetic, board-first. The browse surface is where
+   people shop, so that is where the motion and colour live; the chrome stays calm so the product
+   still reads as something you would trust with money.
+   ============================================================================================ */
+
 :root {
-  --bg: #0a0e13;
-  --bg-raised: #121821;
-  --bg-inset: #0d1218;
-  --border: #1f2a37;
-  --border-strong: #2c3b4d;
-  --text: #e6edf3;
-  --text-dim: #8b98a9;
-  --text-faint: #5a6675;
-  --accent: #37d69b;
-  --accent-dim: #1f7a5a;
-  --buy: #37d69b;
-  --sell: #f2617a;
+  /* --- surfaces ------------------------------------------------------------------------- */
+  --bg: #06080c;
+  --bg-raised: #0f131b;
+  --bg-raised-2: #151b25;
+  --bg-inset: #0a0d13;
+  --border: #1b2330;
+  --border-strong: #2b3849;
+
+  /* --- text ---------------------------------------------------------------------------- */
+  --text: #e9eff6;
+  --text-dim: #8d9bad;
+  --text-faint: #5b6878;
+
+  /* --- signature accent ---------------------------------------------------------------- */
+  --accent: #29e59a;
+  --accent-hot: #7cffc4;
+  --accent-dim: #167f56;
+  --accent-glow: rgba(41, 229, 154, 0.3);
+  --on-accent: #04150d;
+
+  /* --- trade direction ----------------------------------------------------------------- */
+  --buy: #29e59a;
+  --sell: #ff5c7c;
   --warn: #f0b352;
-  --radius: 12px;
-  --radius-sm: 8px;
+
+  /* --- heat ramp ----------------------------------------------------------------------- */
+  /* Progress toward graduation is the single most important number on a card, so it is encoded
+     twice: length AND colour. A curve at 96% should not look like one at 3%. Consumed via
+     heatColor() in lib/heat.ts so the thresholds are testable rather than buried in CSS. */
+  /* Warms toward orange, never into red: red reads as danger, and a curve about to graduate is the
+     most interesting thing on the board, not the most alarming. */
+  --heat-0: #29e59a;
+  --heat-1: #8ee063;
+  --heat-2: #ffd166;
+  --heat-3: #ffa63d;
+  --heat-4: #ff8324;
+
+  /* --- type ---------------------------------------------------------------------------- */
   --mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 30px;
+
+  /* --- space --------------------------------------------------------------------------- */
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-12: 48px;
+
+  /* --- shape + motion ------------------------------------------------------------------ */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-pill: 999px;
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 * {
@@ -33,7 +87,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 15px;
+  font-size: var(--fs-md);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
@@ -56,7 +110,39 @@ code {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- layout --- */
+/* Visible to screen readers only. Used by <Price> to carry the expanded number behind the
+   subscript compression. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Every animation on the board is decorative. Honour the OS setting rather than shipping a
+   "live" feed that induces motion sickness. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* --- layout ----------------------------------------------------------------------------- */
 .app {
   display: flex;
   flex-direction: column;
@@ -66,48 +152,57 @@ code {
 .main {
   flex: 1;
   width: 100%;
-  max-width: 1120px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 28px 20px 60px;
+  padding: var(--s-5) var(--s-5) var(--s-12);
 }
 
 .topbar {
   border-bottom: 1px solid var(--border);
-  background: rgba(10, 14, 19, 0.85);
-  backdrop-filter: blur(10px);
+  background: rgba(6, 8, 12, 0.82);
+  backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
   z-index: 20;
 }
 
 .topbar-inner {
-  max-width: 1120px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 12px 20px;
+  padding: var(--s-3) var(--s-5);
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: var(--s-6);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--s-2);
   font-weight: 700;
   font-size: 17px;
+  letter-spacing: -0.01em;
 }
 .brand-mark {
   color: var(--accent);
   font-size: 20px;
+  line-height: 1;
+}
+.brand-name {
+  color: var(--text);
 }
 
 .nav {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: var(--s-5);
   margin-left: auto;
   color: var(--text-dim);
   font-weight: 500;
+  font-size: 14px;
+}
+.nav a {
+  transition: color var(--dur-fast) var(--ease);
 }
 .nav a:hover {
   color: var(--text);
@@ -116,21 +211,21 @@ code {
   color: var(--accent) !important;
 }
 
-/* --- buttons --- */
+/* --- buttons ---------------------------------------------------------------------------- */
 .btn {
   font-family: var(--sans);
   font-size: 14px;
   font-weight: 600;
   border: 1px solid var(--border-strong);
-  background: var(--bg-raised);
+  background: var(--bg-raised-2);
   color: var(--text);
   padding: 9px 16px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
-    background 0.12s,
-    border-color 0.12s,
-    opacity 0.12s;
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
 }
 .btn:hover:not(:disabled) {
   border-color: var(--accent-dim);
@@ -143,12 +238,17 @@ code {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #04140d;
+  color: var(--on-accent);
+}
+.btn-connect:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hot);
+  border-color: var(--accent-hot);
 }
 .btn-primary {
   width: 100%;
   padding: 13px;
-  font-size: 15px;
+  font-size: var(--fs-md);
 }
 .btn-warn {
   background: var(--warn);
@@ -158,13 +258,13 @@ code {
 .btn-account {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--s-2);
   font-family: var(--mono);
 }
 .btn-buy {
   background: var(--buy);
   border-color: var(--buy);
-  color: #04140d;
+  color: var(--on-accent);
 }
 .btn-sell {
   background: var(--sell);
@@ -179,11 +279,11 @@ code {
   box-shadow: 0 0 6px var(--accent);
 }
 
-/* --- banner --- */
+/* --- banner ----------------------------------------------------------------------------- */
 .banner {
-  max-width: 1120px;
-  margin: 16px auto 0;
-  padding: 12px 18px;
+  max-width: 1320px;
+  margin: var(--s-4) auto 0;
+  padding: var(--s-3) var(--s-4);
   border-radius: var(--radius-sm);
   font-size: 14px;
 }
@@ -193,123 +293,543 @@ code {
   color: #f3c980;
 }
 
-/* --- cards --- */
+/* --- cards ------------------------------------------------------------------------------ */
 .card {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: var(--s-5);
 }
 
 .section-title {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--text-dim);
   font-weight: 600;
-  margin: 0 0 14px;
+  margin: 0 0 var(--s-3);
 }
 
-/* --- home / token grid --- */
-.hero {
-  margin-bottom: 32px;
-}
-.hero h1 {
-  font-size: 34px;
-  margin: 0 0 8px;
-  letter-spacing: -0.02em;
-}
-.hero p {
-  color: var(--text-dim);
-  max-width: 620px;
-  margin: 0;
-}
-.stat-row {
+/* ============================================================================================
+   HOME - the live board
+   ============================================================================================ */
+
+/* A slim masthead, not a landing-page hero. The old one spent ~280px of vertical before any
+   product content; on a launchpad the board IS the product. */
+.masthead {
   display: flex;
-  gap: 28px;
-  margin-top: 20px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+  padding-bottom: var(--s-4);
+  margin-bottom: var(--s-4);
+  border-bottom: 1px solid var(--border);
+}
+.masthead h1 {
+  font-size: var(--fs-xl);
+  margin: 0 0 2px;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+.masthead p {
+  color: var(--text-dim);
+  margin: 0;
+  font-size: var(--fs-base);
+  max-width: 52ch;
+}
+.masthead-stats {
+  display: flex;
+  gap: var(--s-6);
+}
+.mstat-value {
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.1;
+}
+.mstat-label {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+
+/* --- graduation ticker ------------------------------------------------------------------- */
+/* Graduations used to occupy a full card row above the live curves, which put the finished
+   thing above the live thing. As a ticker it still gets the celebration without outranking
+   the board. */
+.ticker {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  background: linear-gradient(90deg, rgba(41, 229, 154, 0.1), rgba(41, 229, 154, 0.02) 60%, transparent);
+  border: 1px solid rgba(41, 229, 154, 0.22);
+  border-radius: var(--radius);
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-4);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ticker::-webkit-scrollbar {
+  display: none;
+}
+.ticker-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+}
+.ticker-bolt {
+  animation: bolt 2.4s var(--ease) infinite;
+}
+@keyframes bolt {
+  0%,
+  88%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  92% {
+    opacity: 0.45;
+    transform: scale(1.22);
+  }
+}
+.ticker-items {
+  display: flex;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.ticker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: var(--fs-base);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ticker-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+.ticker-symbol {
+  font-weight: 700;
+}
+.ticker-meta {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+/* --- board layout ------------------------------------------------------------------------ */
+.board-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  gap: var(--s-5);
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .board-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-3);
   flex-wrap: wrap;
 }
-.stat .stat-value {
-  font-family: var(--mono);
-  font-size: 22px;
-  font-weight: 600;
+.board-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.01em;
 }
-.stat .stat-label {
-  font-size: 12px;
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 var(--accent-glow);
+  animation: livepulse 2s var(--ease) infinite;
+}
+@keyframes livepulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(41, 229, 154, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(41, 229, 154, 0);
+  }
+}
+.board-count {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 400;
+}
+
+/* --- sort control ------------------------------------------------------------------------ */
+.sorts {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+}
+.sort {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--sans);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.sort:hover {
+  color: var(--text);
+}
+.sort[aria-pressed='true'] {
+  background: var(--bg-raised-2);
+  color: var(--accent);
+}
+
+/* --- the grid --------------------------------------------------------------------------- */
+.board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(224px, 1fr));
+  gap: var(--s-3);
+}
+
+.tcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-3);
+  overflow: hidden;
+  transition:
+    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.tcard:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+/* A hairline of the card's own heat colour along the top edge - the board reads as a heat map
+   when scanned, before any number is parsed. */
+.tcard::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--heat, var(--border-strong));
+  opacity: 0.85;
+}
+.tcard-graduated::before {
+  background: linear-gradient(90deg, var(--accent), #93a7ff);
+}
+
+.tcard-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.tcard-id {
+  min-width: 0;
+  flex: 1;
+}
+.tcard-name {
+  font-weight: 650;
+  font-size: 14px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tcard-symbol {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  font-family: var(--mono);
+}
+
+.tcard-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.meter-track {
+  height: 7px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--heat, var(--accent));
+  box-shadow: 0 0 10px -2px var(--heat, var(--accent));
+  transition: width 0.5s var(--ease);
+}
+.meter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.meter-pct {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--heat, var(--text));
+}
+.meter-note {
+  font-size: var(--fs-xs);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-.token-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+.tcard-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border);
+}
+.tstat-label {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tstat-value {
+  font-family: var(--mono);
+  font-size: var(--fs-base);
+  margin-top: 1px;
+}
+.tstat-right {
+  text-align: right;
 }
 
-.token-card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  transition:
-    border-color 0.12s,
-    transform 0.12s;
+/* --- price ------------------------------------------------------------------------------- */
+.price {
+  white-space: nowrap;
 }
-.token-card:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-2px);
+.price-zeros {
+  font-size: 0.72em;
+  vertical-align: -0.22em;
+  padding: 0 0.5px;
+  opacity: 0.85;
 }
-.token-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.price-unit {
+  color: var(--text-faint);
+  margin-left: 4px;
+  font-size: 0.85em;
 }
-.token-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  object-fit: cover;
-  background: var(--bg-inset);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+
+/* --- badges ------------------------------------------------------------------------------ */
+.badge {
+  font-size: var(--fs-xs);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
   font-weight: 700;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   flex-shrink: 0;
 }
-.token-name {
-  font-weight: 600;
-  line-height: 1.2;
-}
-.token-symbol {
-  color: var(--text-faint);
-  font-size: 13px;
-  font-family: var(--mono);
-}
-.badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 20px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
 .badge-live {
-  background: rgba(55, 214, 155, 0.14);
+  background: rgba(41, 229, 154, 0.14);
   color: var(--accent);
 }
 .badge-grad {
-  background: rgba(120, 150, 255, 0.16);
+  background: rgba(147, 167, 255, 0.16);
   color: #93a7ff;
 }
+.badge-new {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+}
 
-/* --- progress meter --- */
+/* --- live trades rail -------------------------------------------------------------------- */
+.rail {
+  position: sticky;
+  top: 76px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+@media (max-width: 1080px) {
+  /* `relative`, not `static`: drops the stickiness on narrow screens while still providing the
+     containing block the scroll-fade below is positioned against. */
+  .rail {
+    position: relative;
+    top: auto;
+  }
+}
+/* The feed clips at a row boundary, which reads as "that's all of them" rather than "there is
+   more". A fade over the last few pixels is the affordance that says: keep scrolling. */
+/* Scoped with :has so the fade appears only over an actual scrolling feed - it would otherwise sit
+   on top of the empty and indexer-down notices, dimming the very text explaining what happened. */
+.rail:has(.rail-scroll)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 34px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(15, 19, 27, 0), var(--bg-raised));
+}
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+/* The feed scrolls inside itself rather than stretching the page. Without this the rail sets the
+   document height, so a busy chain pushes the footer far below the board it belongs to. */
+.rail-scroll {
+  max-height: min(62vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.trade-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 7px var(--s-3);
+  border-bottom: 1px solid rgba(27, 35, 48, 0.6);
+  font-size: var(--fs-base);
+  transition: background var(--dur-fast) var(--ease);
+}
+.trade-row:last-child {
+  border-bottom: none;
+}
+.trade-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.trade-side {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.trade-side-buy {
+  color: var(--buy);
+}
+.trade-side-sell {
+  color: var(--sell);
+}
+.trade-symbol {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trade-eth {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.trade-age {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  text-align: right;
+}
+
+/* --- empty / degraded -------------------------------------------------------------------- */
+/* These are product states, not error pages. An unstyled paragraph in the middle of a designed
+   board reads as breakage even when the message says everything is fine. */
+.notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: var(--s-8) var(--s-5);
+  background: var(--bg-raised);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: var(--fs-base);
+}
+.notice-icon {
+  font-size: 22px;
+  opacity: 0.75;
+  line-height: 1;
+}
+.notice-title {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+.notice-body {
+  max-width: 46ch;
+}
+.notice-inline {
+  padding: var(--s-5) var(--s-4);
+}
+
+/* Skeletons: a loading board should have the SHAPE of the board, so the layout does not jump
+   and an empty grid never reads as "nothing launched yet". */
+.skeleton-card {
+  height: 148px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: linear-gradient(100deg, var(--bg-raised) 30%, var(--bg-raised-2) 50%, var(--bg-raised) 70%);
+  background-size: 250% 100%;
+  animation: shimmer 1.5s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/* --- progress meter (legacy, token page) -------------------------------------------------- */
 .progress {
   width: 100%;
 }
@@ -324,21 +844,111 @@ code {
   height: 100%;
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
   border-radius: 6px;
-  transition: width 0.4s ease;
+  transition: width 0.4s var(--ease);
 }
 .progress-meta {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   margin-top: 6px;
 }
 
-/* --- token page --- */
+/* --- legacy home classes (still referenced by other pages) -------------------------------- */
+.hero {
+  margin-bottom: var(--s-8);
+}
+.hero h1 {
+  font-size: var(--fs-2xl);
+  margin: 0 0 var(--s-2);
+  letter-spacing: -0.02em;
+}
+.hero p {
+  color: var(--text-dim);
+  max-width: 620px;
+  margin: 0;
+}
+.stat-row {
+  display: flex;
+  gap: 28px;
+  margin-top: var(--s-5);
+  flex-wrap: wrap;
+}
+.stat .stat-value {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+.stat .stat-label {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.token-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--s-4);
+}
+
+.token-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+.token-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+.token-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.token-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--bg-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.token-avatar-sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  font-size: var(--fs-xs);
+}
+.token-name {
+  font-weight: 600;
+  line-height: 1.2;
+}
+.token-symbol {
+  color: var(--text-faint);
+  font-size: var(--fs-base);
+  font-family: var(--mono);
+}
+
+/* --- token page --------------------------------------------------------------------------- */
 .token-layout {
   display: grid;
   grid-template-columns: 1fr 360px;
-  gap: 20px;
+  gap: var(--s-5);
   align-items: start;
 }
 @media (max-width: 900px) {
@@ -347,22 +957,22 @@ code {
   }
   .topbar-inner {
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--s-3);
   }
   .nav {
-    gap: 14px;
+    gap: var(--s-3);
   }
 }
 .col-stack {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--s-5);
 }
 
 .token-header {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--s-4);
 }
 .token-header h1 {
   margin: 0;
@@ -371,34 +981,34 @@ code {
 .kv-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 14px 20px;
+  gap: var(--s-3) var(--s-5);
 }
 .kv .kv-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .kv .kv-value {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: var(--fs-md);
   margin-top: 2px;
 }
 
-/* --- trade panel --- */
+/* --- trade panel --------------------------------------------------------------------------- */
 .tabs {
   display: flex;
   gap: 6px;
   background: var(--bg-inset);
   padding: 4px;
   border-radius: var(--radius-sm);
-  margin-bottom: 16px;
+  margin-bottom: var(--s-4);
 }
 .tab {
   flex: 1;
   text-align: center;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: 5px;
   font-weight: 600;
   color: var(--text-dim);
   cursor: pointer;
@@ -408,20 +1018,20 @@ code {
   font-size: 14px;
 }
 .tab.active-buy {
-  background: rgba(55, 214, 155, 0.16);
+  background: rgba(41, 229, 154, 0.16);
   color: var(--buy);
 }
 .tab.active-sell {
-  background: rgba(242, 97, 122, 0.16);
+  background: rgba(255, 92, 124, 0.16);
   color: var(--sell);
 }
 
 .field {
-  margin-bottom: 14px;
+  margin-bottom: var(--s-3);
 }
 .field label {
   display: block;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   margin-bottom: 6px;
   text-transform: uppercase;
@@ -435,12 +1045,12 @@ code {
   border-radius: var(--radius-sm);
   color: var(--text);
   padding: 11px 13px;
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-family: var(--sans);
 }
 .input-amount {
   font-family: var(--mono);
-  font-size: 18px;
+  font-size: var(--fs-lg);
 }
 .input:focus,
 .input-amount:focus {
@@ -451,7 +1061,7 @@ code {
 .quote-line {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text-dim);
   padding: 4px 0;
 }
@@ -460,32 +1070,32 @@ code {
 }
 
 .hint {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
   margin-top: 4px;
 }
 .error-text {
   color: var(--sell);
-  font-size: 13px;
-  margin-top: 8px;
+  font-size: var(--fs-base);
+  margin-top: var(--s-2);
 }
 .success-text {
   color: var(--accent);
-  font-size: 13px;
-  margin-top: 8px;
+  font-size: var(--fs-base);
+  margin-top: var(--s-2);
 }
 
 .pill-row {
   display: flex;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: var(--s-2);
 }
 .pill {
   background: var(--bg-inset);
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-pill);
   padding: 4px 11px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-family: var(--mono);
   cursor: pointer;
   color: var(--text-dim);
@@ -495,11 +1105,11 @@ code {
   color: var(--text);
 }
 
-/* --- tables --- */
+/* --- tables ------------------------------------------------------------------------------- */
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .table th {
   text-align: left;
@@ -507,8 +1117,8 @@ code {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 11px;
-  padding: 8px 10px;
+  font-size: var(--fs-xs);
+  padding: var(--s-2) 10px;
   border-bottom: 1px solid var(--border);
 }
 .table td {
@@ -526,7 +1136,7 @@ code {
   color: var(--sell);
 }
 .creator-row {
-  background: rgba(55, 214, 155, 0.06);
+  background: rgba(41, 229, 154, 0.06);
 }
 .you-tag {
   font-size: 10px;
@@ -537,20 +1147,20 @@ code {
   margin-left: 6px;
 }
 
-/* --- misc --- */
+/* --- misc ---------------------------------------------------------------------------------- */
 .muted {
   color: var(--text-dim);
 }
 .center-note {
   text-align: center;
   color: var(--text-dim);
-  padding: 48px 0;
+  padding: var(--s-12) 0;
 }
 .back-link {
   color: var(--text-dim);
   font-size: 14px;
   display: inline-block;
-  margin-bottom: 16px;
+  margin-bottom: var(--s-4);
 }
 .back-link:hover {
   color: var(--text);
@@ -576,20 +1186,20 @@ code {
   text-decoration: underline;
 }
 
-/* Footer. Deliberately plain — visual identity is the frontend-design pass. The attribution line
-   is a licence obligation (pools are unmodified Uniswap V3, GPL-2.0-or-later), so it stays
-   legible rather than hidden: dimmer and smaller than the tagline, but not decorative. */
+/* Footer. The attribution line is a licence obligation (pools are unmodified Uniswap V3,
+   GPL-2.0-or-later), so it stays legible rather than hidden: dimmer and smaller than the
+   tagline, but not decorative. */
 .footer {
   display: flex;
   flex-direction: column;
   gap: 6px;
   align-items: center;
   text-align: center;
-  padding: 32px 16px;
+  padding: var(--s-8) var(--s-4);
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .footer-attribution {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   opacity: 0.75;
 }

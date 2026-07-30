@@ -7,8 +7,9 @@ import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
 import { isDegraded } from '../lib/indexerHealth'
 import { getTokenImage } from '../lib/tokenMeta'
-import { explorerAddressUrl, formatEth, formatPriceX18, shortAddress } from '../lib/format'
-import { Avatar } from '../components/TokenCard'
+import { explorerAddressUrl, formatEth, shortAddress } from '../lib/format'
+import { Avatar } from '../components/Avatar'
+import { Price } from '../components/Price'
 import { CurveChart } from '../components/CurveChart'
 import { IndexedDataNotice } from '../components/IndexedDataNotice'
 import { OnchainTokenGate } from '../components/OnchainTokenGate'
@@ -51,7 +52,7 @@ export function TokenPage() {
         <div className="col-stack">
           <div className="card">
             <div className="token-header">
-              <Avatar image={image} symbol={symbol} />
+              <Avatar image={image} symbol={symbol} address={tokenAddr} />
               <div style={{ flex: 1 }}>
                 <h1>{name}</h1>
                 <div className="token-symbol">
@@ -93,7 +94,7 @@ export function TokenPage() {
             <p className="section-title">Curve stats</p>
             {token ? (
               <div className="kv-grid">
-                <Kv label="Price" value={`${formatPriceX18(BigInt(token.priceX18))} ETH`} />
+                <Kv label="Price" value={<Price priceX18={BigInt(token.priceX18)} />} />
                 <Kv label="Volume" value={`${formatEth(BigInt(token.volumeEth))} ETH`} />
                 <Kv label="ETH reserve" value={`${formatEth(BigInt(token.ethReserve))} ETH`} />
                 <Kv label="Trades" value={String(token.tradeCount)} />

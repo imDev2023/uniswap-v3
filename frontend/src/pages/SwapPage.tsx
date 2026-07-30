@@ -6,7 +6,7 @@ import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
 import { getTokenImage } from '../lib/tokenMeta'
 import { explorerAddressUrl, formatEth, shortAddress } from '../lib/format'
-import { Avatar } from '../components/TokenCard'
+import { Avatar } from '../components/Avatar'
 import { OnchainTokenGate } from '../components/OnchainTokenGate'
 import { SwapPanel } from '../components/SwapPanel'
 
@@ -78,7 +78,7 @@ export function SwapPage() {
       </Link>
 
       <div className="token-header" style={{ marginBottom: 20 }}>
-        <Avatar image={getTokenImage(tokenAddr)} symbol={symbol} />
+        <Avatar image={getTokenImage(tokenAddr)} symbol={symbol} address={tokenAddr} />
         <div style={{ flex: 1 }}>
           <h1 style={{ fontSize: 22, margin: 0 }}>Swap {symbol} / ETH</h1>
           <div className="token-symbol">

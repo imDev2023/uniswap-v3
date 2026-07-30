@@ -42,6 +42,11 @@ export interface TradeRow {
   txHash: string
 }
 
+/** A trade plus the launch it belongs to - the shape the cross-launch live feed needs. */
+export interface RecentTradeRow extends TradeRow {
+  token: { id: string; symbol: string }
+}
+
 export interface HolderRow {
   id: string
   account: string
@@ -189,6 +194,29 @@ export const HOLDERS_QUERY = gql`
   }
 `
 
+// Cross-launch trade feed for the board's live rail. Not filtered by token - this is the "something
+// is happening right now" signal, and restricting it to one launch would defeat the point. The
+// nested token selection is why Trade.token is a relation rather than a bare address.
+export const RECENT_TRADES_QUERY = gql`
+  query RecentTrades($first: Int!) {
+    trades(first: $first, orderBy: timestamp, orderDirection: desc) {
+      id
+      trader
+      type
+      amountEth
+      amountToken
+      priceX18
+      tokensSold
+      timestamp
+      txHash
+      token {
+        id
+        symbol
+      }
+    }
+  }
+`
+
 // graph-node's built-in health field. `block.timestamp` is a CHAIN timestamp, so comparing it to the
 // RPC head's timestamp gives real lag with no clock skew — unlike `synced`, which compares against
 // graph-node's own ingested head and reads true while genuinely behind.
@@ -248,6 +276,13 @@ export async function fetchToken(id: string): Promise<TokenWithGraduation | null
 export async function fetchTrades(token: string, first = 200): Promise<TradeRow[]> {
   const data = await subgraphClient.request<{ trades: TradeRow[] }>(TRADES_QUERY, {
     token: token.toLowerCase(),
+    first,
+  })
+  return data.trades
+}
+
+export async function fetchRecentTrades(first = 25): Promise<RecentTradeRow[]> {
+  const data = await subgraphClient.request<{ trades: RecentTradeRow[] }>(RECENT_TRADES_QUERY, {
     first,
   })
   return data.trades

@@ -1,4 +1,5 @@
 import { isDegraded, type IndexerState } from '../lib/indexerHealth'
+import { Notice } from './Notice'
 
 // Inline placeholder for a panel whose data comes from the indexer (chart, holders, curve stats).
 // Deliberately says what is missing and that it doesn't block trading, rather than showing an empty
@@ -16,9 +17,9 @@ export function IndexedDataNotice({
 }) {
   if (!isDegraded(state)) return null
   return (
-    <div className="center-note" role="status">
+    <Notice icon="◔" inline>
       {what} unavailable — the indexer is {state === 'down' ? 'unreachable' : 'behind the chain'}.
       Trading still works.
-    </div>
+    </Notice>
   )
 }

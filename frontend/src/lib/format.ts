@@ -22,12 +22,67 @@ export function formatTokenAmount(wei: bigint, maxDecimals = 2): string {
 /**
  * ETH price per whole token from a priceX18 (ETH-per-token scaled by 1e18). These prices are tiny
  * (e.g. ~3.75e-8 ETH), so render with enough precision or in exponential form.
+ *
+ * @deprecated Prefer {@link formatPriceParts} for anything a user reads. Exponential notation is
+ * unreadable at a glance and, because launchpad prices are essentially always below the 1e-6
+ * threshold, it was the format on EVERY price on the board. Kept only for chart tooltips and
+ * non-visual callers that want a single flat string.
  */
 export function formatPriceX18(priceX18: bigint): string {
   const price = Number(priceX18) / 1e18
   if (price === 0) return '0'
   if (price < 1e-6) return price.toExponential(3)
   return trimNumber(price, 9)
+}
+
+/**
+ * A price broken into renderable pieces. `subzero` is the compact leading-zero notation used across
+ * DEX UIs: 0.0₁₀3125 means "0.", then ten zeros, then the significant digits - far easier to compare
+ * at a glance than 3.125e-11, and it keeps prices sortable by eye down a column.
+ */
+export type PriceParts =
+  | { kind: 'plain'; text: string }
+  | { kind: 'subzero'; zeros: number; digits: string; text: string }
+
+/** Significant digits kept in the compact form. Four is enough to distinguish adjacent curve steps. */
+const PRICE_SIG_DIGITS = 4
+
+/**
+ * Minimum run of leading zeros before switching to subscript notation. Below this the plain decimal
+ * is still short enough to read, and 0.00042 is clearer than 0.0₃42.
+ */
+const SUBZERO_MIN_ZEROS = 4
+
+/**
+ * Format a priceX18 for display.
+ *
+ * @dev Works on the decimal STRING rather than converting to a JS number. `Number(priceX18) / 1e18`
+ *      loses precision on large values and reintroduces the exponential formatting this replaces -
+ *      the whole point is to control the digits ourselves. Significant digits are TRUNCATED, not
+ *      rounded, so a displayed price never overstates what the curve would actually charge.
+ */
+export function formatPriceParts(priceX18: bigint): PriceParts {
+  if (priceX18 <= 0n) return { kind: 'plain', text: '0' }
+
+  // Split into integer and 18-decimal fractional halves without touching floating point.
+  const raw = priceX18.toString().padStart(19, '0')
+  const intPart = raw.slice(0, -18).replace(/^0+(?=\d)/, '')
+  const fracPart = raw.slice(-18)
+
+  if (intPart !== '0') {
+    const frac = fracPart.slice(0, PRICE_SIG_DIGITS).replace(/0+$/, '')
+    return { kind: 'plain', text: frac ? `${intPart}.${frac}` : intPart }
+  }
+
+  const zeros = fracPart.length - fracPart.replace(/^0+/, '').length
+  const digits = fracPart.slice(zeros, zeros + PRICE_SIG_DIGITS).replace(/0+$/, '') || '0'
+
+  if (zeros < SUBZERO_MIN_ZEROS) {
+    return { kind: 'plain', text: `0.${'0'.repeat(zeros)}${digits}` }
+  }
+  // `text` is the expanded form, for tooltips, copy-paste and screen readers - the subscript is a
+  // visual compression, so the accessible name must still be the real number.
+  return { kind: 'subzero', zeros, digits, text: `0.${'0'.repeat(zeros)}${digits}` }
 }
 
 export function priceEthPerToken(priceX18: bigint): number {
@@ -38,6 +93,50 @@ export function priceEthPerToken(priceX18: bigint): number {
 export function shortAddress(addr: string): string {
   if (!addr || addr.length < 10) return addr
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
+
+const SUBSCRIPT_DIGITS = '₀₁₂₃₄₅₆₇₈₉'
+
+/**
+ * The same compact price as {@link formatPriceParts}, but as a single plain string using Unicode
+ * subscript digits: "0.0₁₀3124".
+ *
+ * For contexts that cannot hold markup - chart axis ticks, tooltips, `title` attributes - where the
+ * alternative is falling back to exponential notation and reintroducing the problem in exactly the
+ * places a reader is trying to compare values.
+ */
+export function formatPriceCompactText(priceX18: bigint): string {
+  const parts = formatPriceParts(priceX18)
+  if (parts.kind === 'plain') return parts.text
+  const zeros = String(parts.zeros)
+    .split('')
+    .map((d) => SUBSCRIPT_DIGITS[Number(d)])
+    .join('')
+  return `0.0${zeros}${parts.digits}`
+}
+
+/**
+ * Compact relative age, e.g. "12s", "5m", "3h", "2d".
+ *
+ * @dev `now` is injected rather than read from Date.now() inside, so the board's ages are testable
+ *      and so every row in one render shares a single clock - computing "now" per row makes a long
+ *      list drift against itself.
+ *
+ *      Chain timestamps can sit slightly ahead of the browser clock (block timestamps have ~1s of
+ *      slack, and users' clocks are not synchronised), which would otherwise render as a negative
+ *      age. Future timestamps clamp to "now" instead.
+ */
+export function formatAge(timestampSeconds: number | string, nowSeconds: number): string {
+  const then = Number(timestampSeconds)
+  if (!Number.isFinite(then)) return '-'
+
+  const secs = Math.max(0, Math.floor(nowSeconds - then))
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
 }
 
 export function formatPercent(fraction: number, maxDecimals = 1): string {

@@ -1,93 +1,134 @@
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { isLaunchpadConfigured } from '../config/contracts'
-import { useActiveTokens, useFactoryStats, useGraduatedTokens } from '../hooks/useSubgraph'
+import {
+  useActiveTokens,
+  useFactoryStats,
+  useGraduatedTokens,
+  useRecentTrades,
+} from '../hooks/useSubgraph'
+import { useNowSeconds } from '../hooks/useNowSeconds'
 import { formatEth } from '../lib/format'
-import { TokenCard } from '../components/TokenCard'
+import { DEFAULT_SORT, SORT_MODES, sortTokens, type SortMode } from '../lib/board'
+import { BoardCard } from '../components/BoardCard'
+import { GraduationTicker } from '../components/GraduationTicker'
+import { TradeRail } from '../components/TradeRail'
+import { Notice } from '../components/Notice'
 
+/**
+ * The live board.
+ *
+ * Structure follows the Stage 3 decision to re-think flows rather than only restyle. The previous
+ * page led with a full-height hero, then a row of GRADUATED cards, and only then the live curves -
+ * so the two things a visitor can act on (buy a live curve, launch one) sat below the fold behind
+ * the one thing they cannot. Now: a slim masthead, graduations compressed to a ticker, and the
+ * board itself immediately, with a live cross-launch trade feed alongside it.
+ *
+ * The Stage 2 split is preserved: everything here is indexer-derived DISCOVERY, and every panel
+ * degrades to its own labelled notice. Trading never depends on this page.
+ */
 export function HomePage() {
   const { data: tokens, isLoading, isError } = useActiveTokens()
   const { data: graduated } = useGraduatedTokens()
   const { data: stats } = useFactoryStats()
+  const { data: trades, isError: tradesError, isLoading: tradesLoading } = useRecentTrades()
+  const [sort, setSort] = useState<SortMode>(DEFAULT_SORT)
+
+  // One clock for the whole render, so every age on the page agrees with every other.
+  const now = useNowSeconds()
+
+  const sorted = useMemo(() => sortTokens(tokens ?? [], sort), [tokens, sort])
 
   return (
     <>
-      <section className="hero">
-        <h1>Launch fair. Graduate locked.</h1>
-        <p>
-          Create a token on a bonding curve with zero upfront liquidity. It graduates automatically
-          into a permanently-locked Octopus pool the instant it fills — no pre-mine, no rug.
-        </p>
-        <div className="stat-row">
-          <div className="stat">
-            <div className="stat-value num">{stats?.launchCount ?? '—'}</div>
-            <div className="stat-label">Tokens launched</div>
+      <section className="masthead">
+        <div>
+          <h1>Launch fair. Graduate locked.</h1>
+          <p>
+            Bonding curves with zero upfront liquidity. Every graduation locks its pool forever - no
+            pre-mine, no rug.
+          </p>
+        </div>
+        <div className="masthead-stats">
+          <div>
+            <div className="mstat-value num">{stats?.launchCount ?? '-'}</div>
+            <div className="mstat-label">Launched</div>
           </div>
-          <div className="stat">
-            <div className="stat-value num">{stats?.graduationCount ?? '—'}</div>
-            <div className="stat-label">Graduated</div>
+          <div>
+            <div className="mstat-value num">{stats?.graduationCount ?? '-'}</div>
+            <div className="mstat-label">Graduated</div>
           </div>
-          <div className="stat">
-            <div className="stat-value num">
+          <div>
+            <div className="mstat-value num">
               {stats ? formatEth(BigInt(stats.totalVolumeEth)) : '—'}
             </div>
-            <div className="stat-label">Curve volume (ETH)</div>
+            <div className="mstat-label">Volume (ETH)</div>
           </div>
         </div>
       </section>
 
-      {graduated && graduated.length > 0 && (
-        <section style={{ marginBottom: 36 }}>
-          <div className="row-between" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, margin: 0 }}>
-              <span className="brand-mark" style={{ marginRight: 8 }}>
-                🎓
-              </span>
-              Just graduated
+      {graduated && graduated.length > 0 && <GraduationTicker tokens={graduated} now={now} />}
+
+      <div className="board-layout">
+        <main>
+          <div className="board-head">
+            <h2 className="board-title">
+              <span className="live-dot" aria-hidden="true" />
+              Live curves
+              {sorted.length > 0 && <span className="board-count">{sorted.length}</span>}
             </h2>
-            <span className="muted" style={{ fontSize: 13 }}>
-              liquidity locked forever
-            </span>
+            <div className="sorts" role="group" aria-label="Sort live curves">
+              {SORT_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className="sort"
+                  title={m.title}
+                  aria-pressed={sort === m.id}
+                  onClick={() => setSort(m.id)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="token-grid">
-            {graduated.map((t) => (
-              <TokenCard key={t.id} token={t} />
-            ))}
-          </div>
-        </section>
-      )}
 
-      <div className="row-between" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 18, margin: 0 }}>Live curves</h2>
-        <Link to="/create" className="link-accent">
-          + Launch a token
-        </Link>
+          {!isLaunchpadConfigured ? (
+            <Notice icon="⚙" title="Not configured for this build">
+              The launchpad contract addresses aren’t set - see the banner above.
+            </Notice>
+          ) : isError ? (
+            // Browsing the launch list is a DISCOVERY feature and genuinely needs the indexer.
+            // Trading does not (Stage 2) - so say what still works, and give a way through: anyone
+            // holding a token address can still reach its trade page directly.
+            <Notice icon="◔" title="Can’t reach the indexer">
+              The live-curve list can’t load. Trading is unaffected - open a token directly at{' '}
+              <code>/token/&lt;address&gt;</code> to buy, sell or swap it.
+            </Notice>
+          ) : isLoading ? (
+            <div className="board-grid" aria-busy="true" aria-label="Loading curves">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="skeleton-card" />
+              ))}
+            </div>
+          ) : sorted.length === 0 ? (
+            <Notice icon="🐙" title="No live curves yet">
+              Nothing is on the curve right now.{' '}
+              <Link to="/create" className="link-accent">
+                Launch the first one →
+              </Link>
+            </Notice>
+          ) : (
+            <div className="board-grid">
+              {sorted.map((t) => (
+                <BoardCard key={t.id} token={t} now={now} />
+              ))}
+            </div>
+          )}
+        </main>
+
+        <TradeRail trades={trades} now={now} isError={tradesError} isLoading={tradesLoading} />
       </div>
-
-      {!isLaunchpadConfigured ? (
-        <p className="center-note">
-          The launchpad contracts aren’t configured for this build yet — see the banner above.
-        </p>
-      ) : isError ? (
-        // Browsing the launch list is a DISCOVERY feature and genuinely needs the indexer. Trading
-        // does not (Stage 2) — so say what still works, and give a way through: anyone holding a
-        // token address can still reach its trade page directly.
-        <p className="center-note">
-          Couldn’t reach the indexer, so the live-curve list can’t load. Trading is unaffected — open
-          a token directly at <code>/token/&lt;address&gt;</code> to buy, sell or swap it.
-        </p>
-      ) : isLoading ? (
-        <div className="spinner">Loading curves…</div>
-      ) : !tokens || tokens.length === 0 ? (
-        <p className="center-note">
-          No live curves yet. <Link to="/create" className="link-accent">Launch the first one →</Link>
-        </p>
-      ) : (
-        <div className="token-grid">
-          {tokens.map((t) => (
-            <TokenCard key={t.id} token={t} />
-          ))}
-        </div>
-      )}
     </>
   )
 }

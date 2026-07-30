@@ -5,6 +5,7 @@ import {
   explorerTxUrl,
   formatEth,
   formatPercent,
+  formatPriceParts,
   formatPriceX18,
   formatTokenAmount,
   priceEthPerToken,
@@ -41,6 +42,58 @@ describe('formatPriceX18', () => {
   })
   it('renders zero as 0', () => {
     expect(formatPriceX18(0n)).toBe('0')
+  })
+})
+
+describe('formatPriceParts', () => {
+  it('uses subscript notation for the tiny prices launches actually trade at', () => {
+    // 3.125e-11 ETH - QUIET's opening price on live testnet. Was rendered "3.125e-11".
+    expect(formatPriceParts(31_249_999n)).toEqual({
+      kind: 'subzero',
+      zeros: 10,
+      digits: '3124',
+      text: '0.00000000003124',
+    })
+  })
+
+  it('truncates rather than rounds, so a shown price never overstates the curve', () => {
+    // 31_249_999 -> "3124", not "3125": a buyer must never be quoted better than reality.
+    const parts = formatPriceParts(31_249_999n)
+    expect(parts.kind === 'subzero' && parts.digits).toBe('3124')
+  })
+
+  it('counts zeros from the decimal point, not from the first significant digit', () => {
+    // 5e-10 ETH (META / SEND at graduation) => 0.0₉5
+    expect(formatPriceParts(499_999_999n)).toMatchObject({ kind: 'subzero', zeros: 9, digits: '4999' })
+  })
+
+  it('stays plain when there are few enough leading zeros to read directly', () => {
+    // 0.00042 ETH - three zeros, below the subscript threshold.
+    expect(formatPriceParts(420_000_000_000_000n)).toEqual({ kind: 'plain', text: '0.00042' })
+  })
+
+  it('handles prices at or above 1 ETH', () => {
+    expect(formatPriceParts(10n ** 18n)).toEqual({ kind: 'plain', text: '1' })
+    expect(formatPriceParts(2n * 10n ** 18n + 5n * 10n ** 17n)).toEqual({
+      kind: 'plain',
+      text: '2.5',
+    })
+  })
+
+  it('renders zero and negatives as plain 0 rather than an infinite zero run', () => {
+    expect(formatPriceParts(0n)).toEqual({ kind: 'plain', text: '0' })
+    expect(formatPriceParts(-1n)).toEqual({ kind: 'plain', text: '0' })
+  })
+
+  it('does not lose precision on large values the way Number() would', () => {
+    // Number(priceX18)/1e18 goes through a double here; the string path must not.
+    const parts = formatPriceParts(123_456_789_012_345_678_901n)
+    expect(parts).toEqual({ kind: 'plain', text: '123.4567' })
+  })
+
+  it('keeps the expanded text usable as an accessible label', () => {
+    const parts = formatPriceParts(31_249_999n)
+    expect(Number(parts.text)).toBeCloseTo(3.124e-11, 20)
   })
 })
 

@@ -4,6 +4,7 @@ import {
   fetchFactory,
   fetchGraduatedTokens,
   fetchHolders,
+  fetchRecentTrades,
   fetchToken,
   fetchTrades,
 } from '../lib/subgraph'
@@ -52,6 +53,15 @@ export function useHolders(token: string | undefined) {
     queryKey: ['holders', token?.toLowerCase()],
     queryFn: () => fetchHolders(token!),
     enabled: !!token,
+    refetchInterval: LIVE_REFETCH_MS,
+  })
+}
+
+/** Cross-launch trade feed powering the board's live rail. */
+export function useRecentTrades(first = 25) {
+  return useQuery({
+    queryKey: ['recentTrades', first],
+    queryFn: () => fetchRecentTrades(first),
     refetchInterval: LIVE_REFETCH_MS,
   })
 }

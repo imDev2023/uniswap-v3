@@ -54,17 +54,26 @@ export function TokenTradeFeed({
   const arrivals = useArrivals(ids)
   const [scrollRef, scrollable] = useIsScrollable()
 
+  // A behind-the-chain indexer does NOT error - it answers successfully with an empty list for a
+  // token it has not reached yet. So "no rows" alone can never justify "no trades yet", and the
+  // health state has to be consulted on the empty branch too, not only on the error branch. Left
+  // unchecked this rendered "No trades yet. The first buy shows up here." over a curve that had
+  // already traded four times, under a pulsing Live dot.
+  const degraded = isDegraded(indexerState)
+
   return (
     <div className="card-flush">
       <div className="rail-head">
-        {!graduated && <span className="live-dot" aria-hidden="true" />}
+        {/* The dot claims real-time. An indexer hours behind is not real-time, so it goes - for the
+            same reason a graduated curve does not get one. */}
+        {!graduated && !degraded && <span className="live-dot" aria-hidden="true" />}
         {graduated ? 'Curve trades' : 'Live trades'}
       </div>
 
       {isError ? (
         // IndexedDataNotice renders nothing when the indexer looks healthy, which would leave this
         // panel silently blank if the query failed for some other reason. Always say something.
-        isDegraded(indexerState) ? (
+        degraded ? (
           <IndexedDataNotice state={indexerState} what="Trade feed" />
         ) : (
           <Notice icon="◔" inline>
@@ -76,11 +85,15 @@ export function TokenTradeFeed({
           Loading…
         </div>
       ) : newestFirst.length === 0 ? (
-        <Notice icon="◦" inline>
-          {graduated
-            ? 'No curve trades were recorded before graduation.'
-            : 'No trades yet. The first buy shows up here.'}
-        </Notice>
+        degraded ? (
+          <IndexedDataNotice state={indexerState} what="Trade feed" />
+        ) : (
+          <Notice icon="◦" inline>
+            {graduated
+              ? 'No curve trades were recorded before graduation.'
+              : 'No trades yet. The first buy shows up here.'}
+          </Notice>
+        )
       ) : (
         <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>
           {newestFirst.map((t) => (

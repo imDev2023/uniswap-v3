@@ -520,6 +520,25 @@ Progress moves whenever `churn()` is run again, so treat the percentages as indi
 ⚠️ This set reuses the ticker **`RDOGE`** at a different address from the one on the superseded
 factory. They are unrelated launches.
 
+### Metadata launches added 2026-07-31 (build #30)
+
+The seeded set above deliberately covers the metadata cases that FAIL, but it left no case that
+SUCCEEDS, so the read side had no happy path to be built against.
+Note `META`'s URI is not one: its CID resolves `200` with a **zero-byte body**, and `OCAT`/`BOOTS`
+are structurally valid CIDs that were never pinned (both answer `504`).
+
+| Symbol | Token | Metadata URI | Exercises |
+| --- | --- | --- | --- |
+| `ORICH` | `0x439F067FbCe73A6eB6e9e638B327370BF8c79D96` | `data:application/json;base64,…` | Full document - name, description, two links, and a nested `ipfs://` image. Depends on **no gateway**, so it stays a working fixture even if every public gateway is down. |
+| `OPIN` | `0x5a3184C973d268Ab674F5b039F97e86Ee8456F84` | `ipfs://QmeSjSinHpPnmXmspMjwiXyN6zS4E9zccariGR3jxcaWtq/1` | The real IPFS path: a widely-pinned CIDv0 with a directory path, so it also covers the CIDv0 spelling that cannot be expressed as a gateway subdomain. |
+
+`ORICH` also received four buys (~0.011 ETH total) so the chart and range selector had a real
+irregular series to re-derive.
+
+Created with `cast send $FACTORY "createLaunch(string,string,string)" <name> <symbol> <uri>
+--value 0.01ether`.
+⚠️ Both are permanent and their URIs can never be changed - `metadataURI` has no setter.
+
 ⚠️ **There is no longer a never-traded launch on testnet.** `QUIET` was created untraded on purpose
 (it is the regression case for the `priceX18 = 0` bug fixed in #24, and for the board's "New" card
 state), but `churn()` bought it up to ~2%. Create a fresh one with `createLaunch` and simply do not

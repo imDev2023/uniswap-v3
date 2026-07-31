@@ -7,7 +7,6 @@ import { FACTORY_ADDRESS, isLaunchpadConfigured } from '../config/contracts'
 import { activeChain } from '../config/chain'
 import { shortReason } from '../lib/errors'
 import { formatEth } from '../lib/format'
-import { setTokenImage } from '../lib/tokenMeta'
 import { useWrongChain } from '../hooks/useWrongChain'
 import { ConnectButton } from '../components/ConnectButton'
 
@@ -20,7 +19,6 @@ export function CreatePage() {
 
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
-  const [image, setImage] = useState('')
   // Goes on-chain, permanently. v1 is "bring your own URI": the creator supplies one they have
   // already pinned. Uploading and pinning on the creator's behalf needs a pinning API key, which
   // cannot live in a Vite bundle, so that flow needs a server-side endpoint (Stage 3).
@@ -54,8 +52,9 @@ export function CreatePage() {
     })
   }
 
-  // When the tx confirms, pull the new token address out of LaunchCreated, persist the image
-  // client-side (no on-chain image field in v1), and jump to the token page.
+  // When the tx confirms, pull the new token address out of LaunchCreated and jump to the token
+  // page. Nothing is persisted client-side any more: the metadata URI went on-chain in #24 and is
+  // resolved from there, so a launch looks the same in every browser.
   const newToken = useMemo(() => {
     if (!receipt) return undefined
     const logs = parseEventLogs({
@@ -68,9 +67,8 @@ export function CreatePage() {
 
   useEffect(() => {
     if (!newToken) return
-    if (image.trim()) setTokenImage(newToken, image)
     navigate(`/token/${newToken}`)
-  }, [newToken, image, navigate])
+  }, [newToken, navigate])
 
   if (!isLaunchpadConfigured) {
     return <p className="center-note">Launching is disabled until the contracts are configured.</p>
@@ -111,20 +109,11 @@ export function CreatePage() {
           {symbol && symbolError && <div className="error-text">{symbolError}</div>}
         </div>
 
-        <div className="field">
-          <label htmlFor="image">Image URL (optional)</label>
-          <input
-            id="image"
-            className="input"
-            placeholder="https://…"
-            value={image}
-            onChange={(e) => setImage(e.target.value)}
-          />
-          <div className="hint">
-            Stored in your browser only — a local preview until metadata rendering ships.
-          </div>
-        </div>
-
+        {/* The "Image URL" field that used to sit here is gone. It wrote to a per-browser
+            localStorage map and its own hint called it "a local preview until metadata rendering
+            ships" - which is this ticket. Keeping it would offer a creator an image that only they,
+            on that one machine, would ever see, while the field right below it is the one that
+            actually travels with the token. */}
         <div className="field">
           <label htmlFor="metadataURI">Metadata URI (optional)</label>
           <input

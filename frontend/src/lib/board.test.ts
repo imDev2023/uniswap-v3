@@ -6,6 +6,8 @@ function token(over: Partial<TokenRow> & { id: string }): TokenRow {
   return {
     curve: '0xcurve',
     creator: '0xcreator',
+    // Empty is the common case: v1 is bring-your-own-URI and most launches carry no URI.
+    metadataURI: '',
     name: over.id,
     symbol: over.id.toUpperCase(),
     createdAtTimestamp: '1000',

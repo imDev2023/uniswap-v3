@@ -7,7 +7,8 @@ import { useHolders, useToken, useTrades } from '../hooks/useSubgraph'
 import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
 import { isDegraded } from '../lib/indexerHealth'
-import { getTokenImage } from '../lib/tokenMeta'
+import { useOnchainMetadataUri, useTokenMetadata } from '../hooks/useTokenMetadata'
+import { TokenIdentity } from '../components/TokenIdentity'
 import { explorerAddressUrl, formatEth, shortAddress } from '../lib/format'
 import { Avatar } from '../components/Avatar'
 import { Price } from '../components/Price'
@@ -28,6 +29,10 @@ export function TokenPage() {
 
   const onchain = useOnchainToken(tokenAddr)
   const indexer = useIndexerStatus()
+  // Read over RPC, not from the subgraph, so a launch keeps its identity through an indexer outage
+  // - the same reason the trade path was decoupled in Stage 2.
+  const metadataUri = useOnchainMetadataUri(tokenAddr)
+  const meta = useTokenMetadata(tokenAddr, metadataUri)
 
   const { data: token } = useToken(tokenAddr)
   const tradesQuery = useTrades(tokenAddr)
@@ -40,7 +45,6 @@ export function TokenPage() {
 
   const { curve, name, symbol } = onchain
   const graduated = onchain.status !== 'on-curve'
-  const image = getTokenImage(tokenAddr)
   const explorer = activeChain.blockExplorers?.default.url ?? ''
   // Only complain about missing indexed panels when the indexer is actually degraded. A token that
   // simply hasn't been indexed yet (launched seconds ago) is a normal, transient empty state.
@@ -56,7 +60,7 @@ export function TokenPage() {
         <div className="col-stack">
           <div className="card">
             <div className="token-header">
-              <Avatar image={image} symbol={symbol} address={tokenAddr} />
+              <Avatar image={meta?.image} symbol={symbol} address={tokenAddr} />
               <div style={{ flex: 1 }}>
                 <h1>{name}</h1>
                 <div className="token-symbol">
@@ -75,6 +79,8 @@ export function TokenPage() {
                 {graduated ? 'Graduated' : 'Live'}
               </span>
             </div>
+
+            <TokenIdentity address={tokenAddr} meta={meta} />
 
             <div style={{ marginTop: 20 }}>
               {indexedMissing ? (

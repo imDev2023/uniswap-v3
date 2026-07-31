@@ -1378,3 +1378,90 @@ code {
   font-size: var(--fs-sm);
   opacity: 0.75;
 }
+
+/* --- creator-supplied token identity (build/30) ----------------------------------------- */
+/* Third-party text and links from a metadata document. Deliberately quiet: this is the one
+   block on the page whose content we did not author and cannot vouch for, so it reads as a
+   quotation rather than as our own copy. */
+.token-identity {
+  margin-top: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.token-blurb {
+  margin: var(--s-4) 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  /* A description is arbitrary third-party text, so it must not be able to widen the card or
+     spill out of it - a single 400-character unbroken "word" is a trivial layout attack. */
+  overflow-wrap: anywhere;
+}
+.token-blurb-muted {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.token-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.token-link {
+  padding: 4px var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-decoration: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.token-link:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* --- chart range selector (build/30) ---------------------------------------------------- */
+/* Reuses the board sort control's visual language: same inset track, same pressed treatment.
+   Two segmented pickers on one page that looked different would read as different KINDS of
+   control when they do the same thing - pick one of N. Smaller and right-aligned, because this
+   one qualifies the panel it sits in rather than the whole page. */
+.chart-ranges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-bottom: var(--s-3);
+  margin-left: auto;
+  width: fit-content;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  padding: 3px;
+  border-radius: var(--radius-sm);
+}
+.chart-range {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 4px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.chart-range:hover {
+  color: var(--text);
+}
+.chart-range[aria-pressed='true'] {
+  background: var(--bg-raised-2);
+  color: var(--accent);
+}

@@ -12,6 +12,7 @@ import { useNowSeconds } from '../hooks/useNowSeconds'
 import { useArrivals } from '../hooks/useArrivals'
 import { useIndexerStatus } from '../hooks/useIndexerStatus'
 import { formatEth } from '../lib/format'
+import { isHidden, withoutHidden } from '../lib/denylist'
 import { DEFAULT_SORT, SORT_MODES, orderByFor, sortTokens, type SortMode } from '../lib/board'
 import { BoardCard } from '../components/BoardCard'
 import { GraduationTicker } from '../components/GraduationTicker'
@@ -46,7 +47,19 @@ export function HomePage() {
 
   // The server has already ranked these; sortTokens only applies the deterministic tiebreak so
   // equal-keyed rows (nine untraded launches from one block) hold still between polls.
-  const sorted = useMemo(() => sortTokens(tokens ?? [], sort), [tokens, sort])
+  //
+  // Moderation is applied to every discovery surface on this page - board, graduation ticker and
+  // trade rail - because hiding a launch from one of three places it appears is not hiding it. The
+  // filter is deliberately here and not in the queries: it is a rendering policy of ours, not a
+  // claim about what the chain contains, and the token stays fully reachable and tradeable by
+  // direct link. See config/denylist.ts.
+  const sorted = useMemo(() => sortTokens(withoutHidden(tokens ?? []), sort), [tokens, sort])
+  const visibleGraduated = useMemo(() => withoutHidden(graduated ?? []), [graduated])
+  // Keyed off the traded token rather than the trade's own id, which is a tx hash.
+  const visibleTrades = useMemo(
+    () => (trades ?? []).filter((t) => !isHidden(t.token.id)),
+    [trades],
+  )
 
   // New launches flash in, so a board that changes while you are looking at it says so.
   const boardIds = useMemo(() => sorted.map((t) => t.id), [sorted])
@@ -84,7 +97,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <GraduationTicker tokens={graduated} now={now} isError={graduatedError} />
+      <GraduationTicker tokens={visibleGraduated} now={now} isError={graduatedError} />
 
       <div className="board-layout">
         <main>
@@ -145,7 +158,7 @@ export function HomePage() {
         </main>
 
         <TradeRail
-          trades={trades}
+          trades={visibleTrades}
           now={now}
           isError={tradesError}
           isLoading={tradesLoading}

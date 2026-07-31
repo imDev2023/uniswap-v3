@@ -4,7 +4,7 @@ import { useOnchainToken } from '../hooks/useOnchainToken'
 import { useToken } from '../hooks/useSubgraph'
 import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
-import { getTokenImage } from '../lib/tokenMeta'
+import { useOnchainMetadataUri, useTokenMetadata } from '../hooks/useTokenMetadata'
 import { explorerAddressUrl, formatEth } from '../lib/format'
 import { Avatar } from '../components/Avatar'
 import { OnchainTokenGate } from '../components/OnchainTokenGate'
@@ -26,6 +26,10 @@ export function SwapPage() {
   // Garnish only. Never gates rendering, and its failure is ignored rather than surfaced —
   // the banner in App already explains an indexer outage once, globally.
   const { data: indexed } = useToken(tokenAddr)
+  // RPC-sourced like everything else on this page, so the token still looks like itself during an
+  // indexer outage.
+  const metadataUri = useOnchainMetadataUri(tokenAddr)
+  const meta = useTokenMetadata(tokenAddr, metadataUri)
 
   if (!tokenAddr) return <p className="center-note">Invalid token address.</p>
   if (!isTradeable(onchain)) return <OnchainTokenGate token={onchain} />
@@ -82,7 +86,7 @@ export function SwapPage() {
           which wrapped under the avatar at this width. The pool facts below own those details now,
           so the header carries identity only. */}
       <div className="token-header" style={{ marginBottom: 'var(--s-5)' }}>
-        <Avatar image={getTokenImage(tokenAddr)} symbol={symbol} address={tokenAddr} />
+        <Avatar image={meta?.image} symbol={symbol} address={tokenAddr} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="swap-title">Swap {symbol} / ETH</h1>
           <div className="token-symbol">

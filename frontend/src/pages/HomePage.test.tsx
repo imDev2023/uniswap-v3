@@ -53,6 +53,8 @@ function token(over: Partial<TokenRow> & { id: string; symbol: string }): TokenR
   return {
     curve: '0xcurve',
     creator: '0xcreator',
+    // Empty is the common case: v1 is bring-your-own-URI and most launches carry no URI.
+    metadataURI: '',
     // Distinct from the symbol so a query for "RDOGE" matches the symbol element alone - a card
     // renders both, and identical values make every text query ambiguous.
     name: `${over.symbol} Coin`,

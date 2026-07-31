@@ -36,10 +36,16 @@ export function TradeRail({
   const arrivals = useArrivals(ids)
   const [scrollRef, scrollable] = useIsScrollable()
 
+  // An indexer that is merely BEHIND answers successfully with an empty list, so the error branch
+  // below never sees it and "no rows" cannot on its own mean "nobody has traded". The same check
+  // therefore has to guard the empty branch.
+  const degraded = isDegraded(indexerState)
+
   return (
     <aside className="rail" aria-label="Recent trades">
       <div className="rail-head">
-        <span className="live-dot" aria-hidden="true" />
+        {/* A pulsing dot asserts real-time; drop it when the data demonstrably is not. */}
+        {!degraded && <span className="live-dot" aria-hidden="true" />}
         Live trades
       </div>
 
@@ -48,7 +54,7 @@ export function TradeRail({
         // failure, which states something false whenever the indexer is demonstrably healthy and
         // the request failed for some other reason - the same class of confident wrong claim the
         // rest of this work exists to remove.
-        isDegraded(indexerState) ? (
+        degraded ? (
           <IndexedDataNotice state={indexerState} what="Trade feed" />
         ) : (
           <Notice icon="◔" inline>
@@ -60,9 +66,13 @@ export function TradeRail({
           Loading…
         </div>
       ) : !trades || trades.length === 0 ? (
-        <Notice icon="◦" inline>
-          No trades yet. The first buy shows up here.
-        </Notice>
+        degraded ? (
+          <IndexedDataNotice state={indexerState} what="Trade feed" />
+        ) : (
+          <Notice icon="◦" inline>
+            No trades yet. The first buy shows up here.
+          </Notice>
+        )
       ) : (
         <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>
           {trades.map((t) => (

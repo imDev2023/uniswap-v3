@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AreaSeries,
   ColorType,
@@ -24,6 +24,13 @@ import {
   seriesSpanSeconds,
 } from '../lib/priceSeries'
 import { useNowSeconds } from '../hooks/useNowSeconds'
+import {
+  CHART_RANGES,
+  DEFAULT_RANGE,
+  rangeFrom,
+  rangeLabel,
+  type ChartRangeId,
+} from '../lib/chartRange'
 
 // Marginal curve price after each indexed trade (spec story 27). Purely a subgraph read - the series
 // is deterministic from the Bought/Sold events, with no eth_calls and no price oracle.
@@ -93,13 +100,27 @@ export function CurveChart({
   // silently thrown away a few seconds after it is made.
   const viewerMovedRef = useRef(false)
 
+  const [range, setRange] = useState<ChartRangeId>(DEFAULT_RANGE)
+
   // Shared page clock, so the flat tail advances instead of freezing at first-render's `now`.
   const now = useNowSeconds()
+  // `from` re-enters the BUILD rather than being applied as a zoom afterwards. Resampling fixes the
+  // grid's resolution before the chart sees the data, so magnifying a dense cluster of a long span
+  // shows a flat plateau - the detail is already gone. Narrowing the window is what re-derives it.
   const series = useMemo(
-    () => buildPriceSeries(trades, { nowSeconds: now, extendToNow: !graduated }),
-    [trades, now, graduated],
+    () =>
+      buildPriceSeries(trades, {
+        nowSeconds: now,
+        extendToNow: !graduated,
+        from: rangeFrom(range, now),
+      }),
+    [trades, now, graduated, range],
   )
   const isEmpty = series.points.length === 0
+  // Distinguishes "this curve has never traded" from "nothing happened in the last hour". Both draw
+  // an empty plot, and telling a viewer a traded curve has no trades is the exact class of false
+  // claim this chart was rewritten to remove.
+  const hasAnyTrades = trades.length > 0
   // A full page means the subgraph almost certainly had more; the oldest row here is not the
   // curve's first trade and the caption must not let it read as one.
   const isWindowed = trades.length >= TRADE_HISTORY_LIMIT
@@ -231,6 +252,14 @@ export function CurveChart({
     })
   }, [series])
 
+  // Picking a range is the viewer explicitly handing the viewport back. Without this, someone who
+  // had zoomed and then chose "1H" would keep the old framing over completely different data - the
+  // chart would be showing a window they never asked for. It is the same ownership rule as below,
+  // read in the other direction: their pan claims the viewport, their range choice releases it.
+  useEffect(() => {
+    viewerMovedRef.current = false
+  }, [range])
+
   // --- frame the view ---
   // Deliberately separate from feeding the data. They run on the same input but answer to different
   // owners: the data is ours and must track the chain, whereas the viewport belongs to whoever is
@@ -249,12 +278,43 @@ export function CurveChart({
       .setVisibleLogicalRange({ from: -pad, to: series.points.length - 1 + pad })
   }, [series])
 
-  if (isEmpty) {
+  // A curve that has genuinely never traded needs no range control - there is nothing to range over,
+  // and offering one implies data exists somewhere behind it.
+  if (isEmpty && !hasAnyTrades) {
     return <div className="center-note">No trades yet — be the first to buy this curve.</div>
+  }
+
+  const picker = (
+    <div className="chart-ranges" role="group" aria-label="Chart time range">
+      {CHART_RANGES.map((r) => (
+        <button
+          key={r.id}
+          type="button"
+          className="chart-range"
+          title={r.title}
+          aria-pressed={range === r.id}
+          onClick={() => setRange(r.id)}
+        >
+          {r.label}
+        </button>
+      ))}
+    </div>
+  )
+
+  // Empty because of the RANGE, not because the curve is untraded. The control has to stay on
+  // screen: without it, picking "1H" on a quiet curve leaves a dead panel and no way back to ALL.
+  if (isEmpty) {
+    return (
+      <div className="chart-block">
+        {picker}
+        <div className="center-note">No trades in the {rangeLabel(range)}.</div>
+      </div>
+    )
   }
 
   return (
     <div className="chart-block">
+      {picker}
       <div className="chart-wrap" ref={containerRef} />
       <p className="chart-caption">
         {graduated
@@ -262,8 +322,9 @@ export function CurveChart({
           : 'Marginal curve price - flat between trades, because the curve only moves when someone trades.'}
         {series.bucketSeconds > 1 && ` Sampled every ${formatDuration(series.bucketSeconds)}.`}
         {/* The window is the most RECENT trades, so the right edge is always real. Say so, rather
-            than letting the left edge pass for the launch of the curve. */}
-        {isWindowed && ` Last ${TRADE_HISTORY_LIMIT} trades.`}
+            than letting the left edge pass for the launch of the curve. Only meaningful on ALL:
+            inside a narrower range the left edge is the range, not the end of what we hold. */}
+        {isWindowed && range === DEFAULT_RANGE && ` Last ${TRADE_HISTORY_LIMIT} trades.`}
       </p>
     </div>
   )

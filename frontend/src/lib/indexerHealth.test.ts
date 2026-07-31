@@ -4,6 +4,8 @@ import {
   classifyIndexer,
   formatLag,
   isDegraded,
+  needsBlockTimestampLookup,
+  resolveIndexedTimestamp,
   type IndexerLagInput,
 } from './indexerHealth'
 
@@ -75,5 +77,51 @@ describe('formatLag', () => {
     expect(formatLag(360)).toBe('6m')
     expect(formatLag(7200)).toBe('2h')
     expect(formatLag(null)).toBe('unknown')
+  })
+})
+
+describe('resolveIndexedTimestamp - graph-node withholding the timestamp', () => {
+  it('prefers the timestamp graph-node supplies', () => {
+    expect(resolveIndexedTimestamp(1_700_000_000, 999n)).toBe(1_700_000_000)
+  })
+
+  it('falls back to the RPC block header when graph-node returns null', () => {
+    // The bug this exists for: graph-node 0.40.2 answers `_meta.block.timestamp: null` while
+    // `number` and `hash` are real. Folding that to undefined classified a badly-lagging indexer as
+    // `unknown`, the state every surface stays quiet about - so nothing warned, and each indexed
+    // panel showed its empty state as though the data were current.
+    expect(resolveIndexedTimestamp(null, 1_700_000_000n)).toBe(1_700_000_000)
+  })
+
+  it('is undefined only when neither source has an answer yet', () => {
+    expect(resolveIndexedTimestamp(null, undefined)).toBeUndefined()
+    expect(resolveIndexedTimestamp(undefined, undefined)).toBeUndefined()
+  })
+
+  it('classifies a real lag as stale once the fallback supplies the timestamp', () => {
+    // End to end through the classifier, at the ~11h lag actually measured against live testnet.
+    const head = 1_785_466_491
+    const indexed = resolveIndexedTimestamp(null, BigInt(head - 40_514))
+    expect(
+      classifyIndexer({
+        reachable: true,
+        indexedTimestamp: indexed,
+        headTimestamp: head,
+        hasIndexingErrors: false,
+      }).state,
+    ).toBe('stale')
+  })
+})
+
+describe('needsBlockTimestampLookup', () => {
+  it('asks for a lookup exactly when the timestamp is missing', () => {
+    expect(needsBlockTimestampLookup({ block: { number: 5, timestamp: null } })).toBe(true)
+    expect(needsBlockTimestampLookup({ block: { number: 5, timestamp: 100 } })).toBe(false)
+  })
+
+  it('does not ask before there is any meta to look up', () => {
+    // Guards against a wasted RPC round trip on every first render.
+    expect(needsBlockTimestampLookup(null)).toBe(false)
+    expect(needsBlockTimestampLookup(undefined)).toBe(false)
   })
 })

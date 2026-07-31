@@ -65,6 +65,41 @@ export function classifyIndexer(input: IndexerLagInput): IndexerStatus {
   return { state: lagSeconds > STALE_LAG_SECONDS ? 'stale' : 'ok', lagSeconds }
 }
 
+/**
+ * The indexed head's chain timestamp, from graph-node if it supplies one and from an RPC block
+ * header otherwise.
+ *
+ * ⚠️ **graph-node does not always supply it.** Measured on graph-node 0.40.2: `_meta.block` returns
+ * a real `number` and `hash` but `timestamp: null`. Folding that null into `undefined` silently
+ * disabled every degraded state in the app, because a missing indexed timestamp classifies as
+ * `unknown` - which is also the first-load state, and which every surface stays deliberately quiet
+ * about. An indexer eleven hours behind therefore showed no banner at all, while each indexed panel
+ * rendered its EMPTY state as though the data were current and genuinely empty.
+ *
+ * This was missed because the degradation work was validated by STOPPING graph-node, which makes it
+ * unreachable and exercises the `down` path. `stale` - reachable but behind, the likelier
+ * production failure and the one the 5-minute ops alert is written for - had never fired for real.
+ *
+ * The fallback preserves the original decision rather than replacing it: lag stays the difference
+ * between two CHAIN timestamps, so there is still no per-chain block-time constant to keep in sync.
+ * Only the source of one of them changes. Block headers are never pruned - unlike state, which is
+ * gone after ~5,000 blocks on these chains - so reading one by number works at any depth.
+ */
+export function resolveIndexedTimestamp(
+  metaTimestamp: number | null | undefined,
+  fallbackBlockTimestamp: bigint | undefined,
+): number | undefined {
+  if (metaTimestamp != null) return metaTimestamp
+  return fallbackBlockTimestamp === undefined ? undefined : Number(fallbackBlockTimestamp)
+}
+
+/** Whether the indexed block's timestamp has to be fetched from RPC because graph-node withheld it. */
+export function needsBlockTimestampLookup(
+  meta: { block: { number: number; timestamp: number | null } } | null | undefined,
+): boolean {
+  return !!meta && meta.block.timestamp == null
+}
+
 /** Human-readable lag, e.g. "45s" / "6m" / "2h". */
 export function formatLag(lagSeconds: number | null): string {
   if (lagSeconds === null) return 'unknown'

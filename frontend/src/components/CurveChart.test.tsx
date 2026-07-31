@@ -112,3 +112,70 @@ describe('CurveChart caption', () => {
     expect(container.querySelector('.chart-caption')?.textContent).not.toContain('Last 200')
   })
 })
+
+describe('CurveChart range selector', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    setVisibleLogicalRange.mockClear()
+    setData.mockClear()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  /** Trades an hour+ apart, so a 1H window genuinely excludes the older one. */
+  const NOW = Math.floor(Date.now() / 1000)
+  const SPREAD = [
+    trade(NOW - 20 * 3600, '10000000000'),
+    trade(NOW - 10 * 3600, '20000000000'),
+    trade(NOW - 600, '90000000000'),
+  ]
+
+  it('offers the ranges and marks the active one for assistive tech, not just visually', () => {
+    const { getByTitle } = render(<CurveChart trades={SPREAD} graduated={false} />)
+    expect(getByTitle('Every trade held')).toHaveAttribute('aria-pressed', 'true')
+    expect(getByTitle('Last hour')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('rebuilds the series at a finer grid when a narrower range is picked', () => {
+    const { getByTitle } = render(<CurveChart trades={SPREAD} graduated={false} />)
+    const pointsFor = (i: number) => setData.mock.calls[i][0] as { time: number }[]
+    const allPoints = pointsFor(setData.mock.calls.length - 1)
+    const allBucket = allPoints[1].time - allPoints[0].time
+
+    act(() => void fireEvent.click(getByTitle('Last hour')))
+    const hourPoints = pointsFor(setData.mock.calls.length - 1)
+    const hourBucket = hourPoints[1].time - hourPoints[0].time
+
+    // The whole justification for the control: the data is re-derived, not merely magnified.
+    expect(hourBucket).toBeLessThan(allBucket)
+  })
+
+  it('re-frames on a range change even after the viewer has zoomed', () => {
+    const { container, getByTitle } = render(<CurveChart trades={SPREAD} graduated={false} />)
+    fireEvent.wheel(container.querySelector('.chart-wrap')!)
+    const framesAtTakeover = setVisibleLogicalRange.mock.calls.length
+
+    act(() => void fireEvent.click(getByTitle('Last hour')))
+
+    // Picking a range is the viewer handing the viewport back. Keeping their old framing over a
+    // completely different window would show them a view they never asked for.
+    expect(setVisibleLogicalRange.mock.calls.length).toBeGreaterThan(framesAtTakeover)
+  })
+
+  it('keeps the picker on screen when a range turns up empty, so there is a way back', () => {
+    const old = [trade(NOW - 40 * 3600, '10000000000')]
+    // Graduated: a closed curve cannot be carried forward to now, so a recent window is truly empty.
+    const { getByTitle, getByText } = render(<CurveChart trades={old} graduated />)
+    act(() => void fireEvent.click(getByTitle('Last hour')))
+
+    expect(getByText(/no trades in the last hour/i)).toBeInTheDocument()
+    // Without this the panel would be a dead end with no route back to ALL.
+    expect(getByTitle('Every trade held')).toBeInTheDocument()
+  })
+
+  it('distinguishes an untraded curve from a quiet range', () => {
+    const { queryByTitle, getByText } = render(<CurveChart trades={[]} graduated={false} />)
+    expect(getByText(/be the first to buy/i)).toBeInTheDocument()
+    // Nothing to range over, and offering the control would imply data exists behind it.
+    expect(queryByTitle('Last hour')).toBeNull()
+  })
+})

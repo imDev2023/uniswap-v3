@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { TokenRow } from '../lib/subgraph'
-import { getTokenImage } from '../lib/tokenMeta'
+import { useTokenMetadata } from '../hooks/useTokenMetadata'
 import { formatAge, formatEth, formatPercent } from '../lib/format'
 import { heatColor, heatPercent, meterWidthPercent } from '../lib/heat'
 import { Avatar } from './Avatar'
@@ -24,7 +24,9 @@ export function BoardCard({
   /** Arrived since the last poll - animates in so a changing board is noticeable. */
   isNew?: boolean
 }) {
-  const image = getTokenImage(token.id)
+  // Resolved from the token's immutable on-chain URI, and cached forever - see useTokenMetadata for
+  // why that caching is load-bearing on a board that polls every 5 seconds.
+  const meta = useTokenMetadata(token.id, token.metadataURI)
   const pct = heatPercent(token.progressBps)
   const heat = heatColor(token.progressBps)
   const untraded = token.tradeCount === 0
@@ -38,7 +40,7 @@ export function BoardCard({
       style={{ '--heat': heat } as React.CSSProperties}
     >
       <div className="tcard-head">
-        <Avatar image={image} symbol={token.symbol} address={token.id} size="sm" />
+        <Avatar image={meta?.image} symbol={token.symbol} address={token.id} size="sm" />
         <div className="tcard-id">
           <div className="tcard-name">{token.name}</div>
           <div className="tcard-symbol">{token.symbol}</div>

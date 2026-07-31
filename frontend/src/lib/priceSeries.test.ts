@@ -285,3 +285,117 @@ describe('priceMinMove', () => {
     expect(priceMinMove([{ time: 0, value: 1e-30 }])).toBe(1e-18)
   })
 })
+
+describe('buildPriceSeries - windowed by a range selector', () => {
+  const HOUR = 3_600
+  const NOW = 100 * HOUR
+
+  // A curve that traded long ago, then again recently: the shape where a range selector earns its
+  // place, because ALL collapses the recent burst into a handful of grid points.
+  const spread = [
+    trade({ timestamp: String(NOW - 50 * HOUR), priceX18: px(1e-10) }),
+    trade({ timestamp: String(NOW - 49 * HOUR), priceX18: px(2e-10) }),
+    trade({ timestamp: String(NOW - 30 * 60), priceX18: px(8e-10) }),
+    trade({ timestamp: String(NOW - 10 * 60), priceX18: px(9e-10) }),
+  ]
+
+  it('re-derives at a finer resolution, which is the entire point of the control', () => {
+    const all = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true })
+    const hour = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    // Zooming could never do this: the ALL grid has already averaged the last hour into a couple of
+    // buckets before the chart sees it, so magnifying it shows a plateau rather than the moves.
+    expect(hour.bucketSeconds).toBeLessThan(all.bucketSeconds)
+    expect(hour.bucketSeconds).toBeLessThanOrEqual(HOUR / 100)
+  })
+
+  it('opens at the price carried in from BEFORE the window, not at the first trade inside it', () => {
+    // The curve genuinely sat at 2e-10 when the window opened. Starting the line at the first
+    // in-window trade instead would crop the step that trade produced, hiding an 8x move by
+    // beginning the chart already at the top of it.
+    const s = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    expect(s.points[0].time).toBe(NOW - HOUR)
+    expect(s.points[0].value).toBeCloseTo(2e-10, 20)
+  })
+
+  it('draws a flat line at the carried price when nothing traded in the window', () => {
+    // Honest: the curve really did hold that price for the whole window. This is the ordinary
+    // "quiet hour" case, not an outage.
+    const quiet = buildPriceSeries(spread.slice(0, 2), {
+      nowSeconds: NOW,
+      extendToNow: true,
+      from: NOW - HOUR,
+    })
+    expect(quiet.points.length).toBeGreaterThan(1)
+    expect(new Set(quiet.points.map((p) => p.value)).size).toBe(1)
+    expect(quiet.points[0].value).toBeCloseTo(2e-10, 20)
+  })
+
+  it('does NOT stretch the line back to a window edge it has no price for', () => {
+    // The window opens before the oldest trade held, so the price at `from` is unknown - it is
+    // behind the 200-trade cap or before the launch. Starting the line at `from` would invent a
+    // flat stretch that never existed, which is the same fabrication the index-axis chart made.
+    const s = buildPriceSeries(spread, {
+      nowSeconds: NOW,
+      extendToNow: true,
+      from: NOW - 80 * HOUR,
+    })
+    expect(s.points[0].time).toBe(NOW - 50 * HOUR)
+    expect(s.points[0].time).toBeGreaterThan(NOW - 80 * HOUR)
+  })
+
+  it('keeps only the trades inside the window as markers', () => {
+    const s = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    expect(s.markers).toHaveLength(2)
+    for (const m of s.markers) expect(m.time).toBeGreaterThanOrEqual(NOW - HOUR)
+  })
+
+  it('still runs a live curve to now, so the right edge stays real', () => {
+    const s = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    expect(s.hasTail).toBe(true)
+    expect(s.points[s.points.length - 1].time).toBe(NOW)
+  })
+
+  it('is empty for a window entirely before any trade held', () => {
+    const s = buildPriceSeries(spread, {
+      nowSeconds: NOW,
+      extendToNow: true,
+      from: NOW - 200 * HOUR,
+      maxPoints: 10,
+    })
+    // Nothing carried in and nothing inside - but the window still postdates nothing, so the build
+    // falls back to the full history rather than inventing a left edge.
+    expect(s.points[0].time).toBe(NOW - 50 * HOUR)
+  })
+
+  it('is empty for a GRADUATED curve with no trades in the window', () => {
+    // A closed curve cannot be carried to now (its price is frozen and the market moved to the
+    // pool), so a narrow recent window has genuinely nothing to draw - not a flat line to now.
+    const s = buildPriceSeries(spread.slice(0, 2), {
+      nowSeconds: NOW,
+      extendToNow: false,
+      from: NOW - HOUR,
+    })
+    expect(s.points).toHaveLength(0)
+  })
+
+  it('counts a trade exactly on the window edge once, on the inside', () => {
+    const edge = [
+      trade({ timestamp: String(NOW - 2 * HOUR), priceX18: px(1e-10) }),
+      trade({ timestamp: String(NOW - HOUR), priceX18: px(5e-10) }),
+    ]
+    const s = buildPriceSeries(edge, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    // One marker, not two: the boundary trade must not be both carried in AND replayed.
+    expect(s.markers).toHaveLength(1)
+    expect(s.markers[0].count).toBe(1)
+    // Its value shows immediately, because a grid point carries every event at or BEFORE it - the
+    // same rule that makes markers snap up onto the step they caused rather than to its foot. So
+    // the carried-in 1e-10 is superseded at the very first point rather than being drawn first.
+    expect(s.points[0].value).toBeCloseTo(5e-10, 20)
+  })
+
+  it('matches the unwindowed build when from is undefined', () => {
+    const a = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true })
+    const b = buildPriceSeries(spread, { nowSeconds: NOW, extendToNow: true, from: undefined })
+    expect(b).toEqual(a)
+  })
+})

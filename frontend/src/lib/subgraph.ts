@@ -1,4 +1,4 @@
-import { GraphQLClient, gql } from 'graphql-request'
+import { GraphQLClient, gql } from './graphqlClient'
 import { SUBGRAPH_URL } from '../config/contracts'
 import { TRADE_HISTORY_LIMIT } from '../config/constants'
 
@@ -16,6 +16,11 @@ export interface TokenRow {
   creator: string
   name: string
   symbol: string
+  /**
+   * On-chain `LaunchToken.metadataURI`, indexed from `LaunchCreated` (#24). Always present as a
+   * string, but very often empty - v1 is bring-your-own-URI, so no URI at all is the common case.
+   */
+  metadataURI: string
   createdAtTimestamp: string
   ethReserve: string
   tokenReserve: string
@@ -97,6 +102,7 @@ const TOKEN_FIELDS = gql`
     creator
     name
     symbol
+    metadataURI
     createdAtTimestamp
     ethReserve
     tokenReserve

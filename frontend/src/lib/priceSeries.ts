@@ -73,6 +73,17 @@ export interface BuildOptions {
   /** Wall clock, injected so the series is deterministic under test. */
   nowSeconds: number
   /**
+   * Left edge of the window, as a UTC timestamp in seconds. Omitted means "everything we hold".
+   *
+   * This is what a range selector passes, and it has to re-enter the build rather than be applied
+   * afterwards by zooming. Resampling happens HERE, at build time, so the grid's resolution is
+   * fixed before the chart ever sees the data: magnifying a one-pixel cluster of a 30-day series
+   * shows a flat plateau, because the detail was averaged away before rendering, not hidden by the
+   * zoom level. Narrowing `from` is the only thing that re-derives the grid finely enough to show
+   * what actually happened in that period.
+   */
+  from?: number
+  /**
    * Carry the line flat to `now`.
    *
    * True for a live curve: the price genuinely still is the last traded price. **False once the token
@@ -92,16 +103,40 @@ interface PriceEvent {
   count: number
 }
 
-export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceSeries {
-  const events = toEvents(trades)
-  if (events.length === 0) {
-    return { points: [], markers: [], hasTail: false, bucketSeconds: 0 }
-  }
+const EMPTY: PriceSeries = { points: [], markers: [], hasTail: false, bucketSeconds: 0 }
 
-  const from = events[0].time
-  const lastEventTime = events[events.length - 1].time
+export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceSeries {
+  const allEvents = toEvents(trades)
+  if (allEvents.length === 0) return EMPTY
+
   const now = Math.floor(opts.nowSeconds)
+  const { events, carriedInValue } = splitAtWindow(allEvents, opts.from)
+
+  // Nothing traded inside the window and no earlier price to carry into it: the window predates
+  // everything we hold, so there is genuinely nothing to say about it.
+  if (events.length === 0 && carriedInValue === undefined) return EMPTY
+
+  // Where the LINE starts, which is not always where the window starts, and the distinction is the
+  // whole honesty of a range selector:
+  //
+  //  - With a price carried in from before the window, the window's left edge is a real, known
+  //    price - the curve was sitting at exactly that value - so the line starts at `from`.
+  //  - Without one, the window opens before the oldest trade we hold. The price then is NOT known
+  //    (it is behind the 200-trade cap, or before the launch), so the line must start at the first
+  //    trade. Stretching it back to `from` would draw a flat stretch that is pure invention - the
+  //    same class of fabrication as the index-axis chart this module replaced.
+  const from = carriedInValue !== undefined && opts.from !== undefined ? opts.from : events[0].time
+
+  // With no trades in the window, the carried price is the last thing that happened, so "the last
+  // event" is the window edge itself.
+  const lastEventTime = events.length > 0 ? events[events.length - 1].time : from
   const hasTail = opts.extendToNow && now > lastEventTime
+
+  // A CLOSED curve with no trades inside the window has nothing to draw: it cannot be carried to
+  // now (its price is frozen and the market has moved to the pool), and a lone point at the window
+  // edge would be a dot floating in an empty plot.
+  if (events.length === 0 && !hasTail) return EMPTY
+
   const to = hasTail ? now : lastEventTime
 
   // A curve whose entire life fits in one second has no span to lay out.
@@ -114,6 +149,12 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
       bucketSeconds: 1,
     }
   }
+
+  // The value the line opens on. Inside a window this is the price carried in from the last trade
+  // BEFORE it - which is the price the curve actually held at that moment. Falling back to the
+  // first in-window trade's price is only correct when there is nothing earlier, and in that case
+  // `from` is that trade's own time, so the first point is a real observation either way.
+  const openingValue = carriedInValue ?? events[0].value
 
   // Lightweight-charts' time scale is ORDINAL: every data point gets one equal-width slot, and the
   // gaps between timestamps are collapsed. That is right for OHLC bars sampled on a fixed interval
@@ -128,7 +169,7 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
 
   const points: PricePoint[] = []
   let cursor = 0
-  let carried = events[0].value
+  let carried = openingValue
   for (let t = from; t <= to; t += bucketSeconds) {
     while (cursor < events.length && events[cursor].time <= t) {
       carried = events[cursor].value
@@ -148,6 +189,32 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
 
   const lastTime = points[points.length - 1].time
   return { points, markers: toMarkers(events, from, bucketSeconds, lastTime), hasTail, bucketSeconds }
+}
+
+/**
+ * Split the event list at a window's left edge.
+ *
+ * Returns the events inside the window plus the price the curve was sitting at when the window
+ * opened, taken from the last trade before it. That carried-in price is what makes a narrow range
+ * honest: without it, a window containing no trades would look like a curve with no history, and a
+ * window whose first trade is a large move would appear to START at the post-move price, hiding the
+ * move itself by cropping the step that produced it.
+ *
+ * A trade landing exactly on the edge counts as inside, so no trade is ever consumed by both sides.
+ */
+function splitAtWindow(
+  allEvents: PriceEvent[],
+  from: number | undefined,
+): { events: PriceEvent[]; carriedInValue: number | undefined } {
+  if (from === undefined) return { events: allEvents, carriedInValue: undefined }
+
+  const events: PriceEvent[] = []
+  let carriedInValue: number | undefined
+  for (const e of allEvents) {
+    if (e.time < from) carriedInValue = e.value
+    else events.push(e)
+  }
+  return { events, carriedInValue }
 }
 
 /**

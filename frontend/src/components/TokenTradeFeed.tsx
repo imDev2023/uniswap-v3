@@ -27,6 +27,7 @@ export function TokenTradeFeed({
   indexerState,
   isError,
   isLoading,
+  graduated = false,
 }: {
   trades: TradeRow[] | undefined
   symbol: string
@@ -35,6 +36,12 @@ export function TokenTradeFeed({
   indexerState: IndexerState
   isError: boolean
   isLoading: boolean
+  /**
+   * A graduated curve is closed, so these rows are history, not a live feed. The chart eight pixels
+   * away already stops dead for exactly this reason; a pulsing "Live" dot over the same closed
+   * curve would contradict it on the same screen.
+   */
+  graduated?: boolean
 }) {
   // Newest first: the feed answers "what just happened", while the chart owns chronology.
   const newestFirst = useMemo(
@@ -50,8 +57,8 @@ export function TokenTradeFeed({
   return (
     <div className="card-flush">
       <div className="rail-head">
-        <span className="live-dot" aria-hidden="true" />
-        Live trades
+        {!graduated && <span className="live-dot" aria-hidden="true" />}
+        {graduated ? 'Curve trades' : 'Live trades'}
       </div>
 
       {isError ? (
@@ -70,7 +77,9 @@ export function TokenTradeFeed({
         </div>
       ) : newestFirst.length === 0 ? (
         <Notice icon="◦" inline>
-          No trades yet. The first buy shows up here.
+          {graduated
+            ? 'No curve trades were recorded before graduation.'
+            : 'No trades yet. The first buy shows up here.'}
         </Notice>
       ) : (
         <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>

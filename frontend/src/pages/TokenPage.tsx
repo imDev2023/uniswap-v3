@@ -169,7 +169,7 @@ export function TokenPage() {
             </div>
           ) : (
             /* Curve address and graduation state are RPC-resolved, so this panel is unaffected by
-               indexer health — it quotes, caps and trades entirely on-chain. */
+               indexer health - it quotes, caps and trades entirely on-chain. */
             <TradePanel token={tokenAddr} curve={curve} symbol={symbol} />
           )}
 
@@ -181,6 +181,7 @@ export function TokenPage() {
             indexerState={indexer.state}
             isError={tradesQuery.isError}
             isLoading={tradesQuery.isLoading}
+            graduated={graduated}
           />
         </div>
       </div>

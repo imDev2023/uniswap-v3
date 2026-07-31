@@ -249,7 +249,7 @@ export function SwapPanel({
                     ? `${formatEth(bal)} ETH`
                     : `${formatTokenAmount(bal)} ${symbol}`}
                 </span>
-                {/* No "max" on the ETH leg — spending the whole balance leaves nothing for gas. */}
+                {/* No "max" on the ETH leg - spending the whole balance leaves nothing for gas. */}
                 {dir === 'tokenToEth' && (
                   <button
                     className="pill leg-meta-right"

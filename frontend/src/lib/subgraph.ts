@@ -1,5 +1,6 @@
 import { GraphQLClient, gql } from 'graphql-request'
 import { SUBGRAPH_URL } from '../config/contracts'
+import { TRADE_HISTORY_LIMIT } from '../config/constants'
 
 // The subgraph (Build 08 / #19) is the canonical read model: curve progress, trades, holders, and
 // the graduation feed. All numeric fields come back as decimal strings (GraphQL BigInt) — callers
@@ -170,7 +171,7 @@ export const TRADES_QUERY = gql`
     trades(
       first: $first
       orderBy: timestamp
-      orderDirection: asc
+      orderDirection: desc
       where: { token: $token }
     ) {
       id
@@ -288,12 +289,26 @@ export async function fetchToken(id: string): Promise<TokenWithGraduation | null
   return data.token
 }
 
-export async function fetchTrades(token: string, first = 200): Promise<TradeRow[]> {
+/**
+ * The most recent `first` trades for a token, oldest-first.
+ *
+ * The query orders DESCENDING so the window is anchored to the present: asking for the oldest 200
+ * instead means that once a token passes 200 trades the page silently stops at ancient history,
+ * and the chart then carries that stale price flat to `now` - asserting the price has not moved
+ * when it has moved all day. Anchoring to the newest keeps the right-hand edge real.
+ *
+ * The rows are reversed back to ascending here because that is what every caller wants to reason
+ * about; only the *window* is newest-first, not the result.
+ */
+export async function fetchTrades(
+  token: string,
+  first = TRADE_HISTORY_LIMIT,
+): Promise<TradeRow[]> {
   const data = await subgraphClient.request<{ trades: TradeRow[] }>(TRADES_QUERY, {
     token: token.toLowerCase(),
     first,
   })
-  return data.trades
+  return [...data.trades].reverse()
 }
 
 export async function fetchRecentTrades(first = 25): Promise<RecentTradeRow[]> {

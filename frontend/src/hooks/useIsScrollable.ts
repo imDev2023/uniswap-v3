@@ -23,17 +23,24 @@ export function useIsScrollable(): [(node: HTMLElement | null) => void, boolean]
     const measure = () => setScrollable(node.scrollHeight > node.clientHeight + 1)
     measure()
 
-    // Both are needed: the element resizes when the viewport does, and its content changes when new
-    // trades arrive without the element itself changing size.
-    if (typeof ResizeObserver === 'undefined') return
-    const resize = new ResizeObserver(measure)
-    resize.observe(node)
-    const mutation =
-      typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure)
-    mutation?.observe(node, { childList: true, subtree: true })
+    // Both are needed, and they are guarded SEPARATELY: the element resizes when the viewport does,
+    // and its content changes when new trades arrive without the element itself changing size.
+    // Guarding them together meant an environment lacking only ResizeObserver - jsdom, which does
+    // have MutationObserver - silently lost the content watcher too.
+    let resize: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      resize = new ResizeObserver(measure)
+      resize.observe(node)
+    }
+
+    let mutation: MutationObserver | null = null
+    if (typeof MutationObserver !== 'undefined') {
+      mutation = new MutationObserver(measure)
+      mutation.observe(node, { childList: true, subtree: true })
+    }
 
     return () => {
-      resize.disconnect()
+      resize?.disconnect()
       mutation?.disconnect()
     }
   }, [node])

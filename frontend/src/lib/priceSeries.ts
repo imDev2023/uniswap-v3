@@ -18,7 +18,16 @@ import { priceEthPerToken } from './format'
  *     trades and jumps at each one, so every grid point holds the last traded price. The renderer
  *     draws `LineType.WithSteps`; the values here already encode the same claim.
  *  3. **An explicit tail.** A curve that last traded hours ago must not end at the right edge looking
- *     freshly active, so a live curve is carried flat to `now`.
+ *     freshly active, so a live curve is carried flat to `now`. The tail is only honest because the
+ *     input window is anchored to the newest trades - see TRADE_HISTORY_LIMIT in lib/subgraph.ts.
+ *
+ * ⚠️ **The one dishonesty that remains, deliberately.** Resampling keeps the LAST price in each
+ * bucket, so a move that fully reverses inside one bucket leaves no trace: at a 30-day span the
+ * grid is ~1h, and a 10x spike followed by a return to the old price inside that hour renders as a
+ * flat line. Nothing is fabricated - every value plotted genuinely held - but an excursion is
+ * omitted, and past MAX_MARKERS even the markers are gone. Carrying each bucket's min and max would
+ * fix it, which is what a candlestick's wicks are for; it is a change to what this series MEANS
+ * rather than a bug fix, so it is written down here rather than smuggled in.
  */
 
 /** A point on the price line. `time` is a UTC timestamp in **seconds**, as lightweight-charts wants. */
@@ -137,7 +146,8 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
     points.push({ time: to, value: carried })
   }
 
-  return { points, markers: toMarkers(events, from, bucketSeconds), hasTail, bucketSeconds }
+  const lastTime = points[points.length - 1].time
+  return { points, markers: toMarkers(events, from, bucketSeconds, lastTime), hasTail, bucketSeconds }
 }
 
 /**
@@ -170,14 +180,28 @@ function toEvents(trades: TradeRow[]): PriceEvent[] {
  * Place a marker on the grid point each trade falls into.
  *
  * Markers must sit on times that exist in the series or the chart silently drops them, so every
- * event is snapped down to its bucket. When the grid is coarser than the trading, several trades
- * share one marker and the count says so - which is the honest reading: at a resolution of 15s, a
- * three-trade burst inside 6s genuinely is one instant.
+ * event is snapped to a grid point. It is snapped **up**, not down, and that direction is the whole
+ * correctness of this function: a grid point carries every event at or before it, so the point at
+ * or after a trade is the first one holding the price that trade produced. Snapping down lands the
+ * dot on the *previous* price - visibly at the foot of the step it caused rather than on top of it,
+ * with the crosshair reporting the pre-trade price for a trade that moved the market.
+ *
+ * The last bucket can round past the end of the series, so it is clamped to the final point.
+ *
+ * When the grid is coarser than the trading, several trades share one marker and the count says so
+ * - which is the honest reading: at a resolution of 15s, a three-trade burst inside 6s genuinely is
+ * one instant.
  */
-function toMarkers(events: PriceEvent[], from: number, bucketSeconds: number): TradeMarker[] {
+function toMarkers(
+  events: PriceEvent[],
+  from: number,
+  bucketSeconds: number,
+  lastTime: number,
+): TradeMarker[] {
   const byBucket = new Map<number, TradeMarker>()
   for (const e of events) {
-    const time = from + Math.floor((e.time - from) / bucketSeconds) * bucketSeconds
+    const snapped = from + Math.ceil((e.time - from) / bucketSeconds) * bucketSeconds
+    const time = Math.min(snapped, lastTime)
     byBucket.set(time, {
       time,
       side: e.side,

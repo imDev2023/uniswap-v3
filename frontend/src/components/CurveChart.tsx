@@ -15,6 +15,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import type { TradeRow } from '../lib/subgraph'
+import { TRADE_HISTORY_LIMIT } from '../config/constants'
 import { formatPriceCompactText } from '../lib/format'
 import {
   SECONDS_VISIBLE_BELOW,
@@ -87,6 +88,10 @@ export function CurveChart({
   // Held across renders so new trades update the existing plugin instead of stacking up a new
   // marker plugin on the series every poll.
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  // Once the viewer has zoomed or panned, the chart is theirs and must stop re-framing itself.
+  // Without this the shared 5s clock rebuilds `series`, the framing effect re-runs, and any zoom is
+  // silently thrown away a few seconds after it is made.
+  const viewerMovedRef = useRef(false)
 
   // Shared page clock, so the flat tail advances instead of freezing at first-render's `now`.
   const now = useNowSeconds()
@@ -95,6 +100,9 @@ export function CurveChart({
     [trades, now, graduated],
   )
   const isEmpty = series.points.length === 0
+  // A full page means the subgraph almost certainly had more; the oldest row here is not the
+  // curve's first trade and the caption must not let it read as one.
+  const isWindowed = trades.length >= TRADE_HISTORY_LIMIT
 
   // --- create once per mount ---
   useEffect(() => {
@@ -161,7 +169,21 @@ export function CurveChart({
     seriesRef.current = area
     markersRef.current = createSeriesMarkers(area, [])
 
+    // A fresh chart frames itself again. Listening for the input events rather than for
+    // visible-range changes matters: the framing effect below moves the range itself, so a
+    // range-change subscription could not tell the viewer's pan from our own.
+    viewerMovedRef.current = false
+    const claimViewport = () => {
+      viewerMovedRef.current = true
+    }
+    container.addEventListener('wheel', claimViewport, { passive: true })
+    container.addEventListener('pointerdown', claimViewport)
+    container.addEventListener('touchstart', claimViewport, { passive: true })
+
     return () => {
+      container.removeEventListener('wheel', claimViewport)
+      container.removeEventListener('pointerdown', claimViewport)
+      container.removeEventListener('touchstart', claimViewport)
       chart.remove()
       chartRef.current = null
       seriesRef.current = null
@@ -207,6 +229,17 @@ export function CurveChart({
     chart.applyOptions({
       timeScale: { secondsVisible: seriesSpanSeconds(series.points) < SECONDS_VISIBLE_BELOW },
     })
+  }, [series])
+
+  // --- frame the view ---
+  // Deliberately separate from feeding the data. They run on the same input but answer to different
+  // owners: the data is ours and must track the chain, whereas the viewport belongs to whoever is
+  // looking at it the moment they touch it. Fusing the two is what made a 5s clock tick silently
+  // undo a zoom.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart || viewerMovedRef.current || series.points.length === 0) return
+
     // Not `fitContent()`: that pins the first and last points to the exact edges, which clips the
     // leftmost time label in half and draws a final price step flush against the price scale. A
     // logical range with a little padding either side fits the same data and leaves both readable.
@@ -228,6 +261,9 @@ export function CurveChart({
           ? 'Curve price up to graduation. Trading has moved to the locked V3 pool.'
           : 'Marginal curve price - flat between trades, because the curve only moves when someone trades.'}
         {series.bucketSeconds > 1 && ` Sampled every ${formatDuration(series.bucketSeconds)}.`}
+        {/* The window is the most RECENT trades, so the right edge is always real. Say so, rather
+            than letting the left edge pass for the launch of the curve. */}
+        {isWindowed && ` Last ${TRADE_HISTORY_LIMIT} trades.`}
       </p>
     </div>
   )

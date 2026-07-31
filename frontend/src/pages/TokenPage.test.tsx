@@ -177,6 +177,17 @@ describe('TokenPage - a graduated token gets ONE card, not two', () => {
     // ~1.8e9. A graduated one must stop dead, or the page implies the market price hasn't moved.
     expect(points[points.length - 1].time).toBe(1200)
   })
+
+  it('does not label a closed curve history as a live feed', async () => {
+    await renderTokenPage()
+    await screen.findByRole('heading', { name: /meta test/i })
+
+    // The chart directly above this rail stops dead at graduation and says so. A pulsing "Live
+    // trades" header over the same closed curve contradicts it on the same screen, and these rows
+    // are history: the curve cannot produce another one.
+    expect(screen.queryByText(/live trades/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/curve trades/i)).toBeInTheDocument()
+  })
 })
 
 describe('TokenPage - a live curve', () => {

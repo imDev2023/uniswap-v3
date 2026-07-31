@@ -26,7 +26,11 @@ export function PoolFacts({
   pool: Address
   explorer: string
 }) {
-  const { data: slot0 } = useReadContract({
+  const {
+    data: slot0,
+    isError,
+    isLoading,
+  } = useReadContract({
     address: pool,
     abi: uniswapV3PoolAbi,
     functionName: 'slot0',
@@ -44,13 +48,16 @@ export function PoolFacts({
       <div className="pool-fact">
         <span className="pool-fact-label">Price</span>
         <span className="pool-fact-value">
-          {spot ? (
+          {spot && spot.wethPerToken > 0 ? (
             // The float carries far more digits than a price can actually have; scaling to the same
             // 1e18 fixed point the curve uses keeps this rendering identical to every other price
             // in the product rather than inventing a second notation for pool prices.
             <Price priceX18={BigInt(Math.round(spot.wethPerToken * 1e18))} />
           ) : (
-            <span className="num">…</span>
+            // A failed read is not a price. Rendering the placeholder forever - or worse, the `0`
+            // that an unreadable slot0 collapses to - states something false about the market on
+            // the page where someone is about to commit funds.
+            <span className="num muted">{isError ? 'unavailable' : isLoading ? '…' : 'n/a'}</span>
           )}
         </span>
       </div>
@@ -61,7 +68,12 @@ export function PoolFacts({
       </div>
 
       <div className="pool-fact">
-        <span className="pool-fact-label">Liquidity</span>
+        {/* Scoped deliberately to the GRADUATION liquidity. What LPLock holds forever is the
+            protocol's own full-range position; a V3 pool also accepts third-party liquidity, which
+            its providers can withdraw whenever they like. "Liquidity: locked forever" claims the
+            second thing while only the first is true, and it claims it on the one surface where
+            someone is deciding whether to trust the pool. */}
+        <span className="pool-fact-label">Launch liquidity</span>
         <span className="pool-fact-value">
           <span className="badge badge-grad">Locked forever</span>
         </span>

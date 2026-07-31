@@ -1050,8 +1050,7 @@ code {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.input,
-.input-amount {
+.input {
   width: 100%;
   background: var(--bg-inset);
   border: 1px solid var(--border);
@@ -1061,12 +1060,7 @@ code {
   font-size: var(--fs-md);
   font-family: var(--sans);
 }
-.input-amount {
-  font-family: var(--mono);
-  font-size: var(--fs-lg);
-}
-.input:focus,
-.input-amount:focus {
+.input:focus {
   outline: none;
   border-color: var(--accent-dim);
 }
@@ -1141,12 +1135,6 @@ code {
 }
 .table tr:last-child td {
   border-bottom: none;
-}
-.tag-buy {
-  color: var(--buy);
-}
-.tag-sell {
-  color: var(--sell);
 }
 .creator-row {
   background: rgba(41, 229, 154, 0.06);

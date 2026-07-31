@@ -132,8 +132,17 @@ describe('buildPriceSeries', () => {
     })
 
     it('never marks the tail as a trade', () => {
+      // Tolerance is exactly one bucket, and that is forced rather than convenient: a grid point
+      // carries every event at or before it, so the first point holding a trade's price can be up
+      // to one bucket after the trade. Markers snap to that point, because a dot on the previous
+      // point would sit at the PRE-trade price. The residual time error equals the resolution the
+      // caption already states ("Sampled every 14s"), whereas a price error is not disclosed
+      // anywhere. What must never happen - and is what this test exists for - is a marker out in
+      // the flat tail, implying someone traded during the silence.
       const s = buildPriceSeries(RDOGE, { nowSeconds: 12_000, extendToNow: true })
-      expect(s.markers.every((m) => m.time <= 3946)).toBe(true)
+      expect(s.markers.length).toBeGreaterThan(0)
+      expect(s.markers.every((m) => m.time <= 3946 + s.bucketSeconds)).toBe(true)
+      expect(s.markers.every((m) => m.time < 12_000)).toBe(true)
     })
 
     it('does not extend when the chain clock runs ahead of the browser', () => {
@@ -173,6 +182,31 @@ describe('buildPriceSeries', () => {
     const times = points.map((p) => p.time)
     expect(times).toEqual([...times].sort((a, b) => a - b))
     expect(new Set(times).size).toBe(times.length)
+  })
+
+  it('lands every marker on the point holding the price that trade produced', () => {
+    // The direction of the snap is the whole point. A marker snapped DOWN sits on the grid point
+    // BEFORE its trade, which still holds the previous price - so the dot renders at the foot of
+    // the step it caused and the crosshair reports a price that trade did not make.
+    const s = buildPriceSeries(RDOGE, { nowSeconds: 3946, extendToNow: false })
+    const byTime = new Map(s.points.map((p) => [p.time, p.value]))
+
+    // Every trade must be represented by a marker whose own point holds that trade's price.
+    for (const t of RDOGE) {
+      const price = Number(t.priceX18) / 1e18
+      const marker = s.markers.find((m) => Math.abs((byTime.get(m.time) ?? -1) - price) < 1e-20)
+      expect(marker, `no marker holds the price from the trade at t=${t.timestamp}`).toBeDefined()
+    }
+  })
+
+  it('clamps a marker that rounds past the end of the series', () => {
+    // The final trade's bucket can round beyond the last grid point; an out-of-range marker time is
+    // silently dropped by the chart, so the last trade would lose its dot with no error anywhere.
+    const s = buildPriceSeries(RDOGE, { nowSeconds: 3946, extendToNow: false })
+    const times = new Set(s.points.map((p) => p.time))
+    const last = s.points[s.points.length - 1].time
+    for (const m of s.markers) expect(times.has(m.time)).toBe(true)
+    expect(s.markers.some((m) => m.time === last)).toBe(true)
   })
 
   it('lands every marker on a time that exists in the series', () => {

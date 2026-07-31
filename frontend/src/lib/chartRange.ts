@@ -46,7 +46,23 @@ export function rangeFrom(range: ChartRangeId, nowSeconds: number): number | und
   return seconds == null ? undefined : Math.floor(nowSeconds) - seconds
 }
 
-/** Label for a range id, for captions and empty states. */
-export function rangeLabel(range: ChartRangeId): string {
-  return CHART_RANGES.find((r) => r.id === range)?.title.toLowerCase() ?? 'this range'
+/**
+ * How to name a range inside a sentence, e.g. "No trades in {…}".
+ *
+ * Written out per range rather than lower-casing `title`, which produced "No trades in the every
+ * trade held." for ALL - a tooltip phrase is not a noun phrase, and reusing one as the other only
+ * reads correctly by luck. ALL is reachable here whenever the trades list is non-empty but yields
+ * no plottable events.
+ */
+export function rangeEmptyPhrase(range: ChartRangeId): string {
+  switch (range) {
+    case '1h':
+      return 'the last hour'
+    case '6h':
+      return 'the last 6 hours'
+    case '1d':
+      return 'the last 24 hours'
+    case 'all':
+      return 'this curve’s history'
+  }
 }

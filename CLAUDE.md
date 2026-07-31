@@ -33,7 +33,7 @@ export PATH="$HOME/.foundry/bin:$PATH"
 cd contracts && forge test          # fork tests hit Robinhood Chain (rpc alias: robinhood = 4663)
 ```
 
-Ticket rhythm (build tickets #12-#21 built the stack; #22-#28 are merged; **Stages 1 and 2 are done, and Stage 3 is UNDERWAY. `build/29-token-swap-pages` is MERGED to `main`, and **`build/30-metadata-range-bundle` is BUILT but NOT yet reviewed or merged** (2026-07-31)**; remaining work is the rest of Stage 3 (metadata read side) or more of Stage 4 - and as of 2026-07-30 that work is the critical path, since the audit was moved to **after** project completion and the user's own testing pass. Tracked as GitHub issues; the map is #1, spec is #11 - note #26, #27, #28 and #29 have no issues of their own, they were scoped in-session):
+Ticket rhythm (build tickets #12-#21 built the stack; #22-#28 are merged; **Stages 1 and 2 are done, and Stage 3 is UNDERWAY. `build/29-token-swap-pages` is MERGED to `main`; `build/30-metadata-range-bundle` is BUILT and REVIEWED on both axes with findings applied, but NOT yet merged (2026-07-31)**; remaining work is the rest of Stage 3 (metadata read side) or more of Stage 4 - and as of 2026-07-30 that work is the critical path, since the audit was moved to **after** project completion and the user's own testing pass. Tracked as GitHub issues; the map is #1, spec is #11 - note #26, #27, #28 and #29 have no issues of their own, they were scoped in-session):
 1. One ticket per branch: `build/<NN>-<slug>`, branched from `main`.
 2. Implement + write tests at the fork-test seam; keep the full suite green.
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.

@@ -172,6 +172,37 @@ describe('CurveChart range selector', () => {
     expect(getByTitle('Every trade held')).toBeInTheDocument()
   })
 
+  it('captions the truncation when the 200-trade cap bites INSIDE the chosen range', () => {
+    // Gating this caption on `range === 'all'` was a real bug: "inside a narrower range the left
+    // edge is the range" holds only while the cap does not bite inside that range. 200 trades in
+    // the last half hour with a 1H window - routine at mainnet's 0.1s blocks - starts the line 30
+    // minutes in, and without the caption that reads as "the hour began here".
+    const dense = Array.from({ length: 200 }, (_, i) =>
+      trade(NOW - 1800 + i * 5, String(BigInt(i + 1) * 10n ** 9n)),
+    )
+    const { getByTitle, getByText } = render(<CurveChart trades={dense} graduated={false} />)
+    act(() => void fireEvent.click(getByTitle('Last hour')))
+    expect(getByText(/last 200 trades/i)).toBeInTheDocument()
+  })
+
+  it('drops the caption when the range edge is real, so it is not just always on', () => {
+    // A trade before the window means the left edge IS the window, and the caption would be false.
+    const withHistory = [
+      trade(NOW - 20 * 3600, '10000000000'),
+      ...Array.from({ length: 199 }, (_, i) => trade(NOW - 1800 + i * 5, String(BigInt(i + 2) * 10n ** 9n))),
+    ]
+    const { getByTitle, queryByText } = render(<CurveChart trades={withHistory} graduated={false} />)
+    act(() => void fireEvent.click(getByTitle('Last hour')))
+    expect(queryByText(/last 200 trades/i)).toBeNull()
+  })
+
+  it('names the ALL range readably in the empty state', () => {
+    // `rangeLabel` lower-cased the tooltip, producing "No trades in the every trade held."
+    const nonFinite = [trade(NaN as unknown as number, '10000000000')]
+    const { getByText } = render(<CurveChart trades={nonFinite} graduated={false} />)
+    expect(getByText(/no trades in this curve.s history/i)).toBeInTheDocument()
+  })
+
   it('distinguishes an untraded curve from a quiet range', () => {
     const { queryByTitle, getByText } = render(<CurveChart trades={[]} graduated={false} />)
     expect(getByText(/be the first to buy/i)).toBeInTheDocument()

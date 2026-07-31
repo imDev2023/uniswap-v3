@@ -28,7 +28,7 @@ import {
   CHART_RANGES,
   DEFAULT_RANGE,
   rangeFrom,
-  rangeLabel,
+  rangeEmptyPhrase,
   type ChartRangeId,
 } from '../lib/chartRange'
 
@@ -307,7 +307,7 @@ export function CurveChart({
     return (
       <div className="chart-block">
         {picker}
-        <div className="center-note">No trades in the {rangeLabel(range)}.</div>
+        <div className="center-note">No trades in {rangeEmptyPhrase(range)}.</div>
       </div>
     )
   }
@@ -322,9 +322,13 @@ export function CurveChart({
           : 'Marginal curve price - flat between trades, because the curve only moves when someone trades.'}
         {series.bucketSeconds > 1 && ` Sampled every ${formatDuration(series.bucketSeconds)}.`}
         {/* The window is the most RECENT trades, so the right edge is always real. Say so, rather
-            than letting the left edge pass for the launch of the curve. Only meaningful on ALL:
-            inside a narrower range the left edge is the range, not the end of what we hold. */}
-        {isWindowed && range === DEFAULT_RANGE && ` Last ${TRADE_HISTORY_LIMIT} trades.`}
+            than letting the left edge pass for the launch of the curve.
+            Driven by the SERIES, not by the range: gating this on `range === 'all'` was a real bug,
+            because "inside a narrower range the left edge is the range" stops being true the moment
+            the 200-trade cap bites inside that range. Pack 200 trades into the last half hour and
+            ask for 1H - routine at mainnet's 0.1 s blocks - and the line starts 30 minutes into the
+            window. `startsAtOldestHeldTrade` is exactly the question the caption answers. */}
+        {isWindowed && series.startsAtOldestHeldTrade && ` Last ${TRADE_HISTORY_LIMIT} trades.`}
       </p>
     </div>
   )

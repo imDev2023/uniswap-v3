@@ -399,3 +399,43 @@ describe('buildPriceSeries - windowed by a range selector', () => {
     expect(b).toEqual(a)
   })
 })
+
+describe('buildPriceSeries - is the left edge real?', () => {
+  const HOUR = 3_600
+  const NOW = 100 * HOUR
+
+  it('flags a left edge that is only where our data ran out', () => {
+    // The regression the caption depends on. 200 trades packed into the last half hour - routine at
+    // mainnet's 0.1s blocks - with a 1H window: there is no trade before the window, so the line
+    // cannot start at the window edge and instead begins 30 minutes into it. Nothing about that
+    // left edge is real, and a viewer reads it as "the hour began here".
+    const dense = Array.from({ length: 200 }, (_, i) =>
+      trade({ timestamp: String(NOW - 1800 + i * 5), priceX18: px((i + 1) * 1e-10) }),
+    )
+    const s = buildPriceSeries(dense, { nowSeconds: NOW, extendToNow: true, from: NOW - HOUR })
+    expect(s.startsAtOldestHeldTrade).toBe(true)
+    expect(s.points[0].time).toBeGreaterThan(NOW - HOUR)
+  })
+
+  it('does NOT flag it when a price was carried in, because then the edge is the window', () => {
+    const withHistory = [
+      trade({ timestamp: String(NOW - 5 * HOUR), priceX18: px(1e-10) }),
+      trade({ timestamp: String(NOW - 600), priceX18: px(9e-10) }),
+    ]
+    const s = buildPriceSeries(withHistory, {
+      nowSeconds: NOW,
+      extendToNow: true,
+      from: NOW - HOUR,
+    })
+    expect(s.startsAtOldestHeldTrade).toBe(false)
+    expect(s.points[0].time).toBe(NOW - HOUR)
+  })
+
+  it('flags it on the unwindowed build, where the left edge is always the oldest trade held', () => {
+    const s = buildPriceSeries(
+      [trade({ timestamp: String(NOW - HOUR), priceX18: px(1e-10) })],
+      { nowSeconds: NOW, extendToNow: true },
+    )
+    expect(s.startsAtOldestHeldTrade).toBe(true)
+  })
+})

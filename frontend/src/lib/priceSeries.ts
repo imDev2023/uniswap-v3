@@ -49,6 +49,17 @@ export interface PriceSeries {
   markers: TradeMarker[]
   /** True when the line was carried flat to `now`, so the caller can caption it. */
   hasTail: boolean
+  /**
+   * True when the line begins at the oldest trade we hold rather than at a known window edge - so
+   * its left edge is simply where our data ran out, and marks nothing real.
+   *
+   * The caller needs this to caption the truncation honestly. Deciding it from the RANGE instead is
+   * wrong, and was a real bug: reasoning that "inside a narrower range the left edge is the range"
+   * holds only while the 200-trade cap does not bite inside that range. Pack 200 trades into the
+   * last half hour - routine at mainnet's 0.1 s blocks - ask for 1H, and the line starts 1800
+   * seconds into the window with nothing saying so, which reads as "the hour began here".
+   */
+  startsAtOldestHeldTrade: boolean
   /** Grid resolution actually used, so the UI can state the chart's precision honestly. */
   bucketSeconds: number
 }
@@ -103,7 +114,13 @@ interface PriceEvent {
   count: number
 }
 
-const EMPTY: PriceSeries = { points: [], markers: [], hasTail: false, bucketSeconds: 0 }
+const EMPTY: PriceSeries = {
+  points: [],
+  markers: [],
+  hasTail: false,
+  bucketSeconds: 0,
+  startsAtOldestHeldTrade: false,
+}
 
 export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceSeries {
   const allEvents = toEvents(trades)
@@ -125,7 +142,11 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
   //    (it is behind the 200-trade cap, or before the launch), so the line must start at the first
   //    trade. Stretching it back to `from` would draw a flat stretch that is pure invention - the
   //    same class of fabrication as the index-axis chart this module replaced.
-  const from = carriedInValue !== undefined && opts.from !== undefined ? opts.from : events[0].time
+  const windowEdge = carriedInValue !== undefined ? opts.from : undefined
+  const from = windowEdge ?? events[0].time
+  // The left edge marks nothing real: it is the oldest trade we happen to hold, not a boundary the
+  // viewer chose or the curve's own beginning.
+  const startsAtOldestHeldTrade = windowEdge === undefined
 
   // With no trades in the window, the carried price is the last thing that happened, so "the last
   // event" is the window edge itself.
@@ -147,6 +168,7 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
       markers: [{ time: from, side: only.side, count: events.reduce((n, e) => n + e.count, 0) }],
       hasTail: false,
       bucketSeconds: 1,
+      startsAtOldestHeldTrade,
     }
   }
 
@@ -188,7 +210,13 @@ export function buildPriceSeries(trades: TradeRow[], opts: BuildOptions): PriceS
   }
 
   const lastTime = points[points.length - 1].time
-  return { points, markers: toMarkers(events, from, bucketSeconds, lastTime), hasTail, bucketSeconds }
+  return {
+    points,
+    markers: toMarkers(events, from, bucketSeconds, lastTime),
+    hasTail,
+    bucketSeconds,
+    startsAtOldestHeldTrade,
+  }
 }
 
 /**

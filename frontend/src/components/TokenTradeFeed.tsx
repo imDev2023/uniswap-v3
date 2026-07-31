@@ -3,9 +3,8 @@ import type { TradeRow } from '../lib/subgraph'
 import { explorerTxUrl, formatAge, formatEth, formatTokenAmount, shortAddress } from '../lib/format'
 import { useArrivals } from '../hooks/useArrivals'
 import { useIsScrollable } from '../hooks/useIsScrollable'
-import { IndexedDataNotice } from './IndexedDataNotice'
-import { Notice } from './Notice'
-import { isDegraded, type IndexerState } from '../lib/indexerHealth'
+import { type IndexerState } from '../lib/indexerHealth'
+import { TradeFeedState, isFeedLive } from './TradeFeedState'
 
 /**
  * Per-token live trade feed for the token page rail.
@@ -54,46 +53,29 @@ export function TokenTradeFeed({
   const arrivals = useArrivals(ids)
   const [scrollRef, scrollable] = useIsScrollable()
 
-  // A behind-the-chain indexer does NOT error - it answers successfully with an empty list for a
-  // token it has not reached yet. So "no rows" alone can never justify "no trades yet", and the
-  // health state has to be consulted on the empty branch too, not only on the error branch. Left
-  // unchecked this rendered "No trades yet. The first buy shows up here." over a curve that had
-  // already traded four times, under a pulsing Live dot.
-  const degraded = isDegraded(indexerState)
+  const isEmpty = newestFirst.length === 0
 
   return (
     <div className="card-flush">
       <div className="rail-head">
-        {/* The dot claims real-time. An indexer hours behind is not real-time, so it goes - for the
-            same reason a graduated curve does not get one. */}
-        {!graduated && !degraded && <span className="live-dot" aria-hidden="true" />}
+        {!graduated && isFeedLive(indexerState) && <span className="live-dot" aria-hidden="true" />}
         {graduated ? 'Curve trades' : 'Live trades'}
       </div>
 
-      {isError ? (
-        // IndexedDataNotice renders nothing when the indexer looks healthy, which would leave this
-        // panel silently blank if the query failed for some other reason. Always say something.
-        degraded ? (
-          <IndexedDataNotice state={indexerState} what="Trade feed" />
-        ) : (
-          <Notice icon="◔" inline>
-            Trade feed unavailable. Trading still works.
-          </Notice>
-        )
-      ) : isLoading ? (
-        <div className="spinner" style={{ padding: 'var(--s-5)' }}>
-          Loading…
-        </div>
-      ) : newestFirst.length === 0 ? (
-        degraded ? (
-          <IndexedDataNotice state={indexerState} what="Trade feed" />
-        ) : (
-          <Notice icon="◦" inline>
-            {graduated
+      {isError || isLoading || isEmpty ? (
+        // Shared with TradeRail - see TradeFeedState for why the empty branch must check indexer
+        // health too, and why the two feeds are no longer allowed to drift apart here.
+        <TradeFeedState
+          indexerState={indexerState}
+          isError={isError}
+          isLoading={isLoading}
+          isEmpty={isEmpty}
+          emptyMessage={
+            graduated
               ? 'No curve trades were recorded before graduation.'
-              : 'No trades yet. The first buy shows up here.'}
-          </Notice>
-        )
+              : 'No trades yet. The first buy shows up here.'
+          }
+        />
       ) : (
         <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>
           {newestFirst.map((t) => (

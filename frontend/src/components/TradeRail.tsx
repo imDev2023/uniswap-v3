@@ -4,9 +4,8 @@ import type { RecentTradeRow } from '../lib/subgraph'
 import { formatAge, formatEth } from '../lib/format'
 import { useArrivals } from '../hooks/useArrivals'
 import { useIsScrollable } from '../hooks/useIsScrollable'
-import { isDegraded, type IndexerState } from '../lib/indexerHealth'
-import { IndexedDataNotice } from './IndexedDataNotice'
-import { Notice } from './Notice'
+import { type IndexerState } from '../lib/indexerHealth'
+import { TradeFeedState, isFeedLive } from './TradeFeedState'
 
 /**
  * Cross-launch live trade feed.
@@ -36,43 +35,26 @@ export function TradeRail({
   const arrivals = useArrivals(ids)
   const [scrollRef, scrollable] = useIsScrollable()
 
-  // An indexer that is merely BEHIND answers successfully with an empty list, so the error branch
-  // below never sees it and "no rows" cannot on its own mean "nobody has traded". The same check
-  // therefore has to guard the empty branch.
-  const degraded = isDegraded(indexerState)
+  const isEmpty = !trades || trades.length === 0
 
   return (
     <aside className="rail" aria-label="Recent trades">
       <div className="rail-head">
-        {/* A pulsing dot asserts real-time; drop it when the data demonstrably is not. */}
-        {!degraded && <span className="live-dot" aria-hidden="true" />}
+        {isFeedLive(indexerState) && <span className="live-dot" aria-hidden="true" />}
         Live trades
       </div>
 
-      {isError ? (
-        // Diagnose, do not guess. This used to assert "the indexer is unreachable" for ANY query
-        // failure, which states something false whenever the indexer is demonstrably healthy and
-        // the request failed for some other reason - the same class of confident wrong claim the
-        // rest of this work exists to remove.
-        degraded ? (
-          <IndexedDataNotice state={indexerState} what="Trade feed" />
-        ) : (
-          <Notice icon="◔" inline>
-            Trade feed unavailable. Trading still works.
-          </Notice>
-        )
-      ) : isLoading ? (
-        <div className="spinner" style={{ padding: 'var(--s-5)' }}>
-          Loading…
-        </div>
-      ) : !trades || trades.length === 0 ? (
-        degraded ? (
-          <IndexedDataNotice state={indexerState} what="Trade feed" />
-        ) : (
-          <Notice icon="◦" inline>
-            No trades yet. The first buy shows up here.
-          </Notice>
-        )
+      {isError || isLoading || isEmpty ? (
+        // Every non-row state lives in TradeFeedState, shared with TokenTradeFeed - see there for
+        // why an indexer that is merely behind must be checked on the EMPTY branch, not just the
+        // error branch.
+        <TradeFeedState
+          indexerState={indexerState}
+          isError={isError}
+          isLoading={isLoading}
+          isEmpty={isEmpty}
+          emptyMessage="No trades yet. The first buy shows up here."
+        />
       ) : (
         <div className="rail-scroll" ref={scrollRef} data-scrollable={scrollable}>
           {trades.map((t) => (

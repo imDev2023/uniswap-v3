@@ -17,6 +17,10 @@ const fetchActiveTokens = vi.fn()
 const fetchGraduatedTokens = vi.fn()
 const fetchFactory = vi.fn()
 const fetchRecentTrades = vi.fn()
+const fetchMeta = vi.fn()
+
+/** Chain head used by both the indexer-health mock and the subgraph meta fixture. */
+const NOW = 1_800_000_000
 
 vi.mock('../lib/subgraph', () => ({
   fetchActiveTokens: (...a: unknown[]) => fetchActiveTokens(...a),
@@ -26,7 +30,18 @@ vi.mock('../lib/subgraph', () => ({
   fetchToken: vi.fn(),
   fetchTrades: vi.fn(),
   fetchHolders: vi.fn(),
-  fetchMeta: vi.fn(),
+  fetchMeta: (...a: unknown[]) => fetchMeta(...a),
+}))
+
+// The rail now diagnoses WHY the feed is missing rather than asserting the indexer is unreachable
+// for any failure, so the page reads indexer health, which reads the chain head through wagmi.
+vi.mock('wagmi', () => ({
+  useBlock: () => ({ data: { timestamp: BigInt(NOW) } }),
+  useChainId: () => 46630,
+  useAccount: () => ({ address: undefined, isConnected: false }),
+  useConnect: () => ({ connect: vi.fn(), connectors: [], isPending: false }),
+  useDisconnect: () => ({ disconnect: vi.fn() }),
+  useSwitchChain: () => ({ switchChain: vi.fn() }),
 }))
 
 vi.mock('../config/contracts', async (orig) => ({
@@ -233,6 +248,24 @@ describe('HomePage board', () => {
     expect(within(rail).getByText(/trade feed unavailable/i)).toBeInTheDocument()
     // The board itself is untouched by the rail's failure.
     expect(boardOrder()).toEqual(['QUIET', 'DIAMOND', 'RDOGE'])
+  })
+
+  it('does not blame the indexer when the indexer is demonstrably healthy', async () => {
+    // The rail used to assert "the indexer is unreachable" for ANY failure of the trades query.
+    // Here the indexer is provably fine - its indexed head is level with the chain head - and only
+    // this one query failed. Blaming the indexer would state something the page can see is false,
+    // the same class of confident wrong claim as a chart carrying a stale price. It must diagnose,
+    // not guess: the feed is missing, and trading is unaffected.
+    fetchMeta.mockResolvedValue({ block: { number: 100, timestamp: NOW }, hasIndexingErrors: false })
+    fetchRecentTrades.mockRejectedValue(SUBGRAPH_DOWN)
+    await renderHome()
+    await screen.findByText('RDOGE')
+
+    const rail = screen.getByRole('complementary', { name: /recent trades/i })
+    await waitFor(() =>
+      expect(within(rail).queryByText(/indexer is unreachable/i)).not.toBeInTheDocument(),
+    )
+    expect(within(rail).getByText(/trading still works/i)).toBeInTheDocument()
   })
 
   it('says the board is empty rather than rendering a bare grid', async () => {

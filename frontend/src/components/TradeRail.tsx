@@ -4,6 +4,8 @@ import type { RecentTradeRow } from '../lib/subgraph'
 import { formatAge, formatEth } from '../lib/format'
 import { useArrivals } from '../hooks/useArrivals'
 import { useIsScrollable } from '../hooks/useIsScrollable'
+import { isDegraded, type IndexerState } from '../lib/indexerHealth'
+import { IndexedDataNotice } from './IndexedDataNotice'
 import { Notice } from './Notice'
 
 /**
@@ -19,11 +21,14 @@ export function TradeRail({
   now,
   isError,
   isLoading,
+  indexerState,
 }: {
   trades: RecentTradeRow[] | undefined
   now: number
   isError: boolean
   isLoading: boolean
+  /** Passed in rather than read here, so this stays presentational - as TokenTradeFeed does. */
+  indexerState: IndexerState
 }) {
   // Memoised: useArrivals depends on this array's identity, and a fresh array every render would
   // re-run its effect on every tick of the shared clock.
@@ -39,9 +44,17 @@ export function TradeRail({
       </div>
 
       {isError ? (
-        <Notice icon="◔" inline>
-          Trade feed unavailable - the indexer is unreachable. Trading still works.
-        </Notice>
+        // Diagnose, do not guess. This used to assert "the indexer is unreachable" for ANY query
+        // failure, which states something false whenever the indexer is demonstrably healthy and
+        // the request failed for some other reason - the same class of confident wrong claim the
+        // rest of this work exists to remove.
+        isDegraded(indexerState) ? (
+          <IndexedDataNotice state={indexerState} what="Trade feed" />
+        ) : (
+          <Notice icon="◔" inline>
+            Trade feed unavailable. Trading still works.
+          </Notice>
+        )
       ) : isLoading ? (
         <div className="spinner" style={{ padding: 'var(--s-5)' }}>
           Loading…

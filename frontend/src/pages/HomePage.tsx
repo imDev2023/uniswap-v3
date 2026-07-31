@@ -10,6 +10,7 @@ import {
 } from '../hooks/useSubgraph'
 import { useNowSeconds } from '../hooks/useNowSeconds'
 import { useArrivals } from '../hooks/useArrivals'
+import { useIndexerStatus } from '../hooks/useIndexerStatus'
 import { formatEth } from '../lib/format'
 import { DEFAULT_SORT, SORT_MODES, orderByFor, sortTokens, type SortMode } from '../lib/board'
 import { BoardCard } from '../components/BoardCard'
@@ -41,6 +42,7 @@ export function HomePage() {
 
   // One clock for the whole render, so every age on the page agrees with every other.
   const now = useNowSeconds()
+  const indexer = useIndexerStatus()
 
   // The server has already ranked these; sortTokens only applies the deterministic tiebreak so
   // equal-keyed rows (nine untraded launches from one block) hold still between polls.
@@ -142,7 +144,13 @@ export function HomePage() {
           )}
         </main>
 
-        <TradeRail trades={trades} now={now} isError={tradesError} isLoading={tradesLoading} />
+        <TradeRail
+          trades={trades}
+          now={now}
+          isError={tradesError}
+          isLoading={tradesLoading}
+          indexerState={indexer.state}
+        />
       </div>
     </>
   )

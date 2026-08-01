@@ -1,0 +1,34 @@
+# Minimal graphman config for the local stack.
+#
+# graphman is graph-node's admin CLI and it refuses to start without --config, even for
+# read-only subcommands like `info`. It ships inside the graph-node image, so this file just
+# needs to be copied in:
+#
+#   docker cp subgraph/docker/graphman.toml launchpad-graph-node:/tmp/graphman.toml
+#   docker exec launchpad-graph-node graphman --config /tmp/graphman.toml info --all
+#
+# The credentials and the provider URL are the same ones docker-compose.yml already uses, and
+# the host names are container-internal (this runs inside the graph-node container, not on the
+# host), so `postgres:5432` is correct here and `localhost:5434` is not.
+#
+# The command this exists for is `rewind`, when a reorg has left a deployment wedged on an
+# orphaned branch. See "Recovering from a reorg deadlock" in ../README.md before using it.
+
+[store]
+[store.primary]
+connection = "postgresql://graph-node:let-me-in@postgres:5432/graph-node"
+pool_size = 5
+
+[chains]
+ingestor = "default"
+
+[chains.robinhood-testnet]
+shard = "primary"
+protocol = "ethereum"
+provider = [
+  { label = "robinhood-testnet-rpc-0", url = "https://rpc.testnet.chain.robinhood.com", features = ["archive"] },
+]
+
+[deployment]
+[[deployment.rule]]
+indexers = ["default"]

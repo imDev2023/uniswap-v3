@@ -159,6 +159,13 @@ chart and holder table carry this lag.
 > `synced: true` with `latestBlock == chainHeadBlock == 93347390` while the chain was really at
 > 93348111 — 721 blocks ahead. To monitor real lag, compare `latestBlock` against `eth_blockNumber`
 > from the RPC directly, as the table above does.
+>
+> ⚠️ **It is worse than that: `synced` is not a comparison at all.** Confirmed against Postgres
+> during #31 — it is the stored column `synced_at is not null`, set once when the deployment first
+> reached chain head and never re-evaluated afterwards. It cannot go false, whatever happens next.
+> A deployment 518,918 blocks behind still reports `synced: true`, `health: healthy`,
+> `fatalError: null`. See *Recovering from a reorg deadlock* below, and use
+> `node scripts/indexer-health.mjs` rather than reading these fields.
 
 #### The stack survives host sleep, but falls far behind
 
@@ -167,6 +174,114 @@ Closing a laptop pauses the Docker VM. On resume, graph-node logs a burst of Pos
 them, and recovers on its own — but at ~197k blocks/day the backlog is large (a 13-hour sleep left
 it ~2,000 blocks behind even after partial catch-up). No intervention needed; just don't mistake the
 post-resume error burst for a broken stack.
+
+#### Recovering from a reorg deadlock
+
+**This is the failure mode that produced a silently frozen subgraph on 2026-07-31, and it will recur.**
+The deployment stops advancing and never resumes, while graph-node reports perfect health.
+It is not a hang and it is not ingestor lag; it is a crash-restart loop, and it cannot fix itself.
+
+**Symptom.**
+`latestBlock` is frozen at some height while the block ingestor keeps pace with the chain head.
+`synced: true`, `health: healthy`, `fatalError: null`.
+The logs carry a repeating pair, one every ~35 s:
+
+```
+WARN Trying again after load block 0x91bc…eadb failed (attempt #10) with result
+     Err(Ethereum node did not find block 0x91bc…eadb), component: BlockStream
+ERRO Subgraph instance failed to run: Ethereum node did not find block 0x91bc…eadb,
+     component: SubgraphInstanceManager
+```
+
+**Cause.**
+The chain reorged past the deployment's stored head, leaving that head on an orphaned branch.
+Measured on 46630 during build #31: the divergence spanned roughly **134,300 blocks**
+(bounded to `(95175342, 95176342]` at the low end, ending at `95309661`), which is about
+11 hours at 0.3 s blocks.
+That is a testnet rollback, not an ordinary few-block reorg.
+
+graph-node **cannot** recover from this on its own, structurally.
+Reverting a reorg means walking back through the orphaned blocks via `parent_ptr`, which requires
+fetching them *by hash* — and no node serves non-canonical blocks.
+The recovery path depends on the exact thing that is unavailable, so it crash-loops forever.
+
+**Why nothing alerts.**
+All three health fields are read straight out of Postgres and none of them is a live comparison:
+
+| field | what it actually is |
+| --- | --- |
+| `synced` | a **sticky column** (`synced_at is not null`), set once when the deployment first reached chain head and never re-evaluated. It cannot go false. |
+| `health` | only reflects errors raised by the mappings. A block-stream crash loop never touches it. |
+| `fatalError` | only set for **deterministic** errors. A missing block is non-deterministic, so it is retried forever and this stays null. |
+
+Detect it with the probe, which checks the one thing that actually distinguishes a permanent
+deadlock from ordinary lag — whether the stored head hash is the hash the chain has at that height:
+
+```bash
+node scripts/indexer-health.mjs           # exit 0 only if every deployment is ok
+```
+
+**Recovery.**
+Three steps, in this order. Substitute your own fork bounds; the commands below are the ones that
+were actually run.
+
+1. **Find the last canonical cached block.**
+   Compare graph-node's block cache against the chain and walk back until they agree.
+   The cache is sparse (roughly one block per 1000 outside the indexed range), so this bounds the
+   fork start rather than pinpointing it, which is fine — any canonical block below it works.
+
+   ```bash
+   docker exec launchpad-graph-postgres psql -U graph-node -d graph-node -t -A -F',' \
+     -c "select number, encode(hash,'hex') from chain1.blocks where number between <lo> and <hi> order by number;"
+   # then compare each against eth_getBlockByNumber
+   ```
+
+2. **Purge the divergent cache range.**
+   This step is **mandatory, not optional**.
+   graph-node reads block metadata from its own cache, so a rewind that re-indexes through a
+   poisoned range would silently re-index the *wrong chain* out of local storage.
+
+   ```bash
+   docker exec launchpad-graph-postgres psql -U graph-node -d graph-node \
+     -c "delete from chain1.blocks where number > 95175342 and number <= 95309661;"
+   ```
+
+   ⚠️ **`graphman chain check-blocks` does not do this job.** Its stated purpose is to compare
+   cached blocks with fresh ones and clear the cache when they differ, but its repair path assumes
+   it can re-fetch the block by hash. On an orphaned block there is nothing to fetch, so it aborts
+   with `Error: JRPC provider found no block with hash 0x…` instead of deleting the row. Verified
+   during #31.
+
+3. **Rewind both deployments to a pre-fork canonical block, then let them re-index.**
+
+   ```bash
+   docker cp subgraph/docker/graphman.toml launchpad-graph-node:/tmp/graphman.toml
+   docker exec launchpad-graph-node graphman --config /tmp/graphman.toml rewind \
+     --block-number 95175342 \
+     --block-hash 0x3f9deb4a73b812e0ffae4ea2d2c89a1c7e5accdd772ea48c4aa5c3ade24d21d9 \
+     sgd1 sgd2
+   ```
+
+   `rewind` pauses and resumes the deployments itself. `--force` is only needed when the target
+   block is *not* in the local cache; picking a target that is cached and canonical avoids it.
+   The config is committed at `subgraph/docker/graphman.toml` — graphman will not start without
+   `--config`, even for read-only subcommands. Deployment ids (`sgd1`, `sgd2`) come from
+   `graphman --config /tmp/graphman.toml info --all`.
+
+**Cost.** Re-indexing ~650,000 blocks took about **10 minutes** (the scan runs ~1000 blocks/s over
+1000-block ranges). Reconcile afterwards against the chain rather than eyeballing it:
+
+```bash
+cast call <factory> "launchCount()(uint256)" --rpc-url <rpc>   # must equal factory.launchCount
+```
+
+⚠️ **Do not use "the head number stopped advancing" as your stall signal.**
+During a catch-up scan over ranges with no matching logs, graph-node legitimately leaves the stored
+head pointer untouched for long stretches — measured during this recovery, it read `95175342` while
+the scanner was already past `95212453`.
+A non-advancing head is normal during a large re-index, so alerting on it fires loudest exactly when
+an operator is already mid-recovery.
+Canonicity is the signal.
 
 #### The stack needs ~1 GB of Docker VM headroom — starve it and IPFS dies, not graph-node
 

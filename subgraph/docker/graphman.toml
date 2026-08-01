@@ -25,9 +25,19 @@ ingestor = "default"
 [chains.robinhood-testnet]
 shard = "primary"
 protocol = "ethereum"
+# `features = []`, deliberately. graph-node's own startup logs claim `capabilities: archive` for a
+# bare `ethereum:` URL, and that claim is false for this endpoint - state is pruned after roughly
+# 5,000 blocks (~26 min on testnet). See ../README.md, "graph-node declares `archive` capability -
+# it is lying", and docs/rpc-capability.md. Nothing graphman does here needs archive state, so
+# declaring it would be a falsehood committed to the repo for no benefit.
 provider = [
-  { label = "robinhood-testnet-rpc-0", url = "https://rpc.testnet.chain.robinhood.com", features = ["archive"] },
+  { label = "robinhood-testnet-rpc-0", url = "https://rpc.testnet.chain.robinhood.com", features = [] },
 ]
+
+# ⚠️ TOML cannot read the environment, so unlike docker-compose.yml - which honours
+# `${ROBINHOOD_RPC_URL:-…}` - this URL is fixed. If you point the indexer at a different endpoint
+# via ROBINHOOD_RPC_URL, edit the url above to match before running `rewind`, or graphman will
+# resolve block hashes against a different node than the one the indexer is following.
 
 [deployment]
 [[deployment.rule]]

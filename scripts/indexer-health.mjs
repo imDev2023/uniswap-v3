@@ -33,6 +33,17 @@
 //                    catching up", which fixes itself, from "wedged on an orphaned branch",
 //                    which never does and needs a graphman rewind.
 //
+// WHAT THIS DOES NOT DETECT, stated plainly so nobody reads a green run as more than it is.
+// Canonicity catches the reorg deadlock, which is the crash loop that actually happened and the
+// only one that is permanent by construction. It does NOT catch a crash-restart loop from any
+// other non-deterministic cause - a flapping provider, an OOMing container, the retry ladder
+// stalling on a block that IS canonical. Those present as a deployment that is simply behind,
+// and this probe will call them `lagging`, which is indistinguishable here from healthy catch-up.
+// Closing that gap needs a signal this script cannot see from the status API: restart counts or
+// the log stream. graph-node's Prometheus endpoint (container 8040 -> host 8140) is where that
+// would come from, and wiring it up is unbuilt Stage 4 work. Until then: `lagging` that does not
+// clear on its own deserves a look at `docker compose logs graph-node`.
+//
 // A NOTE ON WHAT IS DELIBERATELY *NOT* A SIGNAL. "The head number did not advance between two
 // samples" is NOT used to declare a stall, and must not be. During a catch-up scan over ranges
 // with no matching logs, graph-node legitimately leaves the stored head pointer untouched for
@@ -82,8 +93,6 @@ const DEFAULT_LAG_BLOCKS = 3000
 // precedence rules can be pinned offline, with no graph-node and no chain. Those rules are the
 // whole point of this script, and every one of them was learned from a real failure.
 
-export const VERDICTS = ['ok', 'lagging', 'orphaned', 'failed', 'unknown', 'unreachable']
-
 export function classify(obs, lagBlocks = DEFAULT_LAG_BLOCKS) {
   // Nothing answered. Distinct from every other state: we know nothing, rather than knowing
   // something is wrong. Callers must not read this as healthy.
@@ -97,19 +106,32 @@ export function classify(obs, lagBlocks = DEFAULT_LAG_BLOCKS) {
     return { verdict: 'failed', reason: `fatalError: ${obs.fatalError}` }
   }
 
-  // Absence of evidence. If the chain would not tell us what it has at that height, we cannot
-  // run the canonicity check, and we must not silently fall through to a lag-only verdict that
-  // would report `ok`. This is measurement trap #1 from docs/rpc-capability.md in a new place:
-  // a probe that treats an unanswered question as a passed one reports health it never checked.
-  if (obs.canonicalHash === null || obs.canonicalHash === undefined) {
+  // Absence of evidence, on BOTH sides. If either hash is missing we cannot run the canonicity
+  // check, and we must not silently fall through to a lag-only verdict that would report `ok`.
+  // This is measurement trap #1 from docs/rpc-capability.md in a new place: a probe that treats
+  // an unanswered question as a passed one reports health it never checked.
+  //
+  // Guarding only `canonicalHash` was the original bug: a null or empty `headHash` fell straight
+  // through to the lag check and could return `ok`, skipping the one check this script exists
+  // for. Same defect, opposite side. Caught in review, pinned by the self-test below.
+  if (!normHash(obs.canonicalHash)) {
     return { verdict: 'unknown', reason: 'chain would not serve the block at the indexed head' }
+  }
+  if (!normHash(obs.headHash)) {
+    return { verdict: 'unknown', reason: 'status API reported no hash for the indexed head' }
+  }
+
+  // A non-finite threshold or head would make every comparison below false, so `lag > threshold`
+  // silently reports `ok`. Refuse rather than reassure.
+  if (!Number.isFinite(obs.headNumber) || !Number.isFinite(obs.chainHead) || !Number.isFinite(lagBlocks)) {
+    return { verdict: 'unknown', reason: 'block heights or lag threshold are not finite numbers' }
   }
 
   // THE DECISIVE CHECK. The stored head is on a branch the chain no longer has, so graph-node
   // needs to revert through blocks no node will serve. It cannot, and it will crash-loop
   // forever. This outranks `lagging` on purpose: such a deployment is always also far behind,
   // and reporting the lag alone would describe a permanent deadlock as a temporary delay.
-  if (obs.headHash && normHash(obs.headHash) !== normHash(obs.canonicalHash)) {
+  if (normHash(obs.headHash) !== normHash(obs.canonicalHash)) {
     return {
       verdict: 'orphaned',
       reason: `indexed head ${obs.headNumber} is ${short(obs.headHash)} but the chain has ${short(obs.canonicalHash)}; needs a rewind`,
@@ -381,6 +403,32 @@ const SELF_TEST_CASES = [
     { reachable: true, headNumber: 95000000, headHash: H_A, canonicalHash: null, chainHead: 95638224, fatalError: null },
     'unknown',
   ],
+  // The mirror of the case above, and the one the original code got wrong: it guarded only
+  // canonicalHash, so a missing HEAD hash fell through to the lag check and could report `ok` -
+  // skipping the canonicity check entirely while looking healthy.
+  [
+    'status API reported no head hash: unknown, NOT ok, even when the lag looks fine',
+    { reachable: true, headNumber: 95638200, headHash: null, canonicalHash: H_A, chainHead: 95638224, fatalError: null },
+    'unknown',
+  ],
+  [
+    'an empty-string head hash is treated as missing, not as a mismatch',
+    { reachable: true, headNumber: 95638200, headHash: '', canonicalHash: H_A, chainHead: 95638224, fatalError: null },
+    'unknown',
+  ],
+  // A fat-fingered --lag-blocks used to make `lag > NaN` false for everything, i.e. a probe that
+  // always reports ok. classify() refuses non-finite inputs; main() also exits 2 on the flag.
+  [
+    'a non-finite lag threshold refuses rather than reporting ok',
+    { reachable: true, headNumber: 95000000, headHash: H_A, canonicalHash: H_A, chainHead: 95638224, fatalError: null },
+    'unknown',
+    NaN,
+  ],
+  [
+    'a non-finite head number refuses rather than reporting ok',
+    { reachable: true, headNumber: NaN, headHash: H_A, canonicalHash: H_A, chainHead: 95638224, fatalError: null },
+    'unknown',
+  ],
   [
     'status API down',
     { reachable: false },
@@ -395,8 +443,8 @@ const SELF_TEST_CASES = [
 
 function runSelfTest() {
   let failed = 0
-  for (const [name, obs, want] of SELF_TEST_CASES) {
-    const got = classify(obs).verdict
+  for (const [name, obs, want, lagBlocks] of SELF_TEST_CASES) {
+    const got = classify(obs, lagBlocks === undefined ? DEFAULT_LAG_BLOCKS : lagBlocks).verdict
     const ok = got === want
     if (!ok) failed++
     console.log(`${ok ? '  ok  ' : '  FAIL'}  ${name}  ->  ${got}${ok ? '' : `  (expected ${want})`}`)
@@ -431,8 +479,23 @@ async function main() {
   const statusUrl = arg(args, '--status', DEFAULT_STATUS)
   const rpcArg = arg(args, '--rpc', 'testnet')
   const rpcUrl = RPC_ALIASES[rpcArg] ?? rpcArg
-  const lagBlocks = Number(arg(args, '--lag-blocks', DEFAULT_LAG_BLOCKS))
+  // Validate rather than coerce. `Number('300O')` is NaN, and an unvalidated NaN threshold makes
+  // `lag > lagBlocks` false for every deployment, so a typo in a cron entry would turn the probe
+  // into something that always reports `ok`. classify() refuses NaN too; this is the second
+  // layer, and it is the one that tells the operator which flag they fat-fingered. Exit 2 for
+  // usage errors, matching scripts/rpc-probe.mjs.
+  const lagRaw = arg(args, '--lag-blocks', String(DEFAULT_LAG_BLOCKS))
+  const lagBlocks = Number(lagRaw)
+  if (!Number.isFinite(lagBlocks) || lagBlocks < 0) {
+    console.error(`--lag-blocks expects a non-negative number of blocks, got ${JSON.stringify(lagRaw)}`)
+    process.exit(2)
+  }
+
   const names = arg(args, '--name', DEFAULT_NAMES.join(',')).split(',').map((n) => n.trim()).filter(Boolean)
+  if (names.length === 0) {
+    console.error('--name expects at least one subgraph name, e.g. octopus/octopus')
+    process.exit(2)
+  }
 
   let out
   try {
@@ -456,4 +519,9 @@ async function main() {
 // pathToFileURL, not a `file://` template. This repo's checkout path contains a space
 // ("Work Folder"), so import.meta.url is percent-encoded and never equals the raw argv[1].
 // The naive comparison silently ran nothing at all - no error, no output.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main()
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(`probe failed: ${err.message}`)
+    process.exit(1)
+  })
+}

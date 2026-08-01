@@ -161,7 +161,7 @@ chart and holder table carry this lag.
 > from the RPC directly, as the table above does.
 >
 > ⚠️ **It is worse than that: `synced` is not a comparison at all.** Confirmed against Postgres
-> during #31 — it is the stored column `synced_at is not null`, set once when the deployment first
+> during #31 - it is the stored column `synced_at is not null`, set once when the deployment first
 > reached chain head and never re-evaluated afterwards. It cannot go false, whatever happens next.
 > A deployment 518,918 blocks behind still reports `synced: true`, `health: healthy`,
 > `fatalError: null`. See *Recovering from a reorg deadlock* below, and use
@@ -202,7 +202,7 @@ That is a testnet rollback, not an ordinary few-block reorg.
 
 graph-node **cannot** recover from this on its own, structurally.
 Reverting a reorg means walking back through the orphaned blocks via `parent_ptr`, which requires
-fetching them *by hash* — and no node serves non-canonical blocks.
+fetching them *by hash* - and no node serves non-canonical blocks.
 The recovery path depends on the exact thing that is unavailable, so it crash-loops forever.
 
 **Why nothing alerts.**
@@ -215,7 +215,7 @@ All three health fields are read straight out of Postgres and none of them is a 
 | `fatalError` | only set for **deterministic** errors. A missing block is non-deterministic, so it is retried forever and this stays null. |
 
 Detect it with the probe, which checks the one thing that actually distinguishes a permanent
-deadlock from ordinary lag — whether the stored head hash is the hash the chain has at that height:
+deadlock from ordinary lag - whether the stored head hash is the hash the chain has at that height:
 
 ```bash
 node scripts/indexer-health.mjs           # exit 0 only if every deployment is ok
@@ -228,13 +228,29 @@ were actually run.
 1. **Find the last canonical cached block.**
    Compare graph-node's block cache against the chain and walk back until they agree.
    The cache is sparse (roughly one block per 1000 outside the indexed range), so this bounds the
-   fork start rather than pinpointing it, which is fine — any canonical block below it works.
+   fork start rather than pinpointing it, which is fine - any canonical block below it works.
 
    ```bash
+   RPC=https://rpc.testnet.chain.robinhood.com
+   LO=95000000; HI=95400000     # widen until you see both MATCH and DIVERGE rows
+
    docker exec launchpad-graph-postgres psql -U graph-node -d graph-node -t -A -F',' \
-     -c "select number, encode(hash,'hex') from chain1.blocks where number between <lo> and <hi> order by number;"
-   # then compare each against eth_getBlockByNumber
+     -c "select number, encode(hash,'hex') from chain1.blocks where number between $LO and $HI order by number;" \
+   | while IFS=, read -r n h; do
+       k=$(curl -s -X POST "$RPC" -H 'content-type: application/json' \
+             -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_getBlockByNumber\",\"params\":[\"$(printf '0x%x' "$n")\",false]}" \
+           | python3 -c 'import sys,json; print((json.load(sys.stdin).get("result") or {}).get("hash",""))')
+       [ "0x$h" = "$k" ] && echo "$n MATCH" || echo "$n DIVERGE"
+     done | tee /tmp/forkscan.txt
+
+   # the rewind target is the last MATCH before the first DIVERGE
+   grep -m1 DIVERGE /tmp/forkscan.txt
+   grep -B1 -m1 DIVERGE /tmp/forkscan.txt | head -1
    ```
+
+   The cache is sparse outside the indexed range (roughly one block per 1000), so this bounds the
+   fork start rather than pinpointing it, which is fine - any canonical block below it works as the
+   rewind target. Sample a few hundred rows, not the whole range; each row is one RPC call.
 
 2. **Purge the divergent cache range.**
    This step is **mandatory, not optional**.
@@ -264,7 +280,7 @@ were actually run.
 
    `rewind` pauses and resumes the deployments itself. `--force` is only needed when the target
    block is *not* in the local cache; picking a target that is cached and canonical avoids it.
-   The config is committed at `subgraph/docker/graphman.toml` — graphman will not start without
+   The config is committed at `subgraph/docker/graphman.toml` - graphman will not start without
    `--config`, even for read-only subcommands. Deployment ids (`sgd1`, `sgd2`) come from
    `graphman --config /tmp/graphman.toml info --all`.
 
@@ -272,12 +288,26 @@ were actually run.
 1000-block ranges). Reconcile afterwards against the chain rather than eyeballing it:
 
 ```bash
-cast call <factory> "launchCount()(uint256)" --rpc-url <rpc>   # must equal factory.launchCount
+# chain side
+cast call 0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7 "launchCount()(uint256)" \
+  --rpc-url https://rpc.testnet.chain.robinhood.com
+
+# subgraph side - these two numbers must be equal
+curl -s -X POST http://localhost:8100/subgraphs/name/octopus/octopus \
+  -H 'content-type: application/json' \
+  -d '{"query":"{ factory(id:\"launchpad\"){ launchCount graduationCount } }"}'
+```
+
+After the #31 recovery both read **14** launches / **2** graduations.
+Then confirm the deployment is genuinely healthy rather than merely claiming to be:
+
+```bash
+node scripts/indexer-health.mjs      # exit 0, VERDICT: OK, and the head hash matches the chain
 ```
 
 ⚠️ **Do not use "the head number stopped advancing" as your stall signal.**
 During a catch-up scan over ranges with no matching logs, graph-node legitimately leaves the stored
-head pointer untouched for long stretches — measured during this recovery, it read `95175342` while
+head pointer untouched for long stretches - measured during this recovery, it read `95175342` while
 the scanner was already past `95212453`.
 A non-advancing head is normal during a large re-index, so alerting on it fires loudest exactly when
 an operator is already mid-recovery.

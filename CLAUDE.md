@@ -35,7 +35,7 @@ cd contracts && forge test          # 84 tests; fork tests need RPC_*_ARCHIVE_UR
 
 ⚠️ **As of #32 every fork test is PINNED and forks from an archive endpoint** (`contracts/test/ForkConfig.sol`, aliases `robinhood_archive` / `robinhood_testnet_archive`). `contracts/.env` already has the URLs; `contracts/.env.example` documents them. Without them the fork suites fail loudly rather than falling back to a pruning endpoint.
 
-Ticket rhythm (build tickets #12-#21 built the stack; #22-#28 are merged; **Stages 1 and 2 are done, and Stage 3 is UNDERWAY. `build/29-token-swap-pages` is MERGED to `main`; `build/30-metadata-range-bundle` is REVIEWED, its findings APPLIED, and MERGED to `main` (2026-07-31, fast-forward). `build/31-indexer-reorg-recovery` and `build/32-alchemy-endpoint-wiring` (both Stage 4) are REVIEWED, their findings APPLIED, and MERGED to `main` (2026-08-01, fast-forward). ✅ `main` was PUSHED to `origin/main` (`099d710`) - local and remote are IN SYNC**; remaining work is the rest of Stage 3 (metadata read side) or more of Stage 4 - and as of 2026-07-30 that work is the critical path, since the audit was moved to **after** project completion and the user's own testing pass. Tracked as GitHub issues; the map is #1, spec is #11 - note #26, #27, #28 and #29 have no issues of their own, they were scoped in-session):
+Ticket rhythm (build tickets #12-#21 built the stack; #22-#28 are merged; **Stages 1 and 2 are done, and Stage 3 is UNDERWAY. `build/29-token-swap-pages` is MERGED to `main`; `build/30-metadata-range-bundle` is REVIEWED, its findings APPLIED, and MERGED to `main` (2026-07-31, fast-forward). `build/31-indexer-reorg-recovery` and `build/32-alchemy-endpoint-wiring` (both Stage 4) are REVIEWED, their findings APPLIED, and MERGED to `main` (2026-08-01, fast-forward). ✅ `main` was PUSHED to `origin/main` (`099d710`) - local and remote are IN SYNC**; ⬅️ **the agreed NEXT step is the de-risking probe, not a build ticket - see the section below** - and as of 2026-07-30 the remaining work is the critical path, since the audit was moved to **after** project completion and the user's own testing pass. Tracked as GitHub issues; the map is #1, spec is #11 - note #26, #27, #28 and #29 have no issues of their own, they were scoped in-session):
 1. One ticket per branch: `build/<NN>-<slug>`, branched from `main`.
 2. Implement + write tests at the fork-test seam; keep the full suite green.
 3. Run `/code-review` (two axes) against `main`; apply worthwhile findings.
@@ -170,6 +170,39 @@ Settled decisions:
 - **Rough cost ~$200–500/mo**: indexer VM $40–80, managed Postgres $25–100, RPC $100–300, frontend $0–20, monitoring $0–30.
 
 **Service verdicts (asked 2026-07-26):** **Postgres** ✅ required (graph-node's store, not a choice). **PostHog** ✅ fine for analytics. **Convex** 🟡 good for metadata/comments/watchlists — must *not* replace the subgraph (no reorg handling, no re-index story). **Trigger.dev** 🟡 optional; one real use case is scheduled permissionless `LPLock.collect` fee sweeps, which otherwise accrue untouched. **Prisma** ❌ not needed — graph-node owns its Postgres schema (`sgd1.*`, block-range columns for time-travel); it is an internal format, not a stable API. Never write to it; query GraphQL instead.
+
+### 🔬 NEXT UP - the de-risking probe (agreed 2026-08-01, NOT a build ticket)
+
+**Decided after #32 merged: the next session MEASURES three unknowns instead of building anything.**
+The user wants the project finished as fast as possible, and the remaining-work estimate is currently a range whose entire width comes from three unmeasured things.
+Measuring them is cheap; discovering them late is expensive.
+**No branch, no ticket number, no merge - the deliverable is findings written into the docs, plus a re-estimate.**
+
+Measured cadence for the estimate: **builds #25-#32 = 8 tickets in 4 days** (2026-07-29 → 2026-08-01), each including build, two-axis review, applied findings and merge.
+
+| Remaining work | Est. tickets | Confidence |
+| --- | --- | --- |
+| Stage 3 audit (create-token flow, mobile, wallets, board search) | 1-3 | **Low - the create flow has never been opened** |
+| Key protection: domain allowlist or proxy | 0.5 | High |
+| Stage-2 RPC fallbacks (homepage token list + curve progress) | 1 | High |
+| Frontend hosting (static SPA) | 0.5 | High |
+| Indexer hosting (VM + Postgres `C` collation) | 1-2 | **Low - unverified** |
+| Monitoring wiring (probe exists, needs a runner + alerting) | 1 | High |
+| Indexer tuning for 0.1 s blocks | 1-3 | **Low - named the likeliest surprise by #26** |
+| Blockscout verification of the V3 stack + QuoterV2 | 0.5 | Medium |
+| Production-scale graduation (~90 ETH) on live testnet | 0.5 | Blocked on test ETH |
+| Adversarial MEV testing | 1 | Low - nothing scoped |
+| Mainnet deploy | 0.5 | High |
+
+**~9 tickets if the unknowns come back clean, ~15 if they bite** - roughly 5 days best case, 8-10 realistic, and up to 3 weeks if indexer tuning goes badly.
+
+**The three things the probe must settle, and why each one can blow up the estimate:**
+
+1. ⚠️ **Indexer tuning at 0.1 s blocks - the single largest risk in the project.** Stock graph-node settings **never converge** at testnet's 0.3 s; the tuned compose env holds a stable ~40 s. Mainnet is confirmed at **0.100 s**, ~3x worse. If tuning cannot close it, the fallback is [Ponder](https://ponder.sh), which means **rewriting the mappings and discarding 13 matchstick tests** - a subproject, not a ticket. Measure the real lag before committing to graph-node on mainnet.
+2. ⚠️ **Managed subgraph host support for 4663, and Postgres `C` collation.** Both unverified. `C` collation **can only be set at cluster creation** and is unfixable afterwards without recreating the DB, so picking a managed Postgres that will not give it is a decision that cannot be walked back. If no managed host supports 4663 either, self-hosting becomes real ops work rather than a config choice.
+3. ⚠️ **The create-token flow has never been opened.** It is the product's entry point and the one surface no one has run - not in #20 (which built it), not in #28/#29/#30, not in any review. It could be fine, or it could need the whole bring-your-own-URI UX built out. #30 deleted its "Image URL" field, so at minimum the flow changed under it without anyone looking.
+
+⚠️ **Items with LEAD TIME that are on the user's clock, not on build time.** Starting them costs no working days and each has latency, so they should be kicked off in parallel rather than discovered as blockers when the engineering is done: the **real multisig** for `SAFE`, the root **`LICENSE`** choice, **trademark clearance** (external, and could outlast all remaining engineering), and acquiring **~90 test ETH** for the production-scale graduation.
 
 ### Stage 5 — mainnet deploy
 

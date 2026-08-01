@@ -6,6 +6,7 @@ import {BondingCurve, CurveConfig} from "../src/BondingCurve.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockGraduationManager} from "./mocks/MockGraduationManager.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice Build 03 (#14): bonding-curve buy/sell. The curve is deployed directly with the
 ///         anti-snipe cap DISABLED (threshold 0) so these tests isolate pure curve math;
@@ -193,7 +194,7 @@ contract BondingCurveTest is Test {
 
     /// @notice AC "Fork tests assert pricing math, fee accounting, reserve updates" — on 4663.
     function test_BuySell_OnRobinhoodFork() public {
-        vm.createSelectFork("robinhood");
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         assertEq(block.chainid, 4663);
 
         gm = new MockGraduationManager(); // fresh fork state

@@ -10,6 +10,7 @@ import {GraduationManager} from "../src/periphery/GraduationManager.sol";
 import {Constants} from "../src/Constants.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice Build 05 (#16): the headline behaviour. Drives the whole journey through the public ABI
 ///         against a real Robinhood Chain (4663) fork with our OWN unmodified V3 deployment:
@@ -24,12 +25,8 @@ contract GraduationTest is Test, V3Deployer {
     address internal treasury = makeAddr("treasury");
     address internal whale = makeAddr("whale");
 
-    // Pinned block: this test lazily reads a lot of fork state (many curve buys + a full V3 mint);
-    // pinning keeps Foundry's on-disk RPC cache reusable so the public endpoint isn't re-hit each run.
-    uint256 internal constant FORK_BLOCK = 14_068_850;
-
     function setUp() public {
-        vm.createSelectFork("robinhood", FORK_BLOCK);
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         address v3Factory = deployV3Factory();
         positionManager = deployPositionManager(v3Factory, Constants.WETH9, address(0xDEAD));
         factory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, Constants.WETH9);

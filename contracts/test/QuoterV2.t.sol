@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
 import {IUniswapV3Factory, IUniswapV3Pool, IWETH9} from "../src/interfaces/IUniswapV3Minimal.sol";
 import {Constants} from "../src/Constants.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 interface IQuoterV2 {
     struct QuoteExactInputSingleParams {
@@ -47,7 +48,7 @@ interface IERC20 {
 ///         our own live `SwapRouter` ACTUALLY produces — the property the swap page (#21) needs in
 ///         order to replace its `slot0` spot-price estimate with a real quote.
 ///
-/// @dev Forks **testnet 46630** at head and runs against the genuinely deployed stack from
+/// @dev Forks **testnet 46630** at a pinned block and runs against the genuinely deployed stack from
 ///      `docs/deployments-testnet.md` — the real V3 factory, the real graduated `GRAD/WETH` pool and
 ///      the real router — rather than a freshly seeded local pool. That is the point: a spot-price
 ///      estimate and a quoter agree on a pristine pool and diverge on a real one with fees and
@@ -62,28 +63,16 @@ contract QuoterV2ForkTest is Test, V3Deployer {
 
     IQuoterV2 internal quoter;
 
-    /// @dev How far behind head to fork. Forking at `latest` FAILS on this chain: the node rejects
-    ///      state reads at the newest block with `-32000 unsupported block number`, and it prunes
-    ///      state after only ~5,600 blocks (~28 min — see subgraph/README.md). So the fork block has
-    ///      to sit strictly inside that window: far enough back that the node will serve state,
-    ///      recent enough that it has not been pruned.
-    uint256 internal constant FORK_LAG_BLOCKS = 300;
-
+    /// @dev Pinned, like every other fork test - see `ForkConfig`. This test used to read the head
+    ///      at run time and fork 300 blocks back, because the public endpoint prunes state after
+    ///      ~5,600 blocks and a pinned constant fell out of that window within the hour. Forking
+    ///      from an archive endpoint removes the constraint, and with it a test whose subject
+    ///      changed every time it ran: the pool's price, liquidity and fee growth are now fixed
+    ///      inputs, so a failure here means our quoter disagreed with our router, which is the only
+    ///      thing this test is entitled to claim.
     function setUp() public {
-        vm.createSelectFork("robinhood_testnet", _headBlock() - FORK_LAG_BLOCKS);
+        vm.createSelectFork(ForkConfig.TESTNET, ForkConfig.TESTNET_BLOCK);
         quoter = IQuoterV2(deployQuoterV2(V3_FACTORY, WETH9_TESTNET));
-    }
-
-    /// @dev Blocks land every ~0.3s, so a pinned constant would fall out of the retention window
-    ///      within the hour. Read the head at run time instead.
-    ///      `vm.rpc` hands back the JSON quantity as raw big-endian bytes of its natural width
-    ///      (e.g. `0x05906cc4`), NOT a 32-byte ABI word — `abi.decode(.., (uint256))` reverts on it.
-    function _headBlock() internal returns (uint256 head) {
-        bytes memory raw = vm.rpc("robinhood_testnet", "eth_blockNumber", "[]");
-        require(raw.length > 0 && raw.length <= 32, "unexpected eth_blockNumber width");
-        for (uint256 i = 0; i < raw.length; i++) {
-            head = (head << 8) | uint256(uint8(raw[i]));
-        }
     }
 
     function test_ForkIsTestnet_AndLiveStackIsPresent() public view {

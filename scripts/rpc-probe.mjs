@@ -298,12 +298,37 @@ const why = (r) => {
   return r.transport
 }
 
-/** True when the failure is the node refusing an over-large query, not a real outage. */
-const isQueryTooBig = (r) => /exceeds limit|too many logs|response too large|timeout|timed out/i.test(why(r))
+/**
+ * True when the failure is the node refusing an over-large query, not a real outage.
+ *
+ * Two different ceilings produce this, and BOTH have to be recognised or trap #3 comes back in a new
+ * costume - a refusal that PROVES logs exist at a depth gets tallied as evidence of pruning:
+ *
+ *   - a RESULT-COUNT cap ("logs matched by query exceeds limit of 10000"), which is what the public
+ *     Robinhood endpoints enforce, and
+ *   - a BLOCK-RANGE cap ("you can make eth_getLogs requests with up to a 10 block range"), which is
+ *     what a metered provider's free tier enforces. Measured 2026-08-01: Alchemy's free tier caps
+ *     the range at 10 blocks on both Robinhood chains, and reports it as JSON-RPC code -32600.
+ *
+ * Missing the second one made this probe report `11 depth(s) failed for a NON-CAP reason` against an
+ * endpoint whose logs were entirely intact - the exact inversion the doc warns about.
+ */
+const isQueryTooBig = (r) =>
+  /exceeds limit|too many logs|response too large|block range|timeout|timed out/i.test(why(r))
 
 /** The node states its own ceiling in the refusal text: "exceeds limit of 50000". */
 const parseLimit = (r) => {
   const m = /exceeds limit of (\d+)/i.exec(why(r))
+  return m ? Number(m[1]) : null
+}
+
+/**
+ * A block-range refusal usually names the span it WOULD accept ("up to a 10 block range"). Honour it
+ * rather than blindly dividing the span down: against a 10-block cap the divide-by-5 ladder burns
+ * three extra round trips per depth, times every depth sampled.
+ */
+const parseRangeCap = (r) => {
+  const m = /up to (?:a )?(\d+)[- ]block range/i.exec(why(r))
   return m ? Number(m[1]) : null
 }
 
@@ -498,7 +523,13 @@ async function probeLogRetention(ctx) {
       const r = await getLogs(ctx.url, from, span)
       if (r.ok) return { ok: true, span, count: r.result.length, capped: span < 1000 }
       if (!isQueryTooBig(r) || span <= 1) return { ok: false, span, error: why(r) }
-      span = Math.floor(span / 5)
+      // Take the node at its word when it names an acceptable span; otherwise step down.
+      // `getLogs` queries [from, from+span] INCLUSIVE, so a stated cap of N blocks is span N-1.
+      // Using N directly asks for N+1 blocks, gets refused again, and falls through to the divide
+      // ladder - which still terminates, but throws away the round trip the hint was there to save.
+      const stated = parseRangeCap(r)
+      const fromHint = stated === null ? null : Math.max(1, stated - 1)
+      span = fromHint !== null && fromHint < span ? fromHint : Math.floor(span / 5)
     }
   }
 
@@ -712,8 +743,20 @@ async function probeState(ctx) {
     const blk = await rpc(ctx.url, 'eth_getBlockByNumber', [hex(deepestSafe.block), false])
     const age = blk.ok && blk.result ? Math.floor(Date.now() / 1000) - toNum(blk.result.timestamp) : null
     row('deepest consistent depth', `${deepestSafe.back.toLocaleString()} blocks back${age === null ? '' : ` (~${humanizeAge(age)})`}`)
-    note('  Keep fork tests inside this. It is a MOVING window, so read the head at')
-    note('  runtime rather than hardcoding a block number.')
+    // The advice has to follow the measurement, not the endpoint this probe was first written
+    // against. "Read the head at runtime" is correct ONLY for an endpoint that prunes: it is a
+    // workaround for a moving retention window. Printing it unconditionally told an operator to
+    // undo a pinned fork block on an archive node, which is the opposite of the right move - and it
+    // said so directly under a table showing every sampled depth answering 4/4.
+    if (firstBad === -1) {
+      note('  Every sampled depth answered consistently, i.e. this endpoint behaves like an')
+      note('  ARCHIVE node over the whole sampled range. PIN a block number in fork tests -')
+      note('  a pinned block is reproducible and caches on disk. Deeper than the deepest row')
+      note('  is still unmeasured, not proven.')
+    } else {
+      note('  Keep fork tests inside this. It is a MOVING window, so read the head at')
+      note('  runtime rather than hardcoding a block number.')
+    }
   } else {
     row('deepest consistent depth', 'none of the sampled depths answered consistently')
   }
@@ -880,19 +923,48 @@ const SELF_TEST_CASES = [
   ['a log-cap refusal, which is not throttling', 200, '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"logs matched by query exceeds limit of 10000"}}', 'proceed'],
 ]
 
+/**
+ * Cases for the SECOND classifier: is this failure the node refusing an over-large query?
+ *
+ * It earns its own table because getting it wrong is silent and inverts a conclusion - an unmatched
+ * cap refusal is tallied as a depth that "failed", which reads as pruning when it is in fact proof
+ * that logs exist there. Each row is [name, refusal message, expected too-big?, expected range cap].
+ */
+const SPAN_TEST_CASES = [
+  ['a result-count cap (public Robinhood endpoints)', 'logs matched by query exceeds limit of 10000', true, null],
+  ['the wider result-count cap at span <= 1000', 'logs matched by query exceeds limit of 50000', true, null],
+  ['a free-tier block-range cap (Alchemy)', 'Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. Upgrade to PAYG for expanded block range.', true, 10],
+  ['a block-range cap with a hyphen and a wider span', 'this endpoint allows up to 500-block range queries', true, 500],
+  ['a response-size refusal', 'response too large', true, null],
+  ['a timeout', 'query timed out', true, null],
+  // The negatives matter more than the positives: widening the pattern until everything looks like a
+  // cap would make the retention table incapable of ever reporting real pruning.
+  ['pruned state, which is NOT a cap', 'missing trie node 8f3b2f47 (code -32000)', false, null],
+  ['a rejected block tag, which is NOT a cap', 'unsupported block number (code -32000)', false, null],
+  ['a plan refusal that mentions no range', 'chain is not available on free plan, please upgrade', false, null],
+  ['a transport failure', 'fetch failed', false, null],
+]
+
 function runSelfTest() {
   let failed = 0
+  const check = (ok, name, detail) => {
+    if (!ok) failed++
+    console.log(`${ok ? '  ok  ' : '  FAIL'}  ${name}  ->  ${detail}`)
+  }
   for (const [name, status, body, want] of SELF_TEST_CASES) {
     const got = classifyReply(status, body)
-    const ok = got === want
-    if (!ok) failed++
-    console.log(`${ok ? '  ok  ' : '  FAIL'}  ${name}  ->  ${got}${ok ? '' : `  (expected ${want})`}`)
+    check(got === want, name, `${got}${got === want ? '' : `  (expected ${want})`}`)
   }
-  console.log(
-    failed === 0
-      ? `\nall ${SELF_TEST_CASES.length} reply-classification cases pass`
-      : `\n${failed} of ${SELF_TEST_CASES.length} FAILED`,
-  )
+  for (const [name, message, wantBig, wantCap] of SPAN_TEST_CASES) {
+    // isQueryTooBig / parseRangeCap read a reply through why(), so feed them the same shape.
+    const reply = { ok: false, error: { message, code: -32000 } }
+    const gotBig = isQueryTooBig(reply)
+    const gotCap = parseRangeCap(reply)
+    const ok = gotBig === wantBig && gotCap === wantCap
+    check(ok, name, `tooBig=${gotBig} cap=${gotCap}${ok ? '' : `  (expected tooBig=${wantBig} cap=${wantCap})`}`)
+  }
+  const total = SELF_TEST_CASES.length + SPAN_TEST_CASES.length
+  console.log(failed === 0 ? `\nall ${total} classification cases pass` : `\n${failed} of ${total} FAILED`)
   return failed === 0
 }
 

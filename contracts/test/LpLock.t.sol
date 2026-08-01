@@ -7,6 +7,7 @@ import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 import {GraduationManager} from "../src/periphery/GraduationManager.sol";
 import {LPLock} from "../src/periphery/LPLock.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 import {
     IUniswapV3Factory,
     IUniswapV3Pool,
@@ -39,7 +40,6 @@ interface ISwapRouter {
 ///         protocol fee switch is on, and BOTH the locked position's trading fees and the pool's
 ///         protocol fees are collectable — always to the treasury.
 contract LpLockTest is Test, V3Deployer {
-    uint256 internal constant FORK_BLOCK = 14_068_850; // pinned (shared cache with Graduation.t.sol)
     uint24 internal constant FEE_TIER = 10000;
 
     LaunchpadFactory internal factory;
@@ -56,7 +56,7 @@ contract LpLockTest is Test, V3Deployer {
     address internal attacker = makeAddr("attacker");
 
     function setUp() public {
-        vm.createSelectFork("robinhood", FORK_BLOCK);
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         v3Factory = IUniswapV3Factory(deployV3Factory());
         router = deploySwapRouter(address(v3Factory), Constants.WETH9);
         positionManager = deployPositionManager(address(v3Factory), Constants.WETH9, address(0xDEAD));

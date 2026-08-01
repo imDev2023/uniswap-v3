@@ -21,20 +21,27 @@ The DEX is our **own instance of unmodified Uniswap V3** (decision #4). Rather t
 
 Configured in `foundry.toml` (`[rpc_endpoints]`):
 
-| Alias                | Chain ID | RPC |
-| -------------------- | -------- | --- |
-| `robinhood`          | 4663     | `https://rpc.mainnet.chain.robinhood.com` |
-| `robinhood_testnet`  | 46630    | `https://rpc.testnet.chain.robinhood.com` |
+| Alias                       | Chain ID | RPC | Used for |
+| --------------------------- | -------- | --- | --- |
+| `robinhood`                 | 4663     | `https://rpc.mainnet.chain.robinhood.com` | broadcasting, head reads |
+| `robinhood_testnet`         | 46630    | `https://rpc.testnet.chain.robinhood.com` | broadcasting, head reads |
+| `robinhood_archive`         | 4663     | `${RPC_MAINNET_ARCHIVE_URL}` | **fork tests** |
+| `robinhood_testnet_archive` | 46630    | `${RPC_TESTNET_ARCHIVE_URL}` | **fork tests** |
 
 ## Run
 
 ```bash
+cp .env.example .env        # then fill in RPC_*_ARCHIVE_URL - required for forge test
 npm install                 # fetch the Uniswap V3 precompiled artifacts
 forge build
-forge test -vv              # runs the fork tests against Robinhood Chain (4663)
+forge test -vv              # 84 tests, including fork tests against 4663 and 46630
 ```
 
-The tests fork mainnet (4663) to verify our own V3 deploys and a real 1%-tier pool can be created and initialized, and that the canonical WETH9 actually has code on-chain.
+The fork tests fork mainnet (4663) to verify our own V3 deploys and a real 1%-tier pool can be created and initialized, and that the canonical WETH9 actually has code on-chain; `QuoterV2.t.sol` forks testnet (46630) against the genuinely deployed stack.
+
+**Every fork block is pinned, and every fork uses an archive endpoint** - `test/ForkConfig.sol` is the single place that says which. The two go together: pinning is what makes a fork test reproducible rather than a test against whatever the chain happened to hold that minute, and only an archive node can still serve state at a pinned block, since the public endpoints prune after roughly 5,000 blocks. Without `RPC_*_ARCHIVE_URL` set, the fork suites fail with `environment variable ... not found`, which is deliberate: a fork test silently falling back to a pruning endpoint is what made these suites flaky.
+
+Pinned state caches under `~/.foundry/cache/rpc/<chain>/<block>/`, so after the first run the whole suite takes about a second and touches no network.
 
 ### Deploy (later tickets finalize ownership)
 

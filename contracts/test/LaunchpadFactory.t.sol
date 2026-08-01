@@ -6,6 +6,7 @@ import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
 import {LaunchToken} from "../src/LaunchToken.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice Build 02 (#13): token creation + creation fee.
 contract LaunchpadFactoryTest is Test {
@@ -172,7 +173,7 @@ contract LaunchpadFactoryTest is Test {
     /// @notice AC5: a *fork* test asserting supply, immutability, fee transfer, and event
     ///         — proves a launch behaves against real Robinhood Chain (4663) state.
     function test_CreateLaunch_OnRobinhoodFork() public {
-        vm.createSelectFork("robinhood");
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         assertEq(block.chainid, 4663);
 
         LaunchpadFactory forkFactory = new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory, weth9);

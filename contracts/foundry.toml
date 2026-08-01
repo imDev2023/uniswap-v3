@@ -17,8 +17,19 @@ optimizer_runs = 200
 fs_permissions = [{ access = "read", path = "./node_modules" }]
 
 [rpc_endpoints]
+# The chains' documented public endpoints. Fine for broadcasting and for reading the head, but they
+# PRUNE state after ~5,000 blocks and sit behind a load balancer whose nodes have differing
+# retention, so a historical read is a coin flip (docs/rpc-capability.md). Do not fork from these.
 robinhood = "https://rpc.mainnet.chain.robinhood.com"
 robinhood_testnet = "https://rpc.testnet.chain.robinhood.com"
+
+# Archive endpoints, and the ONLY ones the fork tests use. Pinning a fork block is what makes a fork
+# test reproducible instead of time-dependent, and a pinned block is only servable by a node that
+# still holds state at that height - measured, the public testnet endpoint answers `missing trie
+# node` 1.9M blocks deep where these answer normally. Both are set in `contracts/.env`, which forge
+# loads automatically; see `contracts/.env.example` for how to build them.
+robinhood_archive = "${RPC_MAINNET_ARCHIVE_URL}"
+robinhood_testnet_archive = "${RPC_TESTNET_ARCHIVE_URL}"
 
 # Blockscout verification for the deploy pipeline (#18). Robinhood Chain uses Blockscout, which is
 # keyless — the api-key is a placeholder Blockscout ignores. Point the URLs at the chain's Blockscout

@@ -6,6 +6,7 @@ import {V3Deployer} from "../src/periphery/V3Deployer.sol";
 import {IUniswapV3Factory, IUniswapV3Pool} from "../src/interfaces/IUniswapV3Minimal.sol";
 import {Constants} from "../src/Constants.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice Build 01 harness (#12): proves we can, against a real Robinhood Chain fork,
 ///         deploy our OWN unmodified Uniswap V3 factory + periphery and create a bare pool.
@@ -17,7 +18,7 @@ contract V3HarnessTest is Test, V3Deployer {
     address internal positionManager;
 
     function setUp() public {
-        vm.createSelectFork("robinhood");
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         address f = deployV3Factory();
         factory = IUniswapV3Factory(f);
         router = deploySwapRouter(f, Constants.WETH9);

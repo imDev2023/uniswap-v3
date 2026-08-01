@@ -17,11 +17,19 @@ node scripts/rpc-probe.mjs testnet
 node scripts/rpc-probe.mjs https://candidate-provider.example/rpc --json out.json
 node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
 node scripts/rpc-probe.mjs --self-test
+
+# The Alchemy endpoints, which live in contracts/.env (never commit them):
+set -a && . ./contracts/.env && set +a
+node scripts/rpc-probe.mjs "$RPC_TESTNET_ARCHIVE_URL"
+node scripts/rpc-probe.mjs "$RPC_MAINNET_ARCHIVE_URL"
 ```
 
-`--self-test` runs offline with no network and no endpoint.
-It pins how the probe classifies a reply - throttle, not-a-JSON-RPC-endpoint, or real data - against the actual bodies observed from this chain and from candidate providers.
-That classifier has been wrong in both directions twice, so run it after touching the detection logic.
+⚠️ The Alchemy URLs embed the API key, and the probe prints the endpoint it was given.
+Mask it before pasting output anywhere: `| sed -E 's#(/v2/)[A-Za-z0-9_-]+#\1<key>#g'`.
+
+`--self-test` runs offline with no network and no endpoint. It covers **two** classifiers, in separate case tables:
+how a reply is classified (throttle / not-a-JSON-RPC-endpoint / real data), and whether a failure is the node refusing an over-large query.
+Both have been wrong in production, in both directions, and both fail *silently* while inverting a conclusion - so run it after touching either.
 
 The script has no dependencies and needs Node 18+.
 Pacing self-tunes: each throttle response raises a floor on the gap between calls, so a hard rate-limited candidate is measured slowly instead of being written off as broken.
@@ -305,9 +313,52 @@ graph-node scans in 1000-block ranges, so **Alchemy's free tier cannot back the 
 | **Frontend** (browser) | `eth_call` / Multicall3; almost no `getLogs` | **Alchemy** primary, public as fallback |
 | **Fork tests** (forge) | archive state at a pinned block | **Alchemy** - this removes the ~5,000-block ceiling |
 
-⚠️ **Consequence for fork tests, and it is a real unblock.** The standing rule "read the head at runtime and fork ~300 blocks back, because state is pruned after ~5,000" exists only because of the public endpoint's pruning. Against Alchemy a **pinned historical block number works**, which makes fork tests reproducible instead of time-dependent and should remove the flakiness observed on 2026-07-31. Not yet applied to any test.
+✅ **Both halves of that split are now WIRED (build #32).**
+The frontend's `VITE_RPC_URL` points at the Alchemy testnet URL in `frontend/.env.local`, with the public endpoint arriving automatically as the last resort; every fork test is pinned and forks from `robinhood_archive` / `robinhood_testnet_archive` (`contracts/foundry.toml`, `contracts/test/ForkConfig.sol`).
+The indexer is untouched and stays on the public endpoint, for the reason in the table.
 
-⚠️ **Not yet measured on Alchemy:** rate limits and their shape, `eth_getLogs` matched-log caps within the 10-block window, batch support, and whether a paid tier lifts the log range enough to serve the indexer. Run `node scripts/rpc-probe.mjs "$ENDPOINT_URL"` for a full comparison against the baseline above.
+✅ **Consequence for fork tests, applied in #32.** The standing rule "read the head at runtime and fork ~300 blocks back, because state is pruned after ~5,000" existed only because of the public endpoint's pruning. Against an archive endpoint a **pinned historical block number works**, so all six fork suites are now pinned - four of them (`BondingCurve`, `V3Harness`, `LaunchpadFactory`, `OwnershipAndParams`) had been forking at `latest` and re-fetching live state on every run, which is the most likely source of the 8-failure flake seen on 2026-07-31. Pinning also makes the fetched state cache to disk under `~/.foundry/cache/rpc/<chain>/<block>/`, so the whole 84-test suite runs in ~1.2s offline after the first fetch.
+
+### Alchemy, full probe - measured 2026-08-01 (build #32)
+
+`node scripts/rpc-probe.mjs "$RPC_TESTNET_ARCHIVE_URL"`, and the same for mainnet. Both endpoints, 139-141 calls each, **zero 429s and zero timeouts**.
+
+| | Alchemy testnet 46630 | Alchemy mainnet 4663 | public endpoints |
+| --- | --- | --- | --- |
+| `eth_getLogs` retention | **no pruning, logs at block 0** | same | no pruning |
+| `eth_getLogs` max span | **10 blocks** (free tier) | **10 blocks** (free tier) | no span cap; 50,000 / 10,000 matched-log caps |
+| archive `eth_call` | **4/4 consistent at every sampled depth to 20,000,000 back** | same, to 20,000,000 back | intermittent past ~5,000, non-monotonic |
+| `eth_call` at `latest` | works | works | works over bare RPC |
+| JSON-RPC batch | **supported** | supported | - |
+| 30 concurrent | 30/30 in 537 ms | 30/30 in 195 ms | 30/30 |
+| `debug_traceTransaction`, `trace_block`, `eth_newFilter` | **available** | available | **absent** |
+| measured block time | 0.215 s | **0.100 s** | matches |
+
+Two things here are new rather than confirmations.
+**The archive depth is not a window with an edge**: every sampled depth answered 4/4, including 20,000,000 blocks back, so there is no intermittency to design around and a pinned block is safe.
+And **trace and filter methods exist**, which the public endpoints do not offer at all - not needed today, but it is the only endpoint on which a trace-based debugging session is possible.
+
+⚠️ **Still unmeasured:** the free tier's request-rate ceiling (nothing throttled across ~280 calls, so the ceiling is above that but its shape is unknown), and whether a paid tier lifts the 10-block log range enough to serve the indexer.
+
+### ⚠️ The probe misread the free-tier cap as pruning, which is trap #3 in a new costume
+
+Worth recording because the probe is the instrument the rest of this document is built on, and it produced a **confidently inverted** reading the first time it was pointed at a metered provider.
+
+`isQueryTooBig` recognised only *result-count* refusals (`exceeds limit of 10000`). Alchemy refuses on *block range* (`up to a 10 block range`, JSON-RPC `-32600`), which did not match - so the span-shrinking loop never ran, all eleven depths were recorded as hard errors, and the verdict read **`11 depth(s) failed for a NON-CAP reason - inspect the table`**. Read literally, that says the endpoint may be pruning logs. It is the exact inversion trap #3 warns about: a cap refusal *proves* logs exist at that depth.
+
+Fixed in #32: `isQueryTooBig` matches both cap styles, and `parseRangeCap` honours the span the node names instead of blindly dividing down. The verdict on the same endpoint is now **`NO PRUNING - logs served and non-empty down to the genesis region`**.
+
+⚠️ A second, quieter failure rode along with it. The first fix landed on span 2 rather than 9 (an inclusive-range off-by-one), and at span 2 two of the eleven windows came back **empty** - firing the "a node that prunes logs silently looks exactly like this" warning. The windows were not empty because anything was missing; they were too narrow to contain a log. **A sampling window that is too small manufactures the appearance of absence**, which is trap #4 in the making: with the span corrected to 9, all eleven windows are non-empty.
+
+The probe's `--self-test` now covers this classifier as its own case table (28 cases, up from 18), because getting it wrong is silent and flips a conclusion. Mutation-checked: dropping `block range` from the pattern fails 3 cases, narrowing the range parser fails 2.
+
+### ⚠️ The probe also printed guidance that contradicted its own measurement
+
+Under a table showing every depth answering 4/4, it printed *"It is a MOVING window, so read the head at runtime rather than hardcoding a block number."*
+That advice was hardcoded from the public endpoint this probe was first written against, and against an archive node it tells an operator to **undo** the pinning that makes fork tests reproducible.
+It is now conditional on what was measured: when no sampled depth is unreliable, the probe says to pin.
+
+**The generalisable point:** a measurement tool that carries fixed advice will eventually give the wrong advice with the authority of a measurement. Advice has to be derived from the reading, not printed alongside it.
 
 **QuickNode credentials also exist** in `contracts/.env` (`QUICKNODE_API_KEY`, `QUICKNODE_TOKEN`), but **no QuickNode endpoint URL is recorded**, and a QuickNode URL embeds a per-endpoint hostname that cannot be derived from the token. Unmeasured for that reason.
 
@@ -345,11 +396,15 @@ That matters on Nitro, which reports many conditions under `-32000` - including 
 
 ## Open Stage 4 items this does not answer
 
-- **A second endpoint is still not sourced, but it is no longer unscoped.**
-  The candidate survey above settles which providers are even possible, and the answer is that every viable one needs an account.
-  The frontend side is already built and waiting: `VITE_RPC_URL_2` feeds a viem `fallback` transport (`frontend/src/lib/wagmi.ts`), so adding a second endpoint is a config change rather than a code change.
-  What remains is the account decision.
+- ✅ **A second endpoint is sourced and wired (#32).** The frontend now runs Alchemy primary with the public endpoint as the automatic last resort, which is genuinely two independent providers.
+  **Failover was verified live**, not just in unit tests: with all traffic to `robinhood-testnet.g.alchemy.com` aborted at the network layer, the production build fell straight through to `rpc.testnet.chain.robinhood.com` (HTTP 200s) and the token page rendered complete - gate, metadata, chart, trade panel.
+  `VITE_RPC_URL_2` remains free for a third provider.
+- ⚠️ **The Alchemy URL ships inside the browser bundle and cannot hold a secret.**
+  Confirmed by grepping the built asset: the key appears verbatim in `dist/assets/index-*.js`.
+  That is fine for local dev - `frontend/.env.local` is gitignored and `dist` is too - but **before any public deploy the key needs domain allowlisting (Alchemy supports it) or a proxy in front.**
+  This is the one blocking item between the current config and shipping it.
 - **Rate limits are not characterised.**
-  429s were observed and counted, but the limit's shape (per second, per IP, burst allowance) is unmeasured.
+  429s were observed and counted on the public endpoints, but the limit's shape (per second, per IP, burst allowance) is unmeasured.
+  Alchemy's free tier did not throttle at all across ~280 probe calls plus a browser session, so its ceiling is above that and otherwise unknown.
 - **Postgres `C` collation** for any managed provider is still unverified, and can only be set at cluster creation.
 - Whether any managed subgraph host supports chain 4663 at all is still unasked.

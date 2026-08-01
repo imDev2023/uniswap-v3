@@ -9,6 +9,7 @@ import {Constants} from "../src/Constants.sol";
 import {IUniswapV3Factory} from "../src/interfaces/IUniswapV3Minimal.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice Build 07 (#18): the launchpad goes under Safe-multisig control via a two-step ownership
 ///         handoff, and the curve defaults become owner-tunable guarded params that bind only FUTURE
@@ -165,7 +166,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
     /// @notice Mirrors DeployLaunchpad: deploy our own V3, wire the launchpad to it, hand the V3 fee
     ///         switch to the launchpad, then two-step the launchpad to the Safe — all on a 4663 fork.
     function test_DeployChoreography_OnRobinhoodFork() public {
-        vm.createSelectFork("robinhood");
+        vm.createSelectFork(ForkConfig.MAINNET, ForkConfig.MAINNET_BLOCK);
         assertEq(block.chainid, Constants.CHAIN_ID_MAINNET);
 
         address realV3Factory = deployV3Factory(); // deployer (this test) owns it

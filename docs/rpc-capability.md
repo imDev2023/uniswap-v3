@@ -18,18 +18,27 @@ node scripts/rpc-probe.mjs https://candidate-provider.example/rpc --json out.jso
 node scripts/rpc-probe.mjs https://throttled-candidate.example/rpc --min-interval 10000
 node scripts/rpc-probe.mjs --self-test
 
-# The Alchemy endpoints, which live in contracts/.env (never commit them):
-set -a && . ./contracts/.env && set +a
+# The Alchemy endpoints, which live in contracts/.env (never commit them).
+# Read just the two URLs rather than sourcing the file: `set -a && . contracts/.env` would also
+# export PRIVATE_KEY and TEST_PK_1..6 into the shell for everything that runs afterwards.
+RPC_TESTNET_ARCHIVE_URL=$(grep -m1 '^RPC_TESTNET_ARCHIVE_URL=' contracts/.env | cut -d= -f2-)
+RPC_MAINNET_ARCHIVE_URL=$(grep -m1 '^RPC_MAINNET_ARCHIVE_URL=' contracts/.env | cut -d= -f2-)
 node scripts/rpc-probe.mjs "$RPC_TESTNET_ARCHIVE_URL"
 node scripts/rpc-probe.mjs "$RPC_MAINNET_ARCHIVE_URL"
 ```
 
-⚠️ The Alchemy URLs embed the API key, and the probe prints the endpoint it was given.
-Mask it before pasting output anywhere: `| sed -E 's#(/v2/)[A-Za-z0-9_-]+#\1<key>#g'`.
+✅ **The key cannot reach the output.** These URLs embed an API key, and the probe used to print the
+endpoint it was given verbatim - to stdout *and*, under `--json`, into a file no `.gitignore` rule
+covers. `maskEndpoint` now redacts it at the point of use, so both sinks and any echoed provider
+error body carry `.../v2/<key>`. Verified against the real key: masked, no leak. No manual `sed` is
+needed, and none should be relied on - the failure mode of a manual step is that someone forgets it
+once.
 
-`--self-test` runs offline with no network and no endpoint. It covers **two** classifiers, in separate case tables:
-how a reply is classified (throttle / not-a-JSON-RPC-endpoint / real data), and whether a failure is the node refusing an over-large query.
-Both have been wrong in production, in both directions, and both fail *silently* while inverting a conclusion - so run it after touching either.
+`--self-test` runs offline with no network and no endpoint, and covers **43 cases** across four separate tables:
+how a reply is classified (throttle / not-a-JSON-RPC-endpoint / real data), whether a failure is the node refusing an over-large query, what verdict a set of sampled log windows earns, and whether an endpoint URL is stripped of its credential before being printed or persisted.
+The first three have been wrong in production, in both directions, and all of them fail *silently* while inverting a conclusion.
+The fourth fails silently in the other direction - nothing looks wrong, a secret has simply left the machine.
+Run it after touching any of them.
 
 The script has no dependencies and needs Node 18+.
 Pacing self-tunes: each throttle response raises a floor on the gap between calls, so a hard rate-limited candidate is measured slowly instead of being written off as broken.
@@ -314,10 +323,16 @@ graph-node scans in 1000-block ranges, so **Alchemy's free tier cannot back the 
 | **Fork tests** (forge) | archive state at a pinned block | **Alchemy** - this removes the ~5,000-block ceiling |
 
 ✅ **Both halves of that split are now WIRED (build #32).**
-The frontend's `VITE_RPC_URL` points at the Alchemy testnet URL in `frontend/.env.local`, with the public endpoint arriving automatically as the last resort; every fork test is pinned and forks from `robinhood_archive` / `robinhood_testnet_archive` (`contracts/foundry.toml`, `contracts/test/ForkConfig.sol`).
+The frontend's `VITE_RPC_URL` points at the Alchemy testnet URL in `frontend/.env.local`, with the public endpoint arriving automatically as the last resort.
+`frontend/.env.example` records the decision, since `.env.local` is gitignored and would otherwise leave a fresh clone reproducing the pre-#32 state.
+Every fork test is pinned and forks from `robinhood_archive` / `robinhood_testnet_archive` (`contracts/foundry.toml`, `contracts/test/ForkConfig.sol`).
 The indexer is untouched and stays on the public endpoint, for the reason in the table.
 
-✅ **Consequence for fork tests, applied in #32.** The standing rule "read the head at runtime and fork ~300 blocks back, because state is pruned after ~5,000" existed only because of the public endpoint's pruning. Against an archive endpoint a **pinned historical block number works**, so all six fork suites are now pinned - four of them (`BondingCurve`, `V3Harness`, `LaunchpadFactory`, `OwnershipAndParams`) had been forking at `latest` and re-fetching live state on every run, which is the most likely source of the 8-failure flake seen on 2026-07-31. Pinning also makes the fetched state cache to disk under `~/.foundry/cache/rpc/<chain>/<block>/`, so the whole 84-test suite runs in ~1.2s offline after the first fetch.
+✅ **Consequence for fork tests, applied in #32.**
+The standing rule "read the head at runtime and fork ~300 blocks back, because state is pruned after ~5,000" existed only because of the public endpoint's pruning.
+Against an archive endpoint a **pinned historical block number works**, so all six fork suites are now pinned.
+Four of them (`BondingCurve`, `V3Harness`, `LaunchpadFactory`, `OwnershipAndParams`) had been forking at `latest` and re-fetching live state on every run, which is the most likely source of the 8-failure flake seen on 2026-07-31.
+Pinning also makes the fetched state cache to disk under `~/.foundry/cache/rpc/<chain>/<block>/`, so the whole 84-test suite runs in ~1.2s offline after the first fetch.
 
 ### Alchemy, full probe - measured 2026-08-01 (build #32)
 
@@ -338,19 +353,36 @@ Two things here are new rather than confirmations.
 **The archive depth is not a window with an edge**: every sampled depth answered 4/4, including 20,000,000 blocks back, so there is no intermittency to design around and a pinned block is safe.
 And **trace and filter methods exist**, which the public endpoints do not offer at all - not needed today, but it is the only endpoint on which a trace-based debugging session is possible.
 
-⚠️ **Still unmeasured:** the free tier's request-rate ceiling (nothing throttled across ~280 calls, so the ceiling is above that but its shape is unknown), and whether a paid tier lifts the 10-block log range enough to serve the indexer.
+⚠️ **Still unmeasured:** the free tier's request-rate ceiling.
+Nothing throttled across ~280 calls, so the ceiling is above that, but its shape is unknown.
+Also unmeasured: whether a paid tier lifts the 10-block log range enough to serve the indexer.
 
 ### ⚠️ The probe misread the free-tier cap as pruning, which is trap #3 in a new costume
 
 Worth recording because the probe is the instrument the rest of this document is built on, and it produced a **confidently inverted** reading the first time it was pointed at a metered provider.
 
-`isQueryTooBig` recognised only *result-count* refusals (`exceeds limit of 10000`). Alchemy refuses on *block range* (`up to a 10 block range`, JSON-RPC `-32600`), which did not match - so the span-shrinking loop never ran, all eleven depths were recorded as hard errors, and the verdict read **`11 depth(s) failed for a NON-CAP reason - inspect the table`**. Read literally, that says the endpoint may be pruning logs. It is the exact inversion trap #3 warns about: a cap refusal *proves* logs exist at that depth.
+`isQueryTooBig` recognised only *result-count* refusals (`exceeds limit of 10000`).
+Alchemy refuses on *block range* (`up to a 10 block range`, JSON-RPC `-32600`), which did not match.
+So the span-shrinking loop never ran, all eleven depths were recorded as hard errors, and the verdict read **`11 depth(s) failed for a NON-CAP reason - inspect the table`**.
+Read literally, that says the endpoint may be pruning logs.
+It is the exact inversion trap #3 warns about: a cap refusal *proves* logs exist at that depth.
 
-Fixed in #32: `isQueryTooBig` matches both cap styles, and `parseRangeCap` honours the span the node names instead of blindly dividing down. The verdict on the same endpoint is now **`NO PRUNING - logs served and non-empty down to the genesis region`**.
+Fixed in #32: `isQueryTooBig` matches both cap styles, and `parseRangeCap` honours the span the node names instead of blindly dividing down.
+The verdict on the same endpoint is now **`NO PRUNING - logs served and non-empty down to the genesis region`**.
 
-⚠️ A second, quieter failure rode along with it. The first fix landed on span 2 rather than 9 (an inclusive-range off-by-one), and at span 2 two of the eleven windows came back **empty** - firing the "a node that prunes logs silently looks exactly like this" warning. The windows were not empty because anything was missing; they were too narrow to contain a log. **A sampling window that is too small manufactures the appearance of absence**, which is trap #4 in the making: with the span corrected to 9, all eleven windows are non-empty.
+⚠️ **Trap #5 - a sampling window too small to contain a log manufactures the appearance of absence.**
+A second, quieter failure rode along with the first.
+The initial fix landed on span 2 rather than 9 (an inclusive-range off-by-one), and at span 2 two of the eleven windows came back **empty** - firing the "a node that prunes logs silently looks exactly like this" warning.
+The windows were not empty because anything was missing; they were too narrow to contain a log.
 
-The probe's `--self-test` now covers this classifier as its own case table (28 cases, up from 18), because getting it wrong is silent and flips a conclusion. Mutation-checked: dropping `block range` from the pattern fails 3 cases, narrowing the range parser fails 2.
+✅ **This one is now encoded rather than merely written down**, which was a review finding against #32 itself.
+Correcting the span to 9 made the false reading *less likely*, not impossible - any quieter chain or tighter cap reproduces it.
+So the verdict logic was extracted into a pure `judgeLogRetention` and now separates windows the node's own range cap **narrowed** from full-width ones.
+Only a full-width empty window raises the pruning warning; a run whose empty windows were all cap-narrowed reports **`INCONCLUSIVE`**, which is the honest reading of a measurement taken through a keyhole.
+Extracting it is what made the branch testable at all: the live Alchemy run that proved the masking could not exercise this path, because every window on that run had logs.
+
+The probe's `--self-test` covers all four tables offline (**43 cases**, up from 18).
+Mutation-checked: pooling narrowed windows back in with full-width ones fails 1, reordering the error check below the emptiness checks fails 1, relaxing the block-range clause back to a bare `block range` fails 2, dropping the placeholder decode fails 3, and disabling masking entirely fails 4.
 
 ### ⚠️ The probe also printed guidance that contradicted its own measurement
 

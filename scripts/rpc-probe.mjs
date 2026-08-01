@@ -28,6 +28,9 @@
 // already known. The floor also self-tunes upward on throttling; see the "pacing" section below.
 // A full run is ~150 calls, so budget accordingly (10 s floor => ~25 min).
 //
+// A keyed provider URL is safe to pass here: `maskEndpoint` redacts the credential before anything
+// is printed or written, so neither the terminal nor a `--json` file ends up holding it.
+//
 // No dependencies; needs Node 18+ for global fetch.
 
 import { createHash } from 'node:crypto'
@@ -36,6 +39,56 @@ import { writeFileSync } from 'node:fs'
 const ALIASES = {
   mainnet: 'https://rpc.mainnet.chain.robinhood.com',
   testnet: 'https://rpc.testnet.chain.robinhood.com',
+}
+
+/** Query parameters that carry credentials rather than routing. */
+const SECRET_QUERY_KEYS = /^(api[-_]?key|key|token|access[-_]?token|auth)$/i
+
+/** URL-safe sentinel, swapped for `<key>` after serialisation so `URL` does not escape it. */
+const PLACEHOLDER = 'kEyReDaCtEdSeNtInEl'
+
+/**
+ * Redacts the credential out of an endpoint URL, for display and for `--json`.
+ *
+ * This probe began life against the chains' keyless public endpoints, where the URL was pure
+ * routing information and printing it was free. It is now pointed at metered providers whose key
+ * lives IN the URL (`https://<chain>.g.alchemy.com/v2/<key>`, `https://<host>.quiknode.pro/<key>/`),
+ * so the header line and the `--json` report both became ways to spill a secret - the report
+ * silently, into a file no `.gitignore` rule covers. Masking here means neither can, rather than
+ * relying on whoever pastes the output to remember a `sed`.
+ *
+ * Keys are opaque high-entropy segments, so length is the discriminator: real path segments in
+ * these URLs (`v2`, `rpc`) are short, and a 16+ character segment is not something a human typed.
+ * Display-only, so over-masking a legitimately long segment costs nothing.
+ */
+/**
+ * Redacts credential-looking URLs out of free text before it is printed.
+ *
+ * Needed because provider failure bodies are echoed verbatim (`provider said: ...`), and a 401 page
+ * or a CDN block page routinely quotes the request URL back - key included. Masking only the
+ * endpoint header would leave that path open.
+ */
+const redactText = (text) =>
+  String(text).replace(/https?:\/\/[^\s"'<>]+/g, (m) => maskEndpoint(m))
+
+function maskEndpoint(raw) {
+  let u
+  try {
+    u = new URL(raw)
+  } catch {
+    return String(raw)
+  }
+  u.pathname = u.pathname
+    .split('/')
+    .map((seg) => (/^[A-Za-z0-9_-]{16,}$/.test(seg) ? PLACEHOLDER : seg))
+    .join('/')
+  for (const k of [...u.searchParams.keys()]) {
+    if (SECRET_QUERY_KEYS.test(k)) u.searchParams.set(k, PLACEHOLDER)
+  }
+  // `URL.toString()` percent-encodes the angle brackets, which would print `%3Ckey%3E` and read as
+  // gibberish rather than as a redaction. Substituting after serialisation keeps the placeholder
+  // spelled the way the docs spell it.
+  return u.toString().split(PLACEHOLDER).join('<key>')
 }
 
 // Canonical addresses. WETH9 differs per chain, so the probe resolves it by chain id
@@ -312,9 +365,17 @@ const why = (r) => {
  *
  * Missing the second one made this probe report `11 depth(s) failed for a NON-CAP reason` against an
  * endpoint whose logs were entirely intact - the exact inversion the doc warns about.
+ *
+ * The block-range clause requires a SIZE next to the words - either a number ("up to a 10 block
+ * range") or an explicit "too large". A bare `/block range/` would also swallow "invalid block
+ * range", i.e. a malformed request, and tally it as a cap: the mirror of the bug above, and the
+ * failure mode that matters more, because widening this predicate until everything looks like a cap
+ * makes the retention table incapable of ever reporting real pruning.
  */
 const isQueryTooBig = (r) =>
-  /exceeds limit|too many logs|response too large|block range|timeout|timed out/i.test(why(r))
+  /exceeds limit|too many logs|response too large|\d+\s*[- ]?block range|block range (?:is )?too (?:large|big|wide)|timeout|timed out/i.test(
+    why(r),
+  )
 
 /** The node states its own ceiling in the refusal text: "exceeds limit of 50000". */
 const parseLimit = (r) => {
@@ -330,6 +391,48 @@ const parseLimit = (r) => {
 const parseRangeCap = (r) => {
   const m = /up to (?:a )?(\d+)[- ]block range/i.exec(why(r))
   return m ? Number(m[1]) : null
+}
+
+/**
+ * Turns the sampled log windows into one verdict. Pure, so it can be pinned offline.
+ *
+ * The distinction that earns its keep: **an empty window is evidence of nothing unless the window
+ * was wide enough to plausibly hold a log.** When the node's own range cap shrank the span, an empty
+ * result describes the sample, not the node. Measured 2026-08-01 against a 10-block cap, windows
+ * narrowed to a span of 2 came back empty on a chain whose logs were entirely intact, and the probe
+ * duly warned about a possible silent pruner. Widening the span to 9 made that reading less likely
+ * but not impossible - any quieter chain or tighter cap brings it straight back - so the two cases
+ * are separated here rather than pooled, and a run that can only see through a keyhole reports
+ * `inconclusive` instead of a verdict it has not earned.
+ *
+ * Ordering matters: a non-cap ERROR outranks emptiness, because a depth that failed outright tells
+ * you nothing about whether logs are there, and reporting the empty-window story over it would
+ * describe a broken measurement as a finding about the chain.
+ */
+function judgeLogRetention(samples) {
+  const withLogs = samples.filter((s) => s.ok && s.count > 0)
+  const oldestProven = withLogs.length ? withLogs[withLogs.length - 1] : null
+  const errored = samples.filter((s) => !s.ok)
+  const servedEmpty = samples.filter((s) => s.ok && s.count === 0)
+  const emptyWide = servedEmpty.filter((s) => !s.capped)
+  const emptyNarrow = servedEmpty.filter((s) => s.capped)
+
+  let verdict
+  if (errored.length) verdict = 'errors'
+  else if (oldestProven && oldestProven.from <= 10_000) verdict = 'no-pruning'
+  else if (emptyWide.length) verdict = 'empty-full-width'
+  else if (emptyNarrow.length) verdict = 'inconclusive'
+  else verdict = 'shallow'
+
+  return { oldestProven, errored, emptyWide, emptyNarrow, verdict }
+}
+
+const RETENTION_VERDICT_TEXT = {
+  'no-pruning': () => 'NO PRUNING - logs served and non-empty down to the genesis region',
+  errors: (n) => `${n} depth(s) failed for a NON-CAP reason - inspect the table`,
+  'empty-full-width': () => 'served at every depth, but full-width windows were empty - see warning',
+  inconclusive: () => 'served at every depth; empty windows were all cap-narrowed - INCONCLUSIVE',
+  shallow: () => 'logs served, but the deepest window with logs is above the genesis region',
 }
 
 /** One eth_getLogs call over [from, from+span], optionally address-filtered. */
@@ -375,12 +478,12 @@ async function probeIdentity(url) {
       // The distinction that matters for provider evaluation: this endpoint WORKS, we are just not
       // allowed to talk to it this fast. Reporting it as unusable would discard a viable candidate.
       row('THROTTLED', `cannot complete identity at this rate: ${why(failure)}`)
-      if (failure.body) note(`  provider said: ${failure.body}`)
+      if (failure.body) note(`  provider said: ${redactText(failure.body)}`)
       note('  The endpoint is responding, not broken. Re-run with a slower floor, e.g.')
       note(`  --min-interval 10000, or use an API key to lift the limit.`)
     } else {
       row('FATAL', `endpoint unusable: ${why(failure)}`)
-      if (failure.body) note(`  provider said: ${failure.body}`)
+      if (failure.body) note(`  provider said: ${redactText(failure.body)}`)
     }
     report.sections.identity = {
       reachable: false,
@@ -550,34 +653,32 @@ async function probeLogRetention(ctx) {
     )
   }
 
-  const withLogs = samples.filter((s) => s.ok && s.count > 0)
-  const oldestProven = withLogs.length ? withLogs[withLogs.length - 1] : null
-  const errored = samples.filter((s) => !s.ok)
-  const servedEmpty = samples.filter((s) => s.ok && s.count === 0)
+  const { oldestProven, errored, emptyWide, emptyNarrow, verdict } = judgeLogRetention(samples)
 
   lines.push('')
   if (oldestProven) {
     row('oldest block with logs', `${oldestProven.from.toLocaleString()} (${oldestProven.label})`)
   }
-  if (errored.length === 0 && oldestProven && oldestProven.from <= 10_000) {
-    row('verdict', 'NO PRUNING - logs served and non-empty down to the genesis region')
-  } else if (errored.length) {
-    row('verdict', `${errored.length} depth(s) failed for a NON-CAP reason - inspect the table`)
-  } else {
-    row('verdict', 'served at every depth, but deepest windows were empty - see warning')
-  }
-  if (servedEmpty.length) {
+  row('verdict', RETENTION_VERDICT_TEXT[verdict](errored.length))
+  if (emptyWide.length) {
     lines.push('')
-    note(`WARNING: ${servedEmpty.length} unfiltered window(s) returned 0 logs WITHOUT erroring.`)
+    note(`WARNING: ${emptyWide.length} FULL-WIDTH window(s) returned 0 logs WITHOUT erroring.`)
     note('         A node that prunes logs silently looks exactly like this, and a re-index')
     note('         would record the gap as "no activity" rather than failing loudly. Confirm')
     note('         by hand whether the chain was genuinely idle there.')
+  }
+  if (emptyNarrow.length) {
+    lines.push('')
+    note(`NOTE: ${emptyNarrow.length} window(s) returned 0 logs, but the node's range cap had`)
+    note('      narrowed them first. That is NOT evidence of pruning - the sample was too small')
+    note('      to contain a log. Re-run against an endpoint with a wider range cap to settle it.')
   }
 
   report.sections.logRetention = {
     samples,
     oldestBlockWithLogs: oldestProven ? oldestProven.from : null,
     erroredDepths: errored.length,
+    verdict,
   }
 }
 
@@ -943,6 +1044,48 @@ const SPAN_TEST_CASES = [
   ['a rejected block tag, which is NOT a cap', 'unsupported block number (code -32000)', false, null],
   ['a plan refusal that mentions no range', 'chain is not available on free plan, please upgrade', false, null],
   ['a transport failure', 'fetch failed', false, null],
+  // A MALFORMED request also says "block range", and reading it as a cap sends the span-shrinking
+  // ladder down to 1 before giving up - burning round trips at every depth, and tallying a broken
+  // request as though the node had stated a ceiling. The clause therefore requires a size next to
+  // the words. Mutation: relaxing it back to a bare /block range/ fails these two.
+  ['a malformed range, which is NOT a cap', 'invalid block range params', false, null],
+  ['an unparseable range, which is NOT a cap', 'cannot parse block range', false, null],
+  ['a range cap stated without a number', 'requested block range too large', true, null],
+]
+
+/**
+ * Log-retention verdicts. This is the conclusion the whole Stage 4 "Postgres is a rebuildable cache"
+ * assumption rests on, and it has already been inverted twice: once by an unrecognised cap refusal
+ * (reported as pruning), once by a window too narrow to hold a log (reported as pruning). Both were
+ * silent. The `capped` flag is what separates "the node has no logs here" from "we could not see
+ * far enough to tell", so it gets pinned explicitly.
+ *
+ * Shape: [name, samples, expected verdict]. A sample is {ok, count, capped, from}.
+ */
+const w = (from, count, capped = false) => ({ ok: true, from, count, capped })
+const RETENTION_TEST_CASES = [
+  ['logs at every depth down to genesis', [w(96_000_000, 300), w(10_000, 18), w(0, 10)], 'no-pruning'],
+  ['a non-cap error outranks everything else', [w(0, 10), { ok: false, from: 5_000, error: 'missing trie node' }], 'errors'],
+  // The case that actually happened on 2026-08-01, and the reason this function exists.
+  ['empty windows that the node\'s cap narrowed are INCONCLUSIVE, not pruning', [w(96_000_000, 300, true), w(10_000, 0, true), w(0, 0, true)], 'inconclusive'],
+  ['a FULL-WIDTH empty window is the real pruning signal', [w(96_000_000, 300), w(10_000, 0), w(0, 0)], 'empty-full-width'],
+  // Mixed: one full-width empty window must not be excused by narrowed ones alongside it.
+  ['one full-width empty outranks any number of narrowed ones', [w(96_000_000, 300, true), w(10_000, 0, true), w(0, 0, false)], 'empty-full-width'],
+  ['logs proven only above the genesis region', [w(96_000_000, 300), w(100_000, 6)], 'shallow'],
+]
+
+/**
+ * Endpoint masking. `maskEndpoint` is the only thing standing between a keyed provider URL and both
+ * stdout and the `--json` file, so it gets its own table: the public endpoints must survive intact
+ * (masking them would make the reports unreadable) and every keyed shape must lose its secret.
+ */
+const MASK_TEST_CASES = [
+  ['a public endpoint is untouched', 'https://rpc.mainnet.chain.robinhood.com', 'https://rpc.mainnet.chain.robinhood.com/'],
+  ['an Alchemy key is masked', 'https://robinhood-testnet.g.alchemy.com/v2/AbCdEf0123456789AbCdEf01', 'https://robinhood-testnet.g.alchemy.com/v2/<key>'],
+  ['a QuickNode key is masked', 'https://example.quiknode.pro/0123456789abcdef0123456789abcdef/', 'https://example.quiknode.pro/<key>/'],
+  ['a key in a query parameter is masked', 'https://rpc.example.com/?apiKey=0123456789abcdef0123', 'https://rpc.example.com/?apiKey=<key>'],
+  ['a short path segment is not mistaken for a key', 'https://rpc.example.com/v2/eth', 'https://rpc.example.com/v2/eth'],
+  ['a non-URL is returned unchanged rather than throwing', 'not-a-url', 'not-a-url'],
 ]
 
 function runSelfTest() {
@@ -963,7 +1106,16 @@ function runSelfTest() {
     const ok = gotBig === wantBig && gotCap === wantCap
     check(ok, name, `tooBig=${gotBig} cap=${gotCap}${ok ? '' : `  (expected tooBig=${wantBig} cap=${wantCap})`}`)
   }
-  const total = SELF_TEST_CASES.length + SPAN_TEST_CASES.length
+  for (const [name, samples, want] of RETENTION_TEST_CASES) {
+    const got = judgeLogRetention(samples).verdict
+    check(got === want, name, `${got}${got === want ? '' : `  (expected ${want})`}`)
+  }
+  for (const [name, raw, want] of MASK_TEST_CASES) {
+    const got = maskEndpoint(raw)
+    check(got === want, name, `${got}${got === want ? '' : `  (expected ${want})`}`)
+  }
+  const total =
+    SELF_TEST_CASES.length + SPAN_TEST_CASES.length + RETENTION_TEST_CASES.length + MASK_TEST_CASES.length
   console.log(failed === 0 ? `\nall ${total} classification cases pass` : `\n${failed} of ${total} FAILED`)
   return failed === 0
 }
@@ -995,9 +1147,11 @@ async function main() {
     minIntervalMs = ms
   }
   const url = ALIASES[target] ?? target
-  report.endpoint = url
+  // Masked in both sinks: `report` is what `--json` writes to disk, `lines` is what reaches stdout.
+  // `url` itself stays intact - it still has to address the node.
+  report.endpoint = maskEndpoint(url)
 
-  lines.push('Octopus RPC capability probe', `endpoint: ${url}`, `probed:   ${report.probedAt}`)
+  lines.push('Octopus RPC capability probe', `endpoint: ${report.endpoint}`, `probed:   ${report.probedAt}`)
   if (minIntervalMs > 0) {
     lines.push(
       `pacing:   >= ${minIntervalMs} ms between calls (~${Math.ceil((minIntervalMs * 150) / 60000)} min for a full run)`,

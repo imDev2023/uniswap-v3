@@ -273,6 +273,44 @@ That is far too slow to be a primary but adequate as a failover target, which is
 Note that both `VITE_RPC_URL` and `VITE_RPC_URL_2` ship inside the browser bundle and therefore cannot hold a secret.
 Any metered key needs domain allowlisting or a proxy.
 
+### Alchemy - measured 2026-08-01, and the account now exists
+
+An Alchemy key is present in `contracts/.env` as `ALCHEMY_API_KEY` / `ENDPOINT_URL`.
+**One key serves both chains**, confirmed by `eth_chainId`: the URL in `.env` is the `robinhood-testnet` subdomain and returns `0xb626` (46630); swapping the subdomain to `robinhood-mainnet` returns `0x1237` (4663).
+
+**It is a genuine archive node, and that is a large capability gain over the public endpoint.**
+`launchCount()` on the live testnet factory, same call, same block heights:
+
+| depth below head | Alchemy | public endpoint |
+| --- | --- | --- |
+| 5,000 | `14` | `14` |
+| 50,000 | `14` | `missing trie node … not available` |
+| 500,000 | `12` | `missing trie node … not available` |
+| 1,000,000 | `1` | not attempted |
+| 1,800,000 | `1` | not attempted |
+
+The returned values are real history (14 now, 12 at -500k, 1 before the seeding), not a constant, so this is genuine state and not a cached answer.
+Mainnet 4663 behaves the same: WETH9 `totalSupply()` returns sane, monotonically-different values at **20,000,000 blocks** below head.
+
+⚠️ **But the account is on the FREE tier, and that tier caps `eth_getLogs` at a 10-block range.**
+The refusal is explicit on both chains: *"Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range."*
+A span of 10 already fails, because the range is inclusive.
+graph-node scans in 1000-block ranges, so **Alchemy's free tier cannot back the indexer at all** - it would be ~100x more requests for the same ground, before any rate limit.
+
+**The two endpoints are therefore complementary rather than interchangeable, and that settles the "which key where" question empirically:**
+
+| workload | needs | use |
+| --- | --- | --- |
+| **Indexer** (graph-node) | wide `eth_getLogs`; **zero** `eth_call` by design | **public endpoint** - Alchemy free tier is unusable here |
+| **Frontend** (browser) | `eth_call` / Multicall3; almost no `getLogs` | **Alchemy** primary, public as fallback |
+| **Fork tests** (forge) | archive state at a pinned block | **Alchemy** - this removes the ~5,000-block ceiling |
+
+⚠️ **Consequence for fork tests, and it is a real unblock.** The standing rule "read the head at runtime and fork ~300 blocks back, because state is pruned after ~5,000" exists only because of the public endpoint's pruning. Against Alchemy a **pinned historical block number works**, which makes fork tests reproducible instead of time-dependent and should remove the flakiness observed on 2026-07-31. Not yet applied to any test.
+
+⚠️ **Not yet measured on Alchemy:** rate limits and their shape, `eth_getLogs` matched-log caps within the 10-block window, batch support, and whether a paid tier lifts the log range enough to serve the indexer. Run `node scripts/rpc-probe.mjs "$ENDPOINT_URL"` for a full comparison against the baseline above.
+
+**QuickNode credentials also exist** in `contracts/.env` (`QUICKNODE_API_KEY`, `QUICKNODE_TOKEN`), but **no QuickNode endpoint URL is recorded**, and a QuickNode URL embeds a per-endpoint hostname that cannot be derived from the token. Unmeasured for that reason.
+
 ## How the frontend consumes two endpoints
 
 `frontend/src/lib/wagmi.ts` wires the resolved endpoint list into viem's `fallback` transport.

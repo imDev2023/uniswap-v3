@@ -380,17 +380,60 @@ the launch but never bought).
 
 ## ⚙️ Current testnet curve config — **1 ETH graduation** (test calibration)
 
+**Changed 2026-08-01 on the user's instruction: testnet graduation is now 1 ETH (was 0.1 ETH).**
+Set by `setCurveParams(333333333333333333, 100, 8e24, 0)` — tx
+`0xf6047f279e42e7a5d16e2d3ea5d4f2f050673e4599ee796a6a5ac8521fbb79a1`, block 96028540.
+`setCurveParams` is **future-only**, so every launch created before that block keeps the 0.1 ETH
+calibration it froze at `createLaunch`; only launches created after it graduate at 1 ETH.
+
 The live 46630 factory is deliberately **not** on production calibration. It is set so a new launch
-graduates for **exactly 0.1 ETH**, so the full lifecycle is cheap to exercise repeatedly.
+graduates for **1 ETH**, which is cheap enough to exercise the full lifecycle repeatedly while being
+close enough to the 10 ETH mainnet target that the arithmetic is exercised at a realistic scale.
 
 | Param | Live testnet value | Production value (code default) |
 | --- | --- | --- |
-| `virtualEthReserve` | **1/30 ETH** (`33333333333333333`) | 30 ETH |
+| `virtualEthReserve` | **1/3 ETH** (`333333333333333333`) | 30 ETH |
 | `tradeFeeBps` | 100 (1%) | 100 (1%) |
-| `maxBuyPerWallet` | **800M** (effectively uncapped) | 8M |
+| `maxBuyPerWallet` | 8M (`8e24`) | 8M |
 | `antiSnipeThreshold` | **0** (cap inactive) | 120M |
 
-**Why `virtualEthReserve = 1/30 ETH` gives exactly 0.1 ETH:** `virtualTokenReserve` is
+✅ **Verified on-chain to be exactly 1 ETH**, on launch `CALIB` (token
+`0x3F5D94bfa4f0BaCE252A6e7F700FBF5ec9DDA4B5`, curve `0x1B7a5061A9E3EDa96B95dC4A3b6274aCac495d45`),
+created after the change specifically to read the calibration off a real curve:
+
+```
+virtualEthReserve = 333333333333333333
+finalEthReserve   = 1333333333333333333
+raised            = 1000000000000000000      # exactly 1 ETH
+```
+
+⚠️ **`3 × V_eth` is an approximation, and it is off by one wei for most targets. Do not size a
+calibration with it.** The true amount is `ceilDiv(V_eth × V_tok, V_tok − CURVE_SUPPLY) − V_eth`,
+and the `ceilDiv` is what decides the last wei. The counter-intuitive consequence is that the
+**repeating-decimal targets are the exact ones**: `V_eth = target/3` truncates, and the `ceilDiv`
+recovers precisely what the truncation lost. Targets whose thirds divide evenly have nothing to
+recover, so the ceiling rounds them one wei **over**.
+
+| Target | `V_eth = target/3` | Actual raised | Exact? |
+| --- | --- | --- | --- |
+| 0.1 ETH | `33333333333333333` | `100000000000000000` | ✅ |
+| **1 ETH** | **`333333333333333333`** | **`1000000000000000000`** | ✅ ← current testnet |
+| 1.2 ETH | `400000000000000000` | `1200000000000000001` | ✗ +1 wei |
+| 1.5 ETH | `500000000000000000` | `1500000000000000001` | ✗ +1 wei |
+| 2 ETH | `666666666666666666` | `1999999999999999999` | ✗ −1 wei |
+| 3 ETH | `1000000000000000000` | `3000000000000000001` | ✗ +1 wei |
+| 9 ETH | `3000000000000000000` | `9000000000000000001` | ✗ +1 wei |
+| **10 ETH** | **`3333333333333333333`** | **`10000000000000000000`** | ✅ ← mainnet target |
+| 12 ETH | `4000000000000000000` | `12000000000000000001` | ✗ +1 wei |
+| 15 ETH | `5000000000000000000` | `15000000000000000001` | ✗ +1 wei |
+
+**Both chosen targets — 1 ETH testnet and 10 ETH mainnet — land exactly.** Picking a "rounder"
+number like 1.5 or 12 would make the result *less* clean, not more.
+
+ℹ️ This table previously claimed `maxBuyPerWallet` was **800M**; the live value read `8e24` (8M)
+before the change and was preserved as such. The doc had drifted from the chain.
+
+**Why `virtualEthReserve = 1/30 ETH` gave exactly 0.1 ETH:** `virtualTokenReserve` is
 calibration-locked at `CURVE_SUPPLY² / (CURVE_SUPPLY - GRADUATION_RESERVE)`, which fixes
 `finalEthReserve = 4 × V_eth`. So **ETH-to-graduate = 3 × V_eth**, always. 30 ETH → 90; 1/3 ETH → 1;
 1/30 ETH → 0.1.
@@ -436,10 +479,11 @@ cast send $LAUNCHPAD "setCurveParams(uint256,uint16,uint256,uint256)" \
 Or re-scale the graduation threshold to any target — `virtualEthReserve = target / 3`:
 
 ```bash
-# 1 ETH graduation:    333333333333333333
-# 0.1 ETH graduation:   33333333333333333   <- current
+# 10 ETH graduation:  3333333333333333333   <- the agreed MAINNET target
+#  1 ETH graduation:   333333333333333333   <- current testnet setting
+# 0.1 ETH graduation:   33333333333333333
 cast send $LAUNCHPAD "setCurveParams(uint256,uint16,uint256,uint256)" \
-  33333333333333333 100 800000000000000000000000000 0 \
+  333333333333333333 100 8000000000000000000000000 0 \
   --rpc-url robinhood_testnet --private-key $PRIVATE_KEY
 ```
 

@@ -5,11 +5,23 @@ export const launchpadFactoryAbi = [
     type: 'function',
     name: 'createLaunch',
     stateMutability: 'payable',
+    // #33: the creator's choices moved behind one `LaunchParams` struct, so future launch options
+    // (the dev allocation in #34) can be added without another signature break. Solidity encodes a
+    // calldata struct as a tuple, and viem takes it as a single object argument.
     inputs: [
-      { name: 'name', type: 'string' },
-      { name: 'symbol', type: 'string' },
-      // Permanent, set once at creation — the contract has no setter. See CreatePage.
-      { name: 'metadataURI', type: 'string' },
+      {
+        name: 'p',
+        type: 'tuple',
+        components: [
+          { name: 'name', type: 'string' },
+          { name: 'symbol', type: 'string' },
+          // Permanent, set once at creation - the contract has no setter. See CreatePage.
+          { name: 'metadataURI', type: 'string' },
+          // Lock the graduation LP forever instead of the default 1 year. Terminal: it can never be
+          // walked back. The UI control for this lands in #37; v1 of the struct defaults it to false.
+          { name: 'permanentLock', type: 'bool' },
+        ],
+      },
     ],
     outputs: [{ name: 'token', type: 'address' }],
   },

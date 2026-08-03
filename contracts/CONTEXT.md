@@ -24,7 +24,7 @@ The Uniswap V3 TOKEN/WETH pool a Launch graduates into. Distinct from the Curve 
 _Avoid_: curve, pair
 
 **Creator**:
-The address that called `createLaunch`. Has no special privileges afterwards - no mint, no setter, no withdrawal.
+The address that called `createLaunch`. Has no privilege over supply or pricing - no mint, no curve setter, no withdrawal of anyone's funds. Since #33 the Creator does hold two rights over their own graduated position: `LPLock.extend` (which can only ever lengthen the lock) and a 70% share of that position's LP fees, frozen at graduation.
 _Avoid_: owner, deployer, dev
 
 ### Pricing
@@ -52,7 +52,9 @@ The atomic transition from Curve to Pool: the Curve closes, the Pool is created 
 _Avoid_: listing, migration, launch (a Launch is created, not graduated)
 
 **LP Lock**:
-The permanent custody of a graduated Launch's liquidity position. Fees can be swept to the treasury; the principal and the position itself can never be withdrawn by anyone.
+The custody of a graduated Launch's liquidity position. Fees can be swept at any time, split 70/30 to the Creator and the Treasury.
+
+⚠️ **Not permanent any more, and the change is load-bearing.** Before #33 the principal could never be withdrawn by anyone, and that was verifiable by reading the bytecode and finding no capability to do it. Since #33 the lock runs 1 year by default (Creator-selectable as permanent at creation, and extendable but never shortenable), and an expired lock on a Pool with no activity for `inactivityPeriod` can be wound up by anyone via `reclaim`. The guarantee is now **conditional** - enforced by guards rather than by absence - so say "locked", never "locked forever", unless the specific position chose the permanent sentinel.
 _Avoid_: liquidity lock (ambiguous - a Pool also holds third-party liquidity, which is **not** locked), vesting
 
 ⚠️ **"Locked liquidity" is a claim about our position only.** A graduated Pool also accepts third-party liquidity that its providers can pull at will. Say **launch liquidity** when the distinction matters, which is anywhere a person is deciding whether to trust the Pool.
@@ -72,7 +74,7 @@ _Avoid_: image URL, token URI, metadata (the metadata is the document; this is o
 ### Roles
 
 **Treasury**:
-The address that receives creation fees, curve trade fees and swept pool fees. Frozen at deployment.
+The address that receives creation fees, curve trade fees, the pool protocol fee, its 30% share of swept LP fees, and the proceeds of any `reclaim`. Owner-updatable, forward-looking only.
 _Avoid_: owner, dev wallet
 
 **Curve Params**:

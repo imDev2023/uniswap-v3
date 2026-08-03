@@ -75,7 +75,7 @@ export function HomePage() {
         <div>
           <h1>Launch fair. Graduate locked.</h1>
           <p>
-            Bonding curves with zero upfront liquidity. Every graduation locks its pool forever - no
+            Bonding curves with zero upfront liquidity. Every graduation locks its pool - no
             pre-mine, no rug.
           </p>
         </div>

@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
+import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 import {GraduationManager} from "../src/periphery/GraduationManager.sol";
 import {LPLock} from "../src/periphery/LPLock.sol";
@@ -69,7 +69,7 @@ contract LpLockTest is Test, V3Deployer {
 
     /// @dev Create a launch and graduate it (fill through the anti-snipe window, then cross).
     function _graduate() internal returns (address token, address pool, uint256 tokenId) {
-        token = factory.createLaunch("Locked", "LOCK", "ipfs://QmTestMetadata");
+        token = factory.createLaunch(LaunchParams("Locked", "LOCK", "ipfs://QmTestMetadata", false));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
         for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
             address filler = makeAddr(string(abi.encodePacked("filler", i)));
@@ -107,9 +107,22 @@ contract LpLockTest is Test, V3Deployer {
         assertEq(IERC721(positionManager).ownerOf(tokenId), address(lock), "position owned by the lock");
 
         // --- Principal is unwithdrawable and the NFT is unmovable, by ANYONE, forever ---
+        // ⚠️ This must revert because the attacker is NOT AUTHORIZED, not because the call is
+        // malformed. Until #33 this interface declared `decreaseLiquidity` with flat arguments rather
+        // than the NPM's struct, so the selector did not exist and a bare `vm.expectRevert()` passed
+        // for a reason that had nothing to do with the lock. The assertion is now pinned to the NPM's
+        // actual authorization message, which a selector miss cannot produce.
         vm.prank(attacker);
-        vm.expectRevert(); // NPM: caller is not owner/approved for the tokenId
-        INonfungiblePositionManager(positionManager).decreaseLiquidity(tokenId, 1, 0, 0, block.timestamp);
+        vm.expectRevert(bytes("Not approved"));
+        INonfungiblePositionManager(positionManager).decreaseLiquidity(
+            INonfungiblePositionManager.DecreaseLiquidityParams({
+                tokenId: tokenId,
+                liquidity: 1,
+                amount0Min: 0,
+                amount1Min: 0,
+                deadline: block.timestamp
+            })
+        );
 
         vm.prank(attacker);
         vm.expectRevert();

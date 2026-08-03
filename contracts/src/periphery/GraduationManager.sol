@@ -12,6 +12,15 @@ interface ILaunchpad {
     function curveOf(address token) external view returns (address);
     function GRADUATION_RESERVE() external view returns (uint256);
     function applyProtocolFee(address pool) external;
+    /// @dev Lock terms frozen into this launch at `createLaunch`. Read at graduation, but chosen (and
+    ///      immutable) from creation, so a trader buying the curve can read the exact terms the LP will
+    ///      graduate under, and a later owner retune cannot change them under an in-flight launch.
+    function lockConfigOf(address token) external view returns (uint64 lockDuration, uint16 creatorFeeBps, bool permanent);
+}
+
+interface ILPLock {
+    function registerLock(uint256 tokenId, address launchToken, address pool, uint64 lockUntil, uint16 creatorFeeBps)
+        external;
 }
 
 /// @notice Executes the atomic migration from bonding curve to a seeded, full-range V3 pool
@@ -40,8 +49,13 @@ contract GraduationManager is ReentrancyGuard {
     address public immutable launchpad;
     INonfungiblePositionManager public immutable positionManager;
     address public immutable weth9;
-    /// @notice The permanent lock that receives every graduated position NFT (#17).
+    /// @notice The lock that receives every graduated position NFT (#17).
     address public immutable lpLock;
+
+    /// @dev Mirror of `LPLock.PERMANENT`, inlined rather than fetched so registering a lock does not
+    ///      pay an external call to read a compile-time constant. `LockReclaim.t.sol` pins the two
+    ///      together so they cannot drift apart silently.
+    uint64 internal constant PERMANENT_SENTINEL = type(uint64).max;
 
     /// @notice token => whether it has already graduated.
     mapping(address => bool) public graduated;
@@ -126,10 +140,27 @@ contract GraduationManager is ReentrancyGuard {
         );
         tokenIdOf[token] = tokenId;
 
+        // Record the lock's terms (#33). The NFT arrives in LPLock via a bare NPM mint, which tells it
+        // nothing, so this call is the only way it learns the position exists or what terms bind it.
+        // Split out to keep `graduate` inside the EVM's reachable stack.
+        _registerLock(token, pool, tokenId);
+
         // Switch on the pool's protocol fee. Best-effort: the factory only acts if it owns the V3
         // factory, so a fee-switch misconfiguration can never brick a graduation.
         ILaunchpad(launchpad).applyProtocolFee(pool);
 
         emit Graduated(token, pool, tokenId, tokenAmount, wethAmount, sqrtPriceX96);
+    }
+
+    /// @dev Turn this launch's frozen lock config into a concrete expiry and hand it to the lock.
+    ///      The duration is measured from GRADUATION, not from creation: a launch that sits on the
+    ///      curve for months should still get its full lock once it has a pool to lock.
+    function _registerLock(address token, address pool, uint256 tokenId) private {
+        (uint64 lockDuration, uint16 creatorFeeBps, bool permanent) = ILaunchpad(launchpad).lockConfigOf(token);
+        // The factory clamps `lockDuration` to [MIN_LOCK_DURATION, MAX_LOCK_DURATION] (100 years), so
+        // this checked addition cannot overflow and cannot land on the PERMANENT sentinel. That clamp
+        // is what makes this line safe; it is not a free-standing assumption.
+        uint64 lockUntil = permanent ? PERMANENT_SENTINEL : uint64(block.timestamp) + lockDuration;
+        ILPLock(lpLock).registerLock(tokenId, token, pool, lockUntil, creatorFeeBps);
     }
 }

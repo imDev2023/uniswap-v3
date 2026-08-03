@@ -107,7 +107,7 @@ describe('SwapPage with the indexer down', () => {
     // "N ETH seeded" is the one subgraph-sourced fragment on this page.
     expect(screen.queryByText(/ETH seeded/i)).not.toBeInTheDocument()
     // Everything in the pool-facts panel is RPC-derived, so it must survive the outage intact.
-    expect(screen.getByText(/locked forever/i)).toBeInTheDocument()
+    expect(screen.getByText('Locked')).toBeInTheDocument()
     expect(screen.getByText(/pool fee/i)).toBeInTheDocument()
   })
 

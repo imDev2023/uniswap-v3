@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test, Vm} from "forge-std/Test.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
+import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {LaunchToken} from "../src/LaunchToken.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 
@@ -55,7 +55,7 @@ contract LaunchMetadataTest is Test {
 
     function _create(string memory uri) internal returns (address token) {
         vm.prank(creator);
-        token = factory.createLaunch{value: FEE}("Doge Killer", "DOGEK", uri);
+        token = factory.createLaunch{value: FEE}(LaunchParams("Doge Killer", "DOGEK", uri, false));
     }
 
     /// @dev Create a launch and decode the `LaunchCreated` log it emitted. This is deliberately
@@ -169,7 +169,7 @@ contract LaunchMetadataTest is Test {
 
         address a = _create(URI);
         vm.prank(creator);
-        address b = second.createLaunch{value: FEE}("Second", "TWO", URI);
+        address b = second.createLaunch{value: FEE}(LaunchParams("Second", "TWO", URI, false));
 
         assertEq(LaunchToken(a).launchpad(), address(factory));
         assertEq(LaunchToken(b).launchpad(), address(second));

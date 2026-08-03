@@ -47,7 +47,16 @@ export function CreatePage() {
       address: FACTORY_ADDRESS,
       abi: launchpadFactoryAbi,
       functionName: 'createLaunch',
-      args: [name.trim(), symbol.trim().toUpperCase(), metadataURI.trim()],
+      args: [
+        {
+          name: name.trim(),
+          symbol: symbol.trim().toUpperCase(),
+          metadataURI: metadataURI.trim(),
+          // The lock choice is not surfaced yet; #37 adds the control. Defaulting to false means the
+          // standard 1-year lock, which is the reversible option - `true` is terminal.
+          permanentLock: false,
+        },
+      ],
       value: creationFee,
     })
   }
@@ -79,7 +88,7 @@ export function CreatePage() {
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Launch a token</h1>
       <p className="muted" style={{ marginTop: 0, marginBottom: 24 }}>
         Fixed 1B supply, no pre-mine, no upfront liquidity. It trades on a bonding curve and
-        graduates automatically into a permanently-locked Octopus pool.
+        graduates automatically into a locked Octopus pool.
       </p>
 
       <form className="card" onSubmit={onSubmit}>

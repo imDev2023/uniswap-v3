@@ -68,14 +68,18 @@ export function PoolFacts({
       </div>
 
       <div className="pool-fact">
-        {/* Scoped deliberately to the GRADUATION liquidity. What LPLock holds forever is the
-            protocol's own full-range position; a V3 pool also accepts third-party liquidity, which
-            its providers can withdraw whenever they like. "Liquidity: locked forever" claims the
-            second thing while only the first is true, and it claims it on the one surface where
-            someone is deciding whether to trust the pool. */}
+        {/* Scoped deliberately to the GRADUATION liquidity. What LPLock holds is the protocol's own
+            full-range position; a V3 pool also accepts third-party liquidity, which its providers can
+            withdraw whenever they like. "Liquidity: locked" would claim the second thing while only
+            the first is true, on the one surface where someone is deciding whether to trust the pool.
+
+            #33 also removed "forever" from the value. The lock is now 1 year by default, extendable,
+            and permanent only if the creator chose that at creation - so "Locked forever" was a claim
+            we could no longer make about an arbitrary pool. It says only what is true of every launch
+            position; #37 reads the actual expiry off LPLock and shows the term. */}
         <span className="pool-fact-label">Launch liquidity</span>
         <span className="pool-fact-value">
-          <span className="badge badge-grad">Locked forever</span>
+          <span className="badge badge-grad">Locked</span>
         </span>
       </div>
 

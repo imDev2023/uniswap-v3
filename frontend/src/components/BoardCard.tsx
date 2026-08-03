@@ -59,7 +59,10 @@ export function BoardCard({
         <div className="tcard-meter">
           <div className="meter-row">
             <span className="meter-pct">Locked</span>
-            <span className="meter-note">liquidity forever</span>
+            {/* Not "forever" any more: #33 made the lock 1 year by default, extendable, and permanent
+                only when the creator selected it at creation. The board has no per-token lock term to
+                hand (that read lands in #37), so it states the part that is true of every graduation. */}
+            <span className="meter-note">launch liquidity</span>
           </div>
         </div>
       ) : (

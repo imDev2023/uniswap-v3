@@ -21,6 +21,32 @@ struct LaunchStrings {
     string metadataURI;
 }
 
+/// @notice Everything a creator chooses at `createLaunch`.
+/// @dev A calldata struct rather than a growing argument list, for the same stack reason
+///      `LaunchStrings` exists: `createLaunch` is already at the edge of the EVM's 16-slot reachable
+///      stack under legacy codegen, and each new scalar argument pushes it over. It also means #34 can
+///      add the dev allocation as one more field without another signature break.
+struct LaunchParams {
+    string name;
+    string symbol;
+    string metadataURI;
+    /// @notice Lock the graduation LP permanently instead of for `defaultLockDuration`. Terminal:
+    ///         a permanent lock can never be reclaimed, and `extend` cannot walk it back.
+    bool permanentLock;
+}
+
+/// @notice The lock terms frozen into a launch at creation and consumed at graduation (#33).
+/// @dev ⚠️ Frozen at CREATION, not read live at graduation, and this is a deliberate divergence from
+///      the "future graduations" wording in `docs/tokenomics.md`. Read live, the owner could shorten
+///      the default lock in the window between a launch's creation and its graduation, so a trader who
+///      bought a curve advertising a 1-year lock could graduate into a shorter one. Freezing costs one
+///      storage word and makes the terms readable, and binding, from the moment the curve opens.
+struct LaunchLockConfig {
+    uint64 lockDuration; // seconds from graduation; ignored when `permanent`
+    uint16 creatorFeeBps; // creator's share of the graduated position's LP fees
+    bool permanent;
+}
+
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
 ///      creation fee. The full 1B supply is minted to this factory as custodian — no
@@ -60,6 +86,35 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice Ceiling on the owner-tunable curve trade fee: 10% (1000 bps). A generous but finite
     ///         cap so a param change can never brick a launch or gouge traders (#18).
     uint16 public constant MAX_TRADE_FEE_BPS = 1000;
+
+    /// @notice Default LP lock for a graduated launch: 1 year, measured from graduation (#33).
+    ///         Creators may select a permanent lock at creation, or `LPLock.extend` at any time after.
+    uint64 public constant DEFAULT_LOCK_DURATION = 365 days;
+
+    /// @notice Floor on the owner-tunable lock duration. A lock the owner could shrink toward zero for
+    ///         future launches would make the whole "locked liquidity" claim meaningless, so the
+    ///         setter cannot go below 30 days even for launches that do not exist yet.
+    uint64 public constant MIN_LOCK_DURATION = 30 days;
+
+    /// @notice Ceiling on the owner-tunable lock duration: 100 years.
+    /// @dev ⚠️ This bound is load-bearing, not cosmetic. `GraduationManager` computes a launch's expiry
+    ///      as `uint64(block.timestamp) + lockDuration`, in CHECKED arithmetic. Without a ceiling, a
+    ///      large enough duration makes that addition overflow and `graduate()` reverts **permanently**
+    ///      for every launch created under that config - an owner param that silently bricks
+    ///      graduation, which is exactly what `MAX_TRADE_FEE_BPS` exists to prevent for the trade fee.
+    ///      A duration landing exactly on `type(uint64).max` would be worse still: it would collide
+    ///      with LPLock's PERMANENT sentinel and hand out a permanent lock the creator never chose.
+    ///      100 years leaves ~5.8e11 years of headroom below the overflow, so the sum cannot approach
+    ///      either failure. Anyone actually wanting "forever" selects `permanentLock` explicitly.
+    uint64 public constant MAX_LOCK_DURATION = 36_500 days;
+
+    /// @notice Default creator share of a graduated position's LP fees: 70% (#33). The pool charges 1%
+    ///         per swap, of which Uniswap routes 0.25% to the protocol fee and 0.75% to this position;
+    ///         70% of that 0.75% is 0.525% of volume to the creator, 0.475% total to the protocol.
+    /// @dev ⚠️ It is a share of what the position ACTUALLY EARNS, not of raw swap volume. That
+    ///      distinction is what keeps the promise payable once third-party liquidity joins the pool and
+    ///      our position stops earning the whole LP share.
+    uint16 public constant DEFAULT_CREATOR_FEE_BPS = 7000;
 
     /// @notice Executes atomic graduation and escrows the 200M reserve for every launch (#16).
     GraduationManager public immutable graduationManager;
@@ -101,6 +156,14 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice token => its bonding curve.
     mapping(address => address) public curveOf;
 
+    /// @notice token => the LP lock terms frozen at its creation, consumed by the GraduationManager.
+    mapping(address => LaunchLockConfig) public lockConfigOf;
+
+    /// @notice Owner-tunable lock defaults applied to FUTURE launches (#33), frozen per launch at
+    ///         `createLaunch` exactly like the curve params above.
+    uint64 public defaultLockDuration = DEFAULT_LOCK_DURATION;
+    uint16 public creatorFeeBps = DEFAULT_CREATOR_FEE_BPS;
+
     /// @notice A new launch.
     /// @dev Build 11 (#24) widened this event to be self-sufficient: it carries the metadata URI plus
     ///      the complete set of curve params frozen into this launch's `BondingCurve` immutables, so
@@ -139,6 +202,7 @@ contract LaunchpadFactory is Ownable2Step {
     event CurveParamsUpdated(
         uint256 virtualEthReserve, uint16 tradeFeeBps, uint256 maxBuyPerWallet, uint256 antiSnipeThreshold
     );
+    event LockParamsUpdated(uint64 defaultLockDuration, uint16 creatorFeeBps);
 
     error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
@@ -147,6 +211,7 @@ contract LaunchpadFactory is Ownable2Step {
     error NotGraduationManager();
     error InvalidProtocolFee(uint8 value);
     error InvalidCurveParams();
+    error InvalidLockParams();
 
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
     /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
@@ -179,22 +244,27 @@ contract LaunchpadFactory is Ownable2Step {
 
     /// @notice Create a new token launch. The caller pays at least `creationFee`; any
     ///         excess is refunded. The full fixed supply is minted to this factory.
-    /// @param metadataURI URI of the token's off-chain JSON metadata (`{name, description, image,
+    /// @param p The creator's choices for this launch. `p.metadataURI` is the URI of the token's
+    ///        off-chain JSON metadata (`{name, description, image,
     ///        banner, links}`). Stored permanently on the token with no setter — see
     ///        `LaunchToken.metadataURI`. Content-addressed storage (IPFS) is the intended home;
     ///        the contract does not and cannot validate that the URI resolves, so an unreachable
     ///        or mistyped URI is permanent. Passing an empty string is allowed and simply means
     ///        "no metadata"; clients should fall back to a default avatar.
     /// @return token The newly deployed LaunchToken.
-    function createLaunch(string calldata name, string calldata symbol, string calldata metadataURI)
-        external
-        payable
-        returns (address token)
-    {
+    function createLaunch(LaunchParams calldata p) external payable returns (address token) {
         uint256 fee = creationFee;
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
 
-        token = address(new LaunchToken(name, symbol, metadataURI, address(this)));
+        token = address(new LaunchToken(p.name, p.symbol, p.metadataURI, address(this)));
+
+        // Freeze this launch's lock terms now, so they are readable and binding from the moment the
+        // curve opens rather than resolved at graduation under whatever the defaults are by then.
+        lockConfigOf[token] = LaunchLockConfig({
+            lockDuration: defaultLockDuration,
+            creatorFeeBps: creatorFeeBps,
+            permanent: p.permanentLock
+        });
 
         // Read the owner-tunable params into ONE memory struct, then use that same struct both to
         // construct the curve and to populate LaunchCreated. Sharing the struct (rather than
@@ -223,7 +293,7 @@ contract LaunchpadFactory is Ownable2Step {
         IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
         IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
 
-        _emitLaunchCreated(curve, LaunchStrings(name, symbol, metadataURI), cfg);
+        _emitLaunchCreated(curve, LaunchStrings(p.name, p.symbol, p.metadataURI), cfg);
 
         // Interactions last.
         if (fee > 0) {
@@ -292,6 +362,22 @@ contract LaunchpadFactory is Ownable2Step {
         maxBuyPerWallet = maxBuyPerWallet_;
         antiSnipeThreshold = antiSnipeThreshold_;
         emit CurveParamsUpdated(virtualEthReserve_, tradeFeeBps_, maxBuyPerWallet_, antiSnipeThreshold_);
+    }
+
+    /// @notice Retune the LP lock defaults for FUTURE launches (#33). Existing launches froze their
+    ///         terms at creation and are untouched, including ones still on the curve.
+    /// @dev The creator fee share is deliberately allowed across its whole 0..100% range: unlike the
+    ///      trade fee it is a split of revenue we would otherwise keep, so there is no value at which
+    ///      it can gouge a trader or brick a launch. The lock duration has a floor, because a
+    ///      near-zero lock would make the headline claim meaningless.
+    function setLockParams(uint64 lockDuration_, uint16 creatorFeeBps_) external onlyOwner {
+        if (lockDuration_ < MIN_LOCK_DURATION || lockDuration_ > MAX_LOCK_DURATION) revert InvalidLockParams();
+        // Single source of truth for the ceiling: the lock enforces it again on `registerLock`, and a
+        // second literal here could drift away from it.
+        if (creatorFeeBps_ > lpLock.MAX_CREATOR_FEE_BPS()) revert InvalidLockParams();
+        defaultLockDuration = lockDuration_;
+        creatorFeeBps = creatorFeeBps_;
+        emit LockParamsUpdated(lockDuration_, creatorFeeBps_);
     }
 
     /// @notice Set the default protocol fee applied to FUTURE graduated pools. 0 = off, else 4..10.

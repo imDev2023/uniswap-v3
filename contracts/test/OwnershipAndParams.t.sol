@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
+import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 import {Constants} from "../src/Constants.sol";
 import {IUniswapV3Factory} from "../src/interfaces/IUniswapV3Minimal.sol";
@@ -40,7 +40,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
 
     function _create() internal returns (BondingCurve) {
         vm.prank(creator);
-        address token = factory.createLaunch("Tok", "TOK", "ipfs://QmTestMetadata");
+        address token = factory.createLaunch(LaunchParams("Tok", "TOK", "ipfs://QmTestMetadata", false));
         return BondingCurve(factory.curveOf(token));
     }
 

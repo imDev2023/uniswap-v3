@@ -136,7 +136,7 @@ export function TokenPage() {
             <div className="card">
               <p className="section-title">Graduated</p>
               <p className="muted" style={{ marginTop: 0 }}>
-                Curve trading is closed. {symbol} now trades in a permanently locked V3 pool.
+                Curve trading is closed. {symbol} now trades in a locked V3 pool.
               </p>
 
               <div className="kv-grid" style={{ marginTop: 'var(--s-4)' }}>

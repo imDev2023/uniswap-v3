@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
+import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 
 /// @notice Populates a TESTNET launchpad with a realistic spread of launches so the frontend's
@@ -116,7 +116,7 @@ contract SeedTestnet is Script {
         // start/stopBroadcast rather than a bare broadcast: forge forbids view calls after a
         // one-shot `broadcast`, and this script has to read curve state between every transaction.
         vm.startBroadcast(creatorKey);
-        address token = launchpad.createLaunch{value: fee}(p.name, p.symbol, p.metadataURI);
+        address token = launchpad.createLaunch{value: fee}(LaunchParams(p.name, p.symbol, p.metadataURI, false));
         vm.stopBroadcast();
 
         BondingCurve curve = BondingCurve(launchpad.curveOf(token));

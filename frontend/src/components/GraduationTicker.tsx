@@ -7,7 +7,7 @@ import { formatAge, formatEth } from '../lib/format'
  *
  * The old homepage gave "Just graduated" a full row of cards ABOVE the live curves, which put the
  * finished thing above the thing you can still act on - backwards for a launchpad. Graduation is
- * still the product's proudest moment (liquidity locked forever), so it keeps a distinct, celebratory
+ * still the product's proudest moment (liquidity locked), so it keeps a distinct, celebratory
  * treatment; it just no longer outranks the board.
  */
 export function GraduationTicker({

@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
-import {LaunchpadFactory} from "../src/LaunchpadFactory.sol";
+import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
 import {GraduationManager} from "../src/periphery/GraduationManager.sol";
 import {Constants} from "../src/Constants.sol";
@@ -46,7 +46,7 @@ contract GraduationTest is Test, V3Deployer {
     }
 
     function test_FullLifecycle_AtomicGraduation() public {
-        address token = factory.createLaunch("Graduate Me", "GRAD", "ipfs://QmTestMetadata");
+        address token = factory.createLaunch(LaunchParams("Graduate Me", "GRAD", "ipfs://QmTestMetadata", false));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
 
         // Anti-snipe holds on the real create-then-buy path: a whale can't seize > cap in the window.

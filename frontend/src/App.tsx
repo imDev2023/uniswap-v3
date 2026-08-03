@@ -46,7 +46,7 @@ export function App() {
 
       <footer className="footer">
         <span>
-          Octopus · fair-launch bonding curves · every graduation locks liquidity forever · v1 on
+          Octopus · fair-launch bonding curves · every graduation locks liquidity · v1 on
           Robinhood Chain
         </span>
         {/*

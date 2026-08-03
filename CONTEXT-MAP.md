@@ -9,6 +9,16 @@ Three contexts, and they deliberately do **not** share a language - the same rea
 - [Indexing](./subgraph/CONTEXT.md) - the derived read model built from Launchpad events, plus the operational vocabulary for whether that model can be trusted right now.
 - [Trading UI](./frontend/CONTEXT.md) - what a person sees and does: browsing the Board, reading a Curve, trading, and launching.
 
+## Decisions
+
+Architectural decisions live in [`docs/adr/`](./docs/adr/). Read one before re-opening the question it settles.
+
+- [0001](./docs/adr/0001-unmodified-uniswap-v3-from-audited-artifacts.md) - the AMM is unmodified Uniswap V3, deployed byte-for-byte from audited artifacts.
+- [0002](./docs/adr/0002-metadata-uri-is-immutable.md) - a Launch's metadata URI is set once and has no setter, for anyone.
+- [0003](./docs/adr/0003-the-launchpad-is-the-root-of-identity.md) - ask the launchpad whether a token is its own; never trust a token's claim about its launchpad.
+- [0004](./docs/adr/0004-managed-subgraph-hosting-on-goldsky.md) - Indexing is hosted, not self-run.
+- [0005](./docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) - ⚠️ the LP lock is no longer permanent. It is 1 year by default and reclaimable once expired **and** the pool has gone quiet. Supersedes the permanent-custody property that `contracts/CONTEXT.md` used to assert.
+
 ## Relationships
 
 - **Launchpad → Indexing**: one-way, event-sourced. Indexing consumes `LaunchCreated`, `Bought`, `Sold`, `Graduation` and `Graduated` and makes **no on-chain calls at all**. Everything in the read model is derived, and therefore rebuildable by re-indexing.

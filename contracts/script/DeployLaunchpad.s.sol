@@ -74,6 +74,9 @@ contract DeployLaunchpad is Script, V3Deployer {
         console2.log("LaunchpadFactory:            ", address(launchpad));
         console2.log("GraduationManager:           ", address(launchpad.graduationManager()));
         console2.log("LPLock:                      ", address(launchpad.lpLock()));
+        // #35. Deployed by the factory's constructor like the two above, so it needs Blockscout
+        // verification and a row in docs/deployments-testnet.md at #38's redeploy.
+        console2.log("DevVesting:                  ", address(launchpad.devVesting()));
         console2.log("Treasury:                    ", treasury);
         console2.log("V3 factory owner (=launchpad):", IUniswapV3Factory(v3Factory).owner());
         console2.log("Launchpad owner (deployer):  ", launchpad.owner());

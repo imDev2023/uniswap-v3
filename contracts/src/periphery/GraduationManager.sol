@@ -57,8 +57,14 @@ contract GraduationManager is ReentrancyGuard {
     ///      together so they cannot drift apart silently.
     uint64 internal constant PERMANENT_SENTINEL = type(uint64).max;
 
-    /// @notice token => whether it has already graduated.
-    mapping(address => bool) public graduated;
+    /// @notice token => the timestamp it graduated at, or 0 if it has not.
+    /// @dev A timestamp rather than the `bool` this was before #35, because it is also the start of
+    ///      the creator's vesting schedule and nothing else on-chain dated a graduation. Storing it
+    ///      here lets `DevVesting` READ the start rather than be TOLD it: adding a notification call
+    ///      to `graduate` would put a revertable external call on the one path that must never fail,
+    ///      where a bug in the callee strands a launch mid-migration with its curve already closed.
+    ///      Zero doubles as the "has not graduated" flag, exactly as the bool did.
+    mapping(address => uint64) public graduatedAt;
     /// @notice token => the V3 pool it graduated into.
     mapping(address => address) public poolOf;
     /// @notice token => the locked position NFT id it graduated into.
@@ -94,7 +100,7 @@ contract GraduationManager is ReentrancyGuard {
     /// @return pool The created/initialized V3 pool.
     function graduate(address token) external payable nonReentrant returns (address pool) {
         if (msg.sender != ILaunchpad(launchpad).curveOf(token)) revert NotCurve();
-        if (graduated[token]) revert AlreadyGraduated();
+        if (graduatedAt[token] != 0) revert AlreadyGraduated();
 
         uint256 wethAmount = msg.value;
         // Seed exactly the escrowed reserve (a factory constant), NOT balanceOf: tokens donated to
@@ -103,7 +109,7 @@ contract GraduationManager is ReentrancyGuard {
         uint256 tokenAmount = ILaunchpad(launchpad).GRADUATION_RESERVE();
         if (wethAmount == 0 || tokenAmount == 0) revert NothingToSeed();
 
-        graduated[token] = true;
+        graduatedAt[token] = uint64(block.timestamp);
 
         // Wrap the raised ETH so the pool is a standard TOKEN/WETH ERC-20 pair.
         IWETH9(weth9).deposit{value: wethAmount}();

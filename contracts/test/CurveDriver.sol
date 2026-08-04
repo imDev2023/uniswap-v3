@@ -52,4 +52,32 @@ abstract contract CurveDriver is Test {
         }
         assertFalse(curve.buyCapActive(), "anti-snipe window did not lift within the wallet budget");
     }
+
+    /// @notice Drive `curve` all the way to graduation: lift the anti-snipe window, then make the
+    ///         crossing buy. Leaves the curve closed and the pool created.
+    /// @dev ⚠️ The crossing buy is DERIVED, not a literal, for the same reason `_maxBuyUnderCap` is.
+    ///      Four suites had each hardcoded `buy{value: 300 ether}` against a 10 ETH target - a number
+    ///      that means "comfortably more than enough" at this calibration and nothing at all at
+    ///      another. `finalEthReserve - ethReserve` is exactly the net ETH the curve still needs;
+    ///      grossing it up for the trade fee is exactly what the buyer must send. The curve clamps
+    ///      any excess and refunds it, so rounding up by one wei is safe and rounding down is not.
+    function _crossToGraduation(BondingCurve curve, string memory tag) internal {
+        _liftAntiSnipe(curve, tag);
+
+        uint256 netNeeded = curve.finalEthReserve() - curve.ethReserve();
+        // Round the fee gross-up UP: a wei short leaves the curve one wei below the threshold and it
+        // does not graduate, which is the failure mode `CrossingBuyBoundary.t.sol` pins deliberately.
+        // Ceil-div, inlined: `Calibration.t.sol` keeps its own `_ceilDiv` deliberately reimplemented
+        // from primitives, and a shared one here would collide with it through this base contract.
+        uint256 numerator = netNeeded * BPS;
+        uint256 denominator = BPS - curve.tradeFeeBps();
+        uint256 ethIn = numerator == 0 ? 0 : (numerator - 1) / denominator + 1;
+
+        address closer = makeAddr(string(abi.encodePacked(tag, "closer")));
+        vm.deal(closer, ethIn);
+        vm.prank(closer);
+        curve.buy{value: ethIn}(0);
+
+        assertTrue(curve.graduated(), "curve did not graduate on the derived crossing buy");
+    }
 }

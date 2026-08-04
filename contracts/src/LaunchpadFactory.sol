@@ -9,6 +9,7 @@ import {LaunchToken} from "./LaunchToken.sol";
 import {BondingCurve, CurveConfig} from "./BondingCurve.sol";
 import {GraduationManager} from "./periphery/GraduationManager.sol";
 import {LPLock} from "./periphery/LPLock.sol";
+import {DevVesting} from "./periphery/DevVesting.sol";
 import {IUniswapV3Factory, IUniswapV3Pool} from "./interfaces/IUniswapV3Minimal.sol";
 
 /// @notice The three creator-supplied strings for a launch, bundled into one struct.
@@ -35,8 +36,10 @@ struct LaunchParams {
     bool permanentLock;
     /// @notice Creator's free token allocation, in bps of `CURVE_SUPPLY`, 0 to `maxDevAllocationBps`
     ///         (#34). Carved OUT of the curve allocation, never out of the 200M graduation reserve,
-    ///         so the pool is never thinned and `FDV/raise` is untouched. Vested linearly from
-    ///         graduation by #35; until then the tokens sit custodied in this factory.
+    ///         so the pool is never thinned and `FDV/raise` is untouched. The tokens go straight to
+    ///         `DevVesting`, which releases them linearly from GRADUATION (#35) - never from creation,
+    ///         because most launches never graduate and a creator on a dying curve would otherwise be
+    ///         able to sell back into the curve and extract what other buyers paid in.
     uint16 devAllocationBps;
 }
 
@@ -164,6 +167,33 @@ contract LaunchpadFactory is Ownable2Step {
     ///      either failure. Anyone actually wanting "forever" selects `permanentLock` explicitly.
     uint64 public constant MAX_LOCK_DURATION = 36_500 days;
 
+    /// @notice Default linear vesting window for the creator's dev allocation: 30 days from GRADUATION
+    ///         (#35). Owner-tunable and frozen per launch at `createLaunch`.
+    /// @dev ⚠️ The default sits exactly ON `MIN_VESTING_DURATION`, which is deliberate: from here the
+    ///      owner can only ever LENGTHEN the schedule, and lengthening is the direction that favours
+    ///      holders. A 5% allocation at this default releases roughly 1.33M tokens a day and is fully
+    ///      liquid a month after graduation, where `docs/tokenomics.md` measures a complete 5% exit at
+    ///      about -30.6% on price. Vesting delays that, it does not prevent it.
+    uint64 public constant DEFAULT_VESTING_DURATION = 30 days;
+
+    /// @notice Floor on the owner-tunable vesting duration, matching `MIN_LOCK_DURATION`. A schedule
+    ///         the owner could shrink toward zero would make the whole "vested allocation" claim
+    ///         meaningless, so the setter cannot go below it even for launches that do not exist yet.
+    uint64 public constant MIN_VESTING_DURATION = 30 days;
+
+    /// @notice Ceiling on the owner-tunable vesting duration: 1460 days, i.e. 4 x 365.
+    ///         Not four calendar years - it ignores leap days, exactly as `DEFAULT_LOCK_DURATION`'s
+    ///         `365 days` does. Nothing depends on it landing on a calendar boundary.
+    /// @dev ⚠️ Unlike `MAX_LOCK_DURATION`, this bound is POLICY and not load-bearing, and the
+    ///      difference is worth stating rather than leaving to look alike. The lock's ceiling exists
+    ///      because `GraduationManager` computes an expiry as `block.timestamp + lockDuration` in
+    ///      checked arithmetic, so an unbounded duration would overflow and brick `graduate` outright.
+    ///      `DevVesting` never adds a duration to anything - it compares elapsed time against it - so
+    ///      no value here can overflow or divide by zero. The ceiling exists so an owner cannot set a
+    ///      schedule longer than a creator would outlive, which would be an unclaimable grant dressed
+    ///      up as a vesting one.
+    uint64 public constant MAX_VESTING_DURATION = 1460 days;
+
     /// @notice Default creator share of a graduated position's LP fees: 70% (#33). The pool charges 1%
     ///         per swap, of which Uniswap routes 0.25% to the protocol fee and 0.75% to this position;
     ///         70% of that 0.75% is 0.525% of volume to the creator, 0.475% total to the protocol.
@@ -177,6 +207,9 @@ contract LaunchpadFactory is Ownable2Step {
 
     /// @notice Permanent lock that owns every graduated LP position (#17).
     LPLock public immutable lpLock;
+
+    /// @notice Custodian for every creator's dev allocation, releasing it linearly from graduation (#35).
+    DevVesting public immutable devVesting;
 
     /// @notice The platform's own V3 factory. Ownership is transferred to this launchpad post-deploy,
     ///         which is what lets the owner exercise the protocol fee switch on graduated pools (#17).
@@ -219,8 +252,11 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice token => the creator's dev allocation in tokens, carved out of the curve supply (#34).
     /// @dev Zero for a launch that chose no allocation, and zero for any token this factory did not
     ///      launch - so it is never on its own a proof of anything. `curveOf(token) != 0` is the
-    ///      identity check (ADR-0003). These tokens are custodied by this factory until #35's vesting
-    ///      vault claims them; this mapping is how the vault will find them.
+    ///      identity check (ADR-0003). The tokens themselves left for `devVesting` in the same
+    ///      transaction (#35); this is the factory-side record of what was carved, kept so #36 can
+    ///      emit it in `LaunchConfig` without an external call. `DevVesting.grantOf(token).total` is
+    ///      the same number, written from the same expression in the same transaction, and
+    ///      `DevVesting.t.sol` pins the two together so they cannot drift.
     mapping(address => uint256) public devAllocationOf;
 
     /// @notice Owner-tunable lock defaults applied to FUTURE launches (#33), frozen per launch at
@@ -231,6 +267,10 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice Owner-tunable ceiling on the creator-selectable dev allocation, applied to FUTURE
     ///         launches (#34). Setting it to 0 turns the pre-mine off entirely without a redeploy.
     uint16 public maxDevAllocationBps = MAX_DEV_ALLOCATION_BPS;
+
+    /// @notice Owner-tunable linear vesting window for the dev allocation, applied to FUTURE launches
+    ///         (#35) and frozen into each grant at `createLaunch`, exactly like the lock terms above.
+    uint64 public vestingDuration = DEFAULT_VESTING_DURATION;
 
     /// @notice A new launch.
     /// @dev Build 11 (#24) widened this event to be self-sufficient: it carries the metadata URI plus
@@ -272,6 +312,7 @@ contract LaunchpadFactory is Ownable2Step {
     );
     event LockParamsUpdated(uint64 defaultLockDuration, uint16 creatorFeeBps);
     event MaxDevAllocationUpdated(uint16 oldMaxBps, uint16 newMaxBps);
+    event VestingDurationUpdated(uint64 oldDuration, uint64 newDuration);
 
     error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
@@ -282,6 +323,7 @@ contract LaunchpadFactory is Ownable2Step {
     error InvalidCurveParams();
     error InvalidLockParams();
     error InvalidDevAllocation();
+    error InvalidVestingDuration();
 
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
     /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
@@ -305,6 +347,9 @@ contract LaunchpadFactory is Ownable2Step {
         // lock; the manager authorizes callers via this factory's curveOf().
         lpLock = new LPLock(positionManager, address(this));
         graduationManager = new GraduationManager(address(this), positionManager, weth9_, address(lpLock));
+        // Deployed last: the vesting vault reads each schedule's start from the GraduationManager, so
+        // it needs that address, and holding it immutable keeps `vestingStart` a plain storage read.
+        devVesting = new DevVesting(address(this), address(graduationManager));
     }
 
     /// @notice Number of launches created so far.
@@ -399,6 +444,24 @@ contract LaunchpadFactory is Ownable2Step {
         });
     }
 
+    /// @dev Send the creator's carve to the vesting vault and record it.
+    /// @param curveAllocation This launch's CURVE allocation, from which the dev carve is derived as
+    ///        `CURVE_SUPPLY - curveAllocation`. It takes the curve figure rather than the dev one
+    ///        because `createLaunch` already holds that value in `cfg` and has no spare stack slot
+    ///        for another local - the same 16-slot ceiling that forced `_emitLaunchCreated` to exist.
+    ///
+    /// @dev A zero carve registers nothing at all, rather than a zero-value grant. `DevVesting` then
+    ///      reads that token as `UnknownGrant` instead of as an empty schedule, which is the honest
+    ///      distinction: the launch has no creator allocation, not one worth nothing.
+    function _grantDevCarve(address token, uint256 curveAllocation) private {
+        uint256 devAllocation = CURVE_SUPPLY - curveAllocation;
+        devAllocationOf[token] = devAllocation;
+        if (devAllocation == 0) return;
+
+        IERC20(token).safeTransfer(address(devVesting), devAllocation);
+        devVesting.registerGrant(token, msg.sender, devAllocation, vestingDuration);
+    }
+
     /// @notice Create a new token launch. The caller pays at least `creationFee`; any
     ///         excess is refunded. The full fixed supply is minted to this factory.
     /// @param p The creator's choices for this launch. `p.metadataURI` is the URI of the token's
@@ -438,17 +501,21 @@ contract LaunchpadFactory is Ownable2Step {
         launches.push(token);
         creatorOf[token] = msg.sender;
         curveOf[token] = curve;
-        devAllocationOf[token] = CURVE_SUPPLY - cfg.curveTokenAllocation;
-
         // The curve allocation (80% less any dev carve) goes to the curve for sale; the 20%
         // graduation reserve is escrowed in the GraduationManager, which seeds it into the pool at
-        // graduation (#16). The dev allocation is the remainder and stays custodied HERE, with no
-        // withdrawal path, until #35's vesting vault claims it - deliberately unreachable rather
-        // than parked at an address that could move it before graduation.
+        // graduation (#16); the dev allocation is the remainder and goes to the vesting vault (#35).
+        // Between them these three transfers move the entire 1B supply out of this contract, which is
+        // what keeps the factory holding no launch tokens and needing no path to move any.
         IERC20(token).safeTransfer(curve, cfg.curveTokenAllocation);
         IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
 
+        // ⚠️ `LaunchCreated` MUST be emitted before `GrantRegistered`, and the ordering is not
+        // cosmetic. Both logs land in this one transaction, and an indexer processes them in log
+        // order: `LaunchCreated` is what creates the `Launch` entity, so a `GrantRegistered` handler
+        // running first would `load()` a null and either drop the grant or have to construct a
+        // half-built entity. Cheap to order correctly here, expensive to discover in #36.
         _emitLaunchCreated(curve, LaunchStrings(p.name, p.symbol, p.metadataURI), cfg);
+        _grantDevCarve(token, cfg.curveTokenAllocation);
 
         // Interactions last.
         if (fee > 0) {
@@ -553,6 +620,20 @@ contract LaunchpadFactory is Ownable2Step {
         if (maxDevAllocationBps_ > MAX_DEV_ALLOCATION_BPS) revert InvalidDevAllocation();
         emit MaxDevAllocationUpdated(maxDevAllocationBps, maxDevAllocationBps_);
         maxDevAllocationBps = maxDevAllocationBps_;
+    }
+
+    /// @notice Retune the linear vesting window for the dev allocation, for FUTURE launches (#35).
+    ///         Existing grants froze their duration at creation and are untouched, including grants on
+    ///         launches still sitting on the curve - so lengthening this can never extend a schedule a
+    ///         creator has already been promised, and shortening it can never accelerate one.
+    /// @dev Bounded rather than left open, but see `MAX_VESTING_DURATION`: this ceiling is policy, not
+    ///      an arithmetic guard, and nothing in `DevVesting` overflows without it.
+    function setVestingDuration(uint64 vestingDuration_) external onlyOwner {
+        if (vestingDuration_ < MIN_VESTING_DURATION || vestingDuration_ > MAX_VESTING_DURATION) {
+            revert InvalidVestingDuration();
+        }
+        emit VestingDurationUpdated(vestingDuration, vestingDuration_);
+        vestingDuration = vestingDuration_;
     }
 
     /// @notice Set the default protocol fee applied to FUTURE graduated pools. 0 = off, else 4..10.

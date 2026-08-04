@@ -222,29 +222,33 @@ contract CalibrationTest is Test, V3Deployer, CurveDriver {
             factory.GRADUATION_RESERVE(),
             "the 200M pool reserve is UNTOUCHED by the carve"
         );
-        assertEq(IERC20(token).balanceOf(address(factory)), dev, "factory custodies the dev allocation");
+        // #35 moved custody: the carve leaves for the vesting vault in the same transaction, so the
+        // factory ends `createLaunch` holding no launch tokens at all.
+        assertEq(IERC20(token).balanceOf(address(factory)), 0, "factory custodies nothing");
+        assertEq(IERC20(token).balanceOf(address(factory.devVesting())), dev, "the vault custodies the carve");
 
         assertEq(
             IERC20(token).balanceOf(address(curve)) + IERC20(token).balanceOf(address(gm))
-                + IERC20(token).balanceOf(address(factory)),
+                + IERC20(token).balanceOf(address(factory.devVesting())),
             IERC20(token).totalSupply(),
             "the whole 1B is accounted for"
         );
     }
 
-    /// @notice The custodied dev allocation has no withdrawal path in this build. #35 adds the vault.
-    /// @dev Asserted rather than assumed: if some later change gives the factory a token sweep, this
-    ///      is what notices that the pre-vesting allocation became movable.
-    function test_DevAllocation_HasNoWithdrawalPathYet() public {
+    /// @notice The factory has no path that moves a launch token, and #35 did not give it one.
+    /// @dev In #34 this asserted that the allocation was stranded in the factory. #35 moved custody to
+    ///      `DevVesting`, so the property worth pinning here changed shape but not intent: the factory
+    ///      must still hold nothing and be able to move nothing. `DevVesting.t.sol` carries the
+    ///      corresponding assertion for the vault, which is where the tokens actually live now.
+    function test_Factory_HasNoTokenWithdrawalPath() public {
         (address token,) = _launch(500);
-        uint256 held = IERC20(token).balanceOf(address(factory));
-        assertGt(held, 0, "factory holds the allocation");
+        assertEq(IERC20(token).balanceOf(address(factory)), 0, "the factory holds no launch tokens");
 
-        // No owner path out.
+        // No owner path out, on the contract that also owns the V3 factory.
         vm.prank(owner);
         (bool ok,) = address(factory).call(abi.encodeWithSignature("sweep(address,address)", token, owner));
         assertFalse(ok, "no sweep function exists");
-        assertEq(IERC20(token).balanceOf(address(factory)), held, "allocation untouched");
+        assertEq(IERC20(token).balanceOf(owner), 0, "owner received nothing");
     }
 
     // ---------------------------------------------------------------------------------------------

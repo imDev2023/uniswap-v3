@@ -1,5 +1,6 @@
 import { useAccount } from 'wagmi'
 import type { HolderRow } from '../lib/subgraph'
+import { CURVE_SUPPLY } from '../config/constants'
 import { shareOfCurveSupply } from '../lib/curve'
 import { formatPercent, formatTokenAmount, shortAddress } from '../lib/format'
 
@@ -8,17 +9,25 @@ import { formatPercent, formatTokenAmount, shortAddress } from '../lib/format'
 export function HoldersCard({
   holders,
   creator,
+  curveAllocation = CURVE_SUPPLY,
 }: {
   holders: HolderRow[]
   /** Undefined when the creator isn't known - the indexer supplies it, and it may be unavailable. */
   creator: string | undefined
+  /**
+   * ⚠️ This launch's own curve allocation. Since #34 a dev allocation carves it below the 800M
+   * constant, and concentration is read by someone deciding whether to buy - a denominator that is
+   * too large understates exactly the number they are checking. Defaults to the no-dev-allocation
+   * case, which is correct for every launch created without one.
+   */
+  curveAllocation?: bigint
 }) {
   const { address } = useAccount()
   const you = address?.toLowerCase()
   const creatorLc = creator?.toLowerCase()
 
   const creatorHolder = holders.find((h) => h.account.toLowerCase() === creatorLc)
-  const creatorShare = creatorHolder ? shareOfCurveSupply(BigInt(creatorHolder.balance)) : 0
+  const creatorShare = creatorHolder ? shareOfCurveSupply(BigInt(creatorHolder.balance), curveAllocation) : 0
 
   return (
     <div className="card">
@@ -74,7 +83,7 @@ export function HoldersCard({
                   </td>
                   <td style={{ textAlign: 'right' }}>{formatTokenAmount(BigInt(h.balance))}</td>
                   <td style={{ textAlign: 'right' }}>
-                    {formatPercent(shareOfCurveSupply(BigInt(h.balance)))}
+                    {formatPercent(shareOfCurveSupply(BigInt(h.balance), curveAllocation))}
                   </td>
                 </tr>
               )

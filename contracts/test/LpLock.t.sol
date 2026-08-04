@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {CurveDriver} from "./CurveDriver.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
 import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
@@ -39,7 +40,7 @@ interface ISwapRouter {
 ///         locked in `LPLock` forever (principal unwithdrawable and NFT unmovable by anyone), the pool's
 ///         protocol fee switch is on, and BOTH the locked position's trading fees and the pool's
 ///         protocol fees are collectable — always to the treasury.
-contract LpLockTest is Test, V3Deployer {
+contract LpLockTest is Test, V3Deployer, CurveDriver {
     uint24 internal constant FEE_TIER = 10000;
 
     LaunchpadFactory internal factory;
@@ -69,14 +70,9 @@ contract LpLockTest is Test, V3Deployer {
 
     /// @dev Create a launch and graduate it (fill through the anti-snipe window, then cross).
     function _graduate() internal returns (address token, address pool, uint256 tokenId) {
-        token = factory.createLaunch(LaunchParams("Locked", "LOCK", "ipfs://QmTestMetadata", false));
+        token = factory.createLaunch(LaunchParams("Locked", "LOCK", "ipfs://QmTestMetadata", false, 0));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
-        for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
-            address filler = makeAddr(string(abi.encodePacked("filler", i)));
-            vm.deal(filler, 1 ether);
-            vm.prank(filler);
-            curve.buy{value: 0.15 ether}(0);
-        }
+        _liftAntiSnipe(curve, "lp");
         vm.deal(whale, 500 ether);
         vm.prank(whale);
         curve.buy{value: 300 ether}(0); // crossing buy graduates atomically

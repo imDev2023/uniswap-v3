@@ -75,8 +75,8 @@ export function HomePage() {
         <div>
           <h1>Launch fair. Graduate locked.</h1>
           <p>
-            Bonding curves with zero upfront liquidity. Every graduation locks its pool - no
-            pre-mine, no rug.
+            Bonding curves with zero upfront liquidity. Every graduation locks its pool - zero
+            protocol allocation, no rug.
           </p>
         </div>
         <div className="masthead-stats">

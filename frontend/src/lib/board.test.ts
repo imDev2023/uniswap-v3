@@ -14,6 +14,8 @@ function token(over: Partial<TokenRow> & { id: string }): TokenRow {
     ethReserve: '0',
     tokenReserve: '0',
     tokensSold: '0',
+    // The no-dev-allocation case; #34 made this per launch.
+    curveTokenAllocation: '800000000000000000000000000',
     priceX18: '0',
     progressBps: 0,
     volumeEth: '0',

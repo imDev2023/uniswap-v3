@@ -1,7 +1,7 @@
 # Launchpad
 
 The on-chain domain, and the source of truth for everything else.
-A creator launches a token; it trades on a bonding curve until it has raised a fixed amount of ETH, at which point it moves atomically into a permanently-locked Uniswap V3 pool.
+A creator launches a token; it trades on a bonding curve until it has raised a fixed amount of ETH, at which point it moves atomically into a locked Uniswap V3 pool.
 
 ## Language
 
@@ -12,7 +12,8 @@ One creator's token together with the market that prices it, from creation throu
 _Avoid_: project, coin, listing
 
 **Launch Token**:
-The ERC-20 a Launch mints. Fixed supply, no pre-mine, and it outlives the Curve.
+The ERC-20 a Launch mints. Fixed supply, zero protocol allocation, and it outlives the Curve.
+⚠️ Not "no pre-mine" since #34: a creator may take 0-5% of the curve supply as a free **Dev Allocation**, vested from Graduation.
 _Avoid_: coin, asset
 
 **Curve**:
@@ -35,7 +36,15 @@ _Avoid_: fake reserve, seed liquidity
 
 **Curve Allocation**:
 The share of total supply the Curve will ever sell. Progress toward graduation is measured against this, not against total supply.
+⚠️ Since #34 it is **per Launch**, not a constant: the Dev Allocation is carved out of it, so it ranges from 760M to 800M. Read it off the Launch, never from a constant.
 _Avoid_: circulating supply, float
+
+**Dev Allocation**:
+The Creator's free share of the Curve Allocation, 0% to 5%, chosen once at creation.
+Carved out of the Curve Allocation and never out of the Graduation Reserve, so the Pool is never thinned.
+Vested linearly from Graduation, never from creation.
+⚠️ Not yet visible as a Holder: the read model derives holders from Curve trades only, so a Dev Allocation shows as 0% concentration until #36 indexes it.
+_Avoid_: pre-sale, team tokens, creator buy (it is not a purchase, so the anti-snipe cap is not involved)
 
 **Graduation Reserve**:
 The share of total supply held back from the Curve and seeded into the Pool at graduation.
@@ -48,7 +57,7 @@ _Avoid_: final buy, overflow buy
 ### Graduation
 
 **Graduation**:
-The atomic transition from Curve to Pool: the Curve closes, the Pool is created and seeded, and the resulting liquidity position is locked forever. It either happens completely or not at all.
+The atomic transition from Curve to Pool: the Curve closes, the Pool is created and seeded, and the resulting liquidity position is locked. It either happens completely or not at all.
 _Avoid_: listing, migration, launch (a Launch is created, not graduated)
 
 **LP Lock**:

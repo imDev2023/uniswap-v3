@@ -55,6 +55,9 @@ export function CreatePage() {
           // The lock choice is not surfaced yet; #37 adds the control. Defaulting to false means the
           // standard 1-year lock, which is the reversible option - `true` is terminal.
           permanentLock: false,
+          // No dev allocation until #37 surfaces the control. Zero is the no-pre-mine case, so the
+          // launch a creator gets today is exactly the one they got before #34.
+          devAllocationBps: 0,
         },
       ],
       value: creationFee,
@@ -87,8 +90,8 @@ export function CreatePage() {
     <div style={{ maxWidth: 480, margin: '0 auto' }}>
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Launch a token</h1>
       <p className="muted" style={{ marginTop: 0, marginBottom: 24 }}>
-        Fixed 1B supply, no pre-mine, no upfront liquidity. It trades on a bonding curve and
-        graduates automatically into a locked Octopus pool.
+        Fixed 1B supply, zero protocol allocation, no upfront liquidity. It trades on a bonding
+        curve and graduates automatically into a locked Octopus pool.
       </p>
 
       <form className="card" onSubmit={onSubmit}>

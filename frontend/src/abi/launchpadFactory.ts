@@ -20,6 +20,10 @@ export const launchpadFactoryAbi = [
           // Lock the graduation LP forever instead of the default 1 year. Terminal: it can never be
           // walked back. The UI control for this lands in #37; v1 of the struct defaults it to false.
           { name: 'permanentLock', type: 'bool' },
+          // #34: the creator's free allocation, in bps of the curve supply, 0 to 500 (5%). Carved out
+          // of the curve allocation and vested linearly from graduation (#35). The UI control lands
+          // in #37; until then this is always 0, which is the no-pre-mine case.
+          { name: 'devAllocationBps', type: 'uint16' },
         ],
       },
     ],

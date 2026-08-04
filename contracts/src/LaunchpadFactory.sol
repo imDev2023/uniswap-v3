@@ -33,6 +33,11 @@ struct LaunchParams {
     /// @notice Lock the graduation LP permanently instead of for `defaultLockDuration`. Terminal:
     ///         a permanent lock can never be reclaimed, and `extend` cannot walk it back.
     bool permanentLock;
+    /// @notice Creator's free token allocation, in bps of `CURVE_SUPPLY`, 0 to `maxDevAllocationBps`
+    ///         (#34). Carved OUT of the curve allocation, never out of the 200M graduation reserve,
+    ///         so the pool is never thinned and `FDV/raise` is untouched. Vested linearly from
+    ///         graduation by #35; until then the tokens sit custodied in this factory.
+    uint16 devAllocationBps;
 }
 
 /// @notice The lock terms frozen into a launch at creation and consumed at graduation (#33).
@@ -49,10 +54,11 @@ struct LaunchLockConfig {
 
 /// @notice Entry point for creating a token launch.
 /// @dev Build 02 (#13): deploys a fixed-supply immutable LaunchToken and collects the
-///      creation fee. The full 1B supply is minted to this factory as custodian — no
-///      pre-mine to the creator (fair launch, decision #5). Build 03/04 route the 800M
-///      curve allocation to a bonding curve; Build 05 (#16) escrows the 200M graduation
+///      creation fee. The full 1B supply is minted to this factory as custodian. Build 03/04
+///      route the curve allocation to a bonding curve; Build 05 (#16) escrows the 200M graduation
 ///      reserve in the GraduationManager and wires each curve to it for atomic graduation.
+///      ⚠️ Build #34 ended the "no pre-mine" property: a creator may take 0-5% of the curve supply
+///      as a free, vesting dev allocation. The PROTOCOL allocation is still zero (decision #5).
 ///      Fee/treasury are owner-adjustable and apply only to FUTURE launches (decision #9).
 ///      Build 07 (#18): ownership is `Ownable2Step`, so control is handed to a Safe multisig
 ///      via a two-step transfer+accept (a mistyped owner can never brick the launchpad), and the
@@ -66,22 +72,72 @@ contract LaunchpadFactory is Ownable2Step {
     uint256 public constant CURVE_SUPPLY = 800_000_000e18;
     uint256 public constant GRADUATION_RESERVE = 200_000_000e18;
 
-    /// @notice Default virtual reserves for new curves, calibrated for graduation (#16).
-    ///         V_token = CURVE_SUPPLY^2 / (CURVE_SUPPLY - GRADUATION_RESERVE) so that when the
-    ///         800M allocation sells out, 100% of the raised ETH divided by the 200M reserve
-    ///         equals the curve's final marginal price — i.e. the pool seeds at exactly the
-    ///         curve's final price with no leftover reserves (price continuity, decision #6).
-    ///         With V_eth = 30 ether this puts the graduation threshold at 90 ETH raised.
-    uint256 public constant DEFAULT_VIRTUAL_ETH_RESERVE = 30 ether;
+    /// @notice The curve calibration at a ZERO dev allocation (#16).
+    ///
+    ///         ⚠️ `DEFAULT_VIRTUAL_ETH_RESERVE` is live: it is the owner-tunable `virtualEthReserve`'s
+    ///         initial value and the base every per-launch solve rescales from.
+    ///         ⚠️ `DEFAULT_VIRTUAL_TOKEN_RESERVE` is NOT live and is no longer a default anything.
+    ///         Since #34 `_solveCalibration` derives `V_tok` per launch and never reads this constant.
+    ///         It is retained as the published calibration anchor: it is the exact value the solve
+    ///         must still return at `devAllocationBps == 0`, which
+    ///         `test_Calibration_ReproducesTheConstantsAtZeroDev` pins bit-for-bit, and it is the
+    ///         pinned value `test_PriceContinuity_BreaksIfVirtualTokenIsPinned` proves is WRONG for
+    ///         any carved launch. Do not reintroduce it into a calibration path.
+    ///
+    ///         Writing `C` for a launch's curve allocation and `G` for `GRADUATION_RESERVE`, price
+    ///         continuity (decision #6) requires `V_tok = C^2 / (C - G)`: when `C` sells out, the
+    ///         raised ETH divided by the 200M reserve equals the curve's final marginal price, so the
+    ///         pool seeds at exactly the price the curve closed at, with no leftover reserves and no
+    ///         arbitrage gift to the first swapper.
+    ///
+    ///         ⚠️ `V_tok` depends on `C`, so it is NOT a constant once a dev allocation exists. Left
+    ///         pinned at the 800M value while `C` carves to 760M, the pool opens 9.25% above the
+    ///         curve's last price and the raise lands 1.15 ETH short of target. See `docs/tokenomics.md`.
+    uint256 public constant DEFAULT_VIRTUAL_ETH_RESERVE = uint256(10 ether) / 3;
     uint256 public constant DEFAULT_VIRTUAL_TOKEN_RESERVE = 1_066_666_666_666_666_666_666_666_666; // 800M^2 / 600M
+
+    /// @notice Ceiling on the owner-tunable `virtualEthReserve`. 1e6 ETH of virtual reserve is a
+    ///         3e6 ETH graduation target: absurd, but finite.
+    /// @dev ⚠️ **This is a policy bound, not an overflow fix, and the distinction is honest.** An
+    ///      overflow does exist - `_solveCalibration` multiplies `virtualEthReserve` by
+    ///      600M-with-18-decimals and `BondingCurve` multiplies it again into `k = V_eth * V_tok`,
+    ///      both checked, so a large enough value would revert `createLaunch` for every launch made
+    ///      under that config. But it sits ~26 orders of magnitude above this ceiling, so no plausible
+    ///      value reaches it and calling this bound an overflow guard would overstate it.
+    ///
+    ///      What it actually buys is that `virtualEthReserve` had NO upper bound at all, in the same
+    ///      contract where `MAX_TRADE_FEE_BPS` and `MAX_LOCK_DURATION` exist precisely so an owner
+    ///      param cannot be set to a value that makes the product unusable. This closes that gap by
+    ///      symmetry with its neighbours, not because an exploit was found.
+    ///      ⚠️ Added in #34, outside the ticket's stated scope. Recorded in `docs/tokenomics.md`
+    ///      under "Amendments made during implementation".
+    uint256 public constant MAX_VIRTUAL_ETH_RESERVE = 1_000_000 ether;
 
     /// @notice Default curve trade fee, 1% (decision #5). Passed to each curve at creation.
     uint16 public constant DEFAULT_TRADE_FEE_BPS = 100;
 
     /// @notice Anti-snipe defaults (decision #7): per-wallet cap = 1% of the 800M curve
     ///         allocation, in force until 15% of the curve has sold, then auto-lifts.
+    /// @dev ⚠️ Both are SHARES of `CURVE_SUPPLY`, not absolute token counts, and `_curveConfigFor`
+    ///      rescales them by `C / CURVE_SUPPLY` so the documented "1%" and "15%" hold for every
+    ///      launch whatever its dev allocation (#34).
+    ///
+    ///      Rescaling rather than clamping is deliberate. A threshold above a launch's own `C` is
+    ///      unreachable, so `tokensSold` never crosses it and the per-wallet cap **never lifts** for
+    ///      the entire life of that curve - and clamping to `C` reproduces exactly that state, since
+    ///      `buyCapActive()` is `tokensSold < antiSnipeThreshold` and sellout is `tokensSold == C`.
+    ///      `AntiSnipe.t.sol` deploys `threshold == ALLOC` precisely to mean "window covers the whole
+    ///      curve". Scaling makes the unreachable case impossible by construction instead.
     uint256 public constant DEFAULT_MAX_BUY_PER_WALLET = 8_000_000e18; // 1% of 800M
     uint256 public constant DEFAULT_ANTI_SNIPE_THRESHOLD = 120_000_000e18; // 15% of 800M
+
+    /// @notice Ceiling on the creator-selectable dev allocation: 5% of the curve supply (decision #2).
+    ///         Free, carved out of `C`, and vested linearly from graduation by #35's vault.
+    /// @dev ⚠️ This is a PRE-MINE and it retires the "no pre-mine" claim. The *protocol* allocation
+    ///      stays zero (decision #5). Reversible on testnet by setting `maxDevAllocationBps` to 0.
+    uint16 public constant MAX_DEV_ALLOCATION_BPS = 500; // 5%
+
+    uint256 internal constant BPS = 10_000;
 
     /// @notice Ceiling on the owner-tunable curve trade fee: 10% (1000 bps). A generous but finite
     ///         cap so a param change can never brick a launch or gouge traders (#18).
@@ -140,8 +196,9 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice Owner-tunable curve defaults applied to FUTURE launches (#18). These bind at the
     ///         moment `createLaunch` runs and are then frozen into that curve's immutables, so an
     ///         in-flight launch is never affected by a later change. `virtualTokenReserve` is
-    ///         deliberately NOT tunable: it stays calibration-locked to `DEFAULT_VIRTUAL_TOKEN_RESERVE`
-    ///         so graduation price continuity (#16) holds for any `virtualEthReserve`.
+    ///         deliberately NOT tunable: since #34 it is DERIVED per launch as `C^2 / (C - G)`, which
+    ///         is what makes graduation price continuity (#16) hold for any `virtualEthReserve` AND
+    ///         any dev allocation. An owner-settable `V_tok` could break that invariant directly.
     uint256 public virtualEthReserve = DEFAULT_VIRTUAL_ETH_RESERVE;
     uint16 public tradeFeeBps = DEFAULT_TRADE_FEE_BPS;
     uint256 public maxBuyPerWallet = DEFAULT_MAX_BUY_PER_WALLET;
@@ -159,10 +216,21 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice token => the LP lock terms frozen at its creation, consumed by the GraduationManager.
     mapping(address => LaunchLockConfig) public lockConfigOf;
 
+    /// @notice token => the creator's dev allocation in tokens, carved out of the curve supply (#34).
+    /// @dev Zero for a launch that chose no allocation, and zero for any token this factory did not
+    ///      launch - so it is never on its own a proof of anything. `curveOf(token) != 0` is the
+    ///      identity check (ADR-0003). These tokens are custodied by this factory until #35's vesting
+    ///      vault claims them; this mapping is how the vault will find them.
+    mapping(address => uint256) public devAllocationOf;
+
     /// @notice Owner-tunable lock defaults applied to FUTURE launches (#33), frozen per launch at
     ///         `createLaunch` exactly like the curve params above.
     uint64 public defaultLockDuration = DEFAULT_LOCK_DURATION;
     uint16 public creatorFeeBps = DEFAULT_CREATOR_FEE_BPS;
+
+    /// @notice Owner-tunable ceiling on the creator-selectable dev allocation, applied to FUTURE
+    ///         launches (#34). Setting it to 0 turns the pre-mine off entirely without a redeploy.
+    uint16 public maxDevAllocationBps = MAX_DEV_ALLOCATION_BPS;
 
     /// @notice A new launch.
     /// @dev Build 11 (#24) widened this event to be self-sufficient: it carries the metadata URI plus
@@ -203,6 +271,7 @@ contract LaunchpadFactory is Ownable2Step {
         uint256 virtualEthReserve, uint16 tradeFeeBps, uint256 maxBuyPerWallet, uint256 antiSnipeThreshold
     );
     event LockParamsUpdated(uint64 defaultLockDuration, uint16 creatorFeeBps);
+    event MaxDevAllocationUpdated(uint16 oldMaxBps, uint16 newMaxBps);
 
     error InsufficientCreationFee(uint256 sent, uint256 required);
     error ZeroTreasury();
@@ -212,6 +281,7 @@ contract LaunchpadFactory is Ownable2Step {
     error InvalidProtocolFee(uint8 value);
     error InvalidCurveParams();
     error InvalidLockParams();
+    error InvalidDevAllocation();
 
     /// @param positionManager The platform's own V3 NonfungiblePositionManager (decision #4).
     /// @param v3Factory_ The platform's own V3 factory; ownership is transferred to this launchpad
@@ -242,6 +312,93 @@ contract LaunchpadFactory is Ownable2Step {
         return launches.length;
     }
 
+    /// @notice Preview the curve calibration a launch would get for a given dev allocation, under
+    ///         the params in force right now. Lets the create form show the real numbers before the
+    ///         creator commits, and lets a caller verify the solve without simulating `createLaunch`.
+    /// @dev Reads the same private solve `createLaunch` uses, so a preview and the launch it previews
+    ///      cannot disagree. It also REVERTS on an allocation `createLaunch` would reject, rather than
+    ///      returning a plausible calibration nobody can actually get. Still only a preview: the owner
+    ///      may retune between the two calls, exactly as with every other future-only param.
+    function curveCalibrationFor(uint16 devAllocationBps_)
+        external
+        view
+        returns (uint256 devAllocation, uint256 curveAllocation, uint256 virtualEth, uint256 virtualToken)
+    {
+        (curveAllocation, virtualEth, virtualToken) = _solveCalibration(devAllocationBps_);
+        devAllocation = CURVE_SUPPLY - curveAllocation;
+    }
+
+    /// @dev The calibration solve, and the single place the dev allocation is bounds-checked.
+    ///
+    ///      Writing `C` for the curve allocation and `G` for `GRADUATION_RESERVE`:
+    ///
+    ///        V_tok = C^2 / (C - G)                          price continuity (decision #6)
+    ///        V_eth = target * G / (C - G)                   holds the graduation target
+    ///
+    ///      `virtualEthReserve` stores `V_eth` at a ZERO dev allocation, so rather than reconstruct
+    ///      `target` (a second division, a second truncation) we rescale it directly by the identity
+    ///      `V_eth(C) = V_eth(CURVE_SUPPLY) * (CURVE_SUPPLY - G) / (C - G)`, which is the same
+    ///      expression with `target` cancelled out. Multiply-before-divide throughout, so each value
+    ///      truncates exactly once and no division ever precedes a multiplication.
+    ///
+    ///      ⚠️ Because the stored `V_eth` is ITSELF a truncated value (`10 ether / 3`), the rescale
+    ///      can land one wei below the exact solve - it does so at 3%, and nowhere else in 0..5%.
+    ///      Three wei on a 10 ETH target. Route (A) was settled on the stored-`V_eth` shape and the
+    ///      one-wei table row in `docs/tokenomics.md` is corrected to match this code rather than
+    ///      the code bent to match the table.
+    ///
+    ///      ⚠️ The bound is checked HERE, not at the call sites, so the `unchecked` block below is
+    ///      provable from this function alone. Moving the check outward would make the safety of
+    ///      these subtractions depend on every caller remembering to do it first.
+    function _solveCalibration(uint16 devAllocationBps_)
+        private
+        view
+        returns (uint256 curveAllocation, uint256 virtualEth, uint256 virtualToken)
+    {
+        if (devAllocationBps_ > maxDevAllocationBps) revert InvalidDevAllocation();
+
+        // `maxDevAllocationBps <= MAX_DEV_ALLOCATION_BPS` (500), enforced by `setMaxDevAllocationBps`
+        // and by the initializer, so the product is at most 5% of CURVE_SUPPLY and `curveAllocation`
+        // lands in [760M, 800M]. Both subtractions are therefore structurally underflow-free against
+        // a 200M `GRADUATION_RESERVE`, which is what makes eliding the checks safe rather than merely
+        // cheap. Solidity 0.8 checked arithmetic still guards every other line in this contract.
+        unchecked {
+            curveAllocation = CURVE_SUPPLY - (CURVE_SUPPLY * devAllocationBps_) / BPS;
+            uint256 denom = curveAllocation - GRADUATION_RESERVE;
+            virtualEth = (virtualEthReserve * (CURVE_SUPPLY - GRADUATION_RESERVE)) / denom;
+            virtualToken = (curveAllocation * curveAllocation) / denom;
+        }
+    }
+
+    /// @dev Wraps `_solveCalibration` into the full `CurveConfig` a curve is constructed from. Split
+    ///      out of `createLaunch` for the same stack reason `_emitLaunchCreated` exists.
+    function _curveConfigFor(address token, uint16 devAllocationBps_)
+        private
+        view
+        returns (CurveConfig memory cfg)
+    {
+        (uint256 curveAllocation, uint256 virtualEth, uint256 virtualToken) =
+            _solveCalibration(devAllocationBps_);
+
+        // The anti-snipe params are shares of CURVE_SUPPLY; rescale them onto this launch's own `C`
+        // so "1% of the curve" and "15% of the curve" stay true. The floor cannot reach zero for any
+        // sane cap, but a cap small enough to floor to zero would trip BondingCurve's
+        // `maxBuyPerWallet > 0` require and brick the launch, so it is floored at one wei.
+        uint256 cap = (maxBuyPerWallet * curveAllocation) / CURVE_SUPPLY;
+
+        cfg = CurveConfig({
+            token: IERC20(token),
+            treasury: treasury,
+            graduationManager: address(graduationManager),
+            virtualEthReserve: virtualEth,
+            virtualTokenReserve: virtualToken,
+            curveTokenAllocation: curveAllocation,
+            tradeFeeBps: tradeFeeBps,
+            maxBuyPerWallet: cap == 0 ? 1 : cap,
+            antiSnipeThreshold: (antiSnipeThreshold * curveAllocation) / CURVE_SUPPLY
+        });
+    }
+
     /// @notice Create a new token launch. The caller pays at least `creationFee`; any
     ///         excess is refunded. The full fixed supply is minted to this factory.
     /// @param p The creator's choices for this launch. `p.metadataURI` is the URI of the token's
@@ -255,6 +412,10 @@ contract LaunchpadFactory is Ownable2Step {
     function createLaunch(LaunchParams calldata p) external payable returns (address token) {
         uint256 fee = creationFee;
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
+        // The dev allocation is bounds-checked inside `_solveCalibration`, deliberately NOT duplicated
+        // here. A second copy of the bound is a second thing that can drift, and hoisting the solve
+        // above the token deploy to fail earlier would push three more locals onto a frame that is
+        // already at the EVM's 16-slot reachable limit (see `_emitLaunchCreated`).
 
         token = address(new LaunchToken(p.name, p.symbol, p.metadataURI, address(this)));
 
@@ -271,26 +432,20 @@ contract LaunchpadFactory is Ownable2Step {
         // re-reading storage for the event) makes it structurally impossible for the emitted params
         // to disagree with the curve's immutables — there is only one read of each storage slot.
         // It also keeps `createLaunch` under the stack limit.
-        CurveConfig memory cfg = CurveConfig({
-            token: IERC20(token),
-            treasury: treasury,
-            graduationManager: address(graduationManager),
-            virtualEthReserve: virtualEthReserve,
-            virtualTokenReserve: DEFAULT_VIRTUAL_TOKEN_RESERVE,
-            curveTokenAllocation: CURVE_SUPPLY,
-            tradeFeeBps: tradeFeeBps,
-            maxBuyPerWallet: maxBuyPerWallet,
-            antiSnipeThreshold: antiSnipeThreshold
-        });
+        CurveConfig memory cfg = _curveConfigFor(token, p.devAllocationBps);
         address curve = address(new BondingCurve(cfg));
         // Register the curve before moving tokens so the GraduationManager can authorize it.
         launches.push(token);
         creatorOf[token] = msg.sender;
         curveOf[token] = curve;
+        devAllocationOf[token] = CURVE_SUPPLY - cfg.curveTokenAllocation;
 
-        // 80% goes to the curve for sale; the 20% graduation reserve is escrowed in the
-        // GraduationManager, which seeds it into the pool at graduation (#16).
-        IERC20(token).safeTransfer(curve, CURVE_SUPPLY);
+        // The curve allocation (80% less any dev carve) goes to the curve for sale; the 20%
+        // graduation reserve is escrowed in the GraduationManager, which seeds it into the pool at
+        // graduation (#16). The dev allocation is the remainder and stays custodied HERE, with no
+        // withdrawal path, until #35's vesting vault claims it - deliberately unreachable rather
+        // than parked at an address that could move it before graduation.
+        IERC20(token).safeTransfer(curve, cfg.curveTokenAllocation);
         IERC20(token).safeTransfer(address(graduationManager), GRADUATION_RESERVE);
 
         _emitLaunchCreated(curve, LaunchStrings(p.name, p.symbol, p.metadataURI), cfg);
@@ -344,8 +499,9 @@ contract LaunchpadFactory is Ownable2Step {
 
     /// @notice Retune the curve defaults for FUTURE launches (#18). Validation mirrors BondingCurve's
     ///         constructor invariants so a launch can never be bricked by a param change, and clamps the
-    ///         trade fee to a sane ceiling. `virtualTokenReserve` is intentionally not exposed — it stays
-    ///         calibration-locked so graduation price continuity (#16) holds for any `virtualEthReserve`.
+    ///         trade fee to a sane ceiling. `virtualTokenReserve` is intentionally not exposed: it is
+    ///         derived per launch from that launch's curve allocation, so price continuity (#16) holds
+    ///         for any `virtualEthReserve` and any dev allocation.
     ///         In-flight launches already froze their params into curve immutables and are untouched.
     function setCurveParams(
         uint256 virtualEthReserve_,
@@ -353,10 +509,16 @@ contract LaunchpadFactory is Ownable2Step {
         uint256 maxBuyPerWallet_,
         uint256 antiSnipeThreshold_
     ) external onlyOwner {
-        if (virtualEthReserve_ == 0) revert InvalidCurveParams();
+        if (virtualEthReserve_ == 0 || virtualEthReserve_ > MAX_VIRTUAL_ETH_RESERVE) revert InvalidCurveParams();
         if (tradeFeeBps_ > MAX_TRADE_FEE_BPS) revert InvalidCurveParams();
         if (maxBuyPerWallet_ == 0) revert InvalidCurveParams();
-        if (antiSnipeThreshold_ > CURVE_SUPPLY) revert InvalidCurveParams();
+        // ⚠️ Strictly less than, not `<=`. A threshold equal to the curve supply is UNREACHABLE:
+        // `buyCapActive()` is `tokensSold < antiSnipeThreshold` and sellout is `tokensSold == C`, so
+        // the per-wallet cap would bind for the entire life of every future curve. Rescaling onto a
+        // launch's own `C` does not save it either, since `T == CURVE_SUPPLY` scales to exactly `C`.
+        // `T < CURVE_SUPPLY` scales to strictly below `C`, so the lift is always reachable.
+        // Pre-existing footgun, tightened in #34 because the same line now feeds the rescale.
+        if (antiSnipeThreshold_ >= CURVE_SUPPLY) revert InvalidCurveParams();
         virtualEthReserve = virtualEthReserve_;
         tradeFeeBps = tradeFeeBps_;
         maxBuyPerWallet = maxBuyPerWallet_;
@@ -378,6 +540,19 @@ contract LaunchpadFactory is Ownable2Step {
         defaultLockDuration = lockDuration_;
         creatorFeeBps = creatorFeeBps_;
         emit LockParamsUpdated(lockDuration_, creatorFeeBps_);
+    }
+
+    /// @notice Retune the ceiling on the creator-selectable dev allocation, for FUTURE launches (#34).
+    ///         Existing launches carved their allocation at creation and are untouched, including
+    ///         ones still on the curve - lowering this never claws back an allocation already made.
+    /// @dev Bounded by the hard `MAX_DEV_ALLOCATION_BPS` constant rather than left open: the solve
+    ///      needs `C > GRADUATION_RESERVE`, and `V_tok = C^2 / (C - G)` diverges as `C` approaches
+    ///      `G`. 5% keeps `C` at 760M against a 200M reserve, nowhere near it. Zero is valid and is
+    ///      the documented way to turn the pre-mine off without a redeploy.
+    function setMaxDevAllocationBps(uint16 maxDevAllocationBps_) external onlyOwner {
+        if (maxDevAllocationBps_ > MAX_DEV_ALLOCATION_BPS) revert InvalidDevAllocation();
+        emit MaxDevAllocationUpdated(maxDevAllocationBps, maxDevAllocationBps_);
+        maxDevAllocationBps = maxDevAllocationBps_;
     }
 
     /// @notice Set the default protocol fee applied to FUTURE graduated pools. 0 = off, else 4..10.

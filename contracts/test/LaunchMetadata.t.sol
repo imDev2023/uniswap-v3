@@ -55,7 +55,7 @@ contract LaunchMetadataTest is Test {
 
     function _create(string memory uri) internal returns (address token) {
         vm.prank(creator);
-        token = factory.createLaunch{value: FEE}(LaunchParams("Doge Killer", "DOGEK", uri, false));
+        token = factory.createLaunch{value: FEE}(LaunchParams("Doge Killer", "DOGEK", uri, false, 0));
     }
 
     /// @dev Create a launch and decode the `LaunchCreated` log it emitted. This is deliberately
@@ -169,7 +169,7 @@ contract LaunchMetadataTest is Test {
 
         address a = _create(URI);
         vm.prank(creator);
-        address b = second.createLaunch{value: FEE}(LaunchParams("Second", "TWO", URI, false));
+        address b = second.createLaunch{value: FEE}(LaunchParams("Second", "TWO", URI, false, 0));
 
         assertEq(LaunchToken(a).launchpad(), address(factory));
         assertEq(LaunchToken(b).launchpad(), address(second));

@@ -25,6 +25,11 @@ export interface TokenRow {
   ethReserve: string
   tokenReserve: string
   tokensSold: string
+  /**
+   * This launch's own curve allocation. ⚠️ NOT the 800M constant since #34: a dev allocation carves
+   * it down to as little as 760M, so progress and share denominators must come from here per launch.
+   */
+  curveTokenAllocation: string
   priceX18: string
   progressBps: number
   volumeEth: string
@@ -107,6 +112,7 @@ const TOKEN_FIELDS = gql`
     ethReserve
     tokenReserve
     tokensSold
+    curveTokenAllocation
     priceX18
     progressBps
     volumeEth

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {CurveDriver} from "./CurveDriver.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
 import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve} from "../src/BondingCurve.sol";
@@ -32,7 +33,7 @@ interface ISwapRouter2 {
 /// @notice Build #33: per-position lock records, the 70/30 creator fee split, monotonic `extend`, and
 ///         the liveness-gated `reclaim`. Runs against a real Robinhood Chain fork with our own V3
 ///         deploy, so the liveness signal is read from a genuine pool oracle rather than a mock.
-contract LockReclaimTest is Test, V3Deployer {
+contract LockReclaimTest is Test, V3Deployer, CurveDriver {
     uint24 internal constant FEE_TIER = 10000;
     uint64 internal constant ONE_YEAR = 365 days;
     uint32 internal constant INACTIVITY = 180 days;
@@ -64,14 +65,9 @@ contract LockReclaimTest is Test, V3Deployer {
 
     function _graduate(bool permanent) internal returns (address token, address pool, uint256 tokenId) {
         vm.prank(creator);
-        token = factory.createLaunch(LaunchParams("Locked", "LOCK", "ipfs://QmTest", permanent));
+        token = factory.createLaunch(LaunchParams("Locked", "LOCK", "ipfs://QmTest", permanent, 0));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
-        for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
-            address filler = makeAddr(string(abi.encodePacked("filler", i)));
-            vm.deal(filler, 1 ether);
-            vm.prank(filler);
-            curve.buy{value: 0.15 ether}(0);
-        }
+        _liftAntiSnipe(curve, "lr");
         vm.deal(whale, 500 ether);
         vm.prank(whale);
         curve.buy{value: 300 ether}(0);
@@ -121,19 +117,14 @@ contract LockReclaimTest is Test, V3Deployer {
     ///      must not change a launch that is already live on the curve.
     function test_LockTerms_FrozenAtCreation_NotAtGraduation() public {
         vm.prank(creator);
-        address token = factory.createLaunch(LaunchParams("Frozen", "FRZ", "", false));
+        address token = factory.createLaunch(LaunchParams("Frozen", "FRZ", "", false, 0));
 
         // Owner retunes AFTER creation but BEFORE graduation.
         vm.prank(owner);
         factory.setLockParams(90 days, 1000);
 
         BondingCurve curve = BondingCurve(factory.curveOf(token));
-        for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
-            address filler = makeAddr(string(abi.encodePacked("f2_", i)));
-            vm.deal(filler, 1 ether);
-            vm.prank(filler);
-            curve.buy{value: 0.15 ether}(0);
-        }
+        _liftAntiSnipe(curve, "f2");
         vm.deal(whale, 500 ether);
         vm.prank(whale);
         curve.buy{value: 300 ether}(0);
@@ -365,14 +356,9 @@ contract LockReclaimTest is Test, V3Deployer {
         factory.setLockParams(maxDuration, 7000);
 
         vm.prank(creator);
-        address token = factory.createLaunch(LaunchParams("Long", "LONG", "", false));
+        address token = factory.createLaunch(LaunchParams("Long", "LONG", "", false, 0));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
-        for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
-            address filler = makeAddr(string(abi.encodePacked("f3_", i)));
-            vm.deal(filler, 1 ether);
-            vm.prank(filler);
-            curve.buy{value: 0.15 ether}(0);
-        }
+        _liftAntiSnipe(curve, "f3");
         vm.deal(whale, 500 ether);
         vm.prank(whale);
         curve.buy{value: 300 ether}(0); // must not revert

@@ -50,6 +50,12 @@ export function TokenPage() {
   // simply hasn't been indexed yet (launched seconds ago) is a normal, transient empty state.
   const indexedMissing = !token && isDegraded(indexer.state)
 
+  // This launch's own curve allocation (#34). ⚠️ Guarded rather than `BigInt(token.x)` directly:
+  // the row comes from the indexer, and an absent field would throw inside render and white-screen
+  // the whole route instead of degrading. `undefined` lets each consumer fall back to the 800M
+  // no-dev-allocation default, which is the correct value for every launch created without one.
+  const curveAllocation = token?.curveTokenAllocation ? BigInt(token.curveTokenAllocation) : undefined
+
   return (
     <div>
       <Link to="/" className="back-link">
@@ -95,6 +101,7 @@ export function TokenPage() {
                 <ProgressMeter
                   progressBps={token.progressBps}
                   tokensSold={BigInt(token.tokensSold)}
+                  curveAllocation={curveAllocation}
                 />
               </div>
             )}
@@ -124,7 +131,11 @@ export function TokenPage() {
               <IndexedDataNotice state={indexer.state} what="Holder table" />
             </div>
           ) : (
-            <HoldersCard holders={holders ?? []} creator={token?.creator} />
+            <HoldersCard
+              holders={holders ?? []}
+              creator={token?.creator}
+              curveAllocation={curveAllocation}
+            />
           )}
         </div>
 

@@ -40,7 +40,7 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
 
     function _create() internal returns (BondingCurve) {
         vm.prank(creator);
-        address token = factory.createLaunch(LaunchParams("Tok", "TOK", "ipfs://QmTestMetadata", false));
+        address token = factory.createLaunch(LaunchParams("Tok", "TOK", "ipfs://QmTestMetadata", false, 0));
         return BondingCurve(factory.curveOf(token));
     }
 
@@ -102,7 +102,10 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
         // Read getters up front: doing so inside an `expectRevert`-armed line would consume the
         // expectation on the view call instead of on setCurveParams.
         uint16 tooHighFee = factory.MAX_TRADE_FEE_BPS() + 1;
-        uint256 tooHighThreshold = factory.CURVE_SUPPLY() + 1;
+        // Exactly CURVE_SUPPLY is itself too high (#34): the anti-snipe window could never lift,
+        // because `buyCapActive()` is `tokensSold < threshold` and sellout is `tokensSold == C`.
+        uint256 tooHighThreshold = factory.CURVE_SUPPLY();
+        uint256 tooHighVirtualEth = factory.MAX_VIRTUAL_ETH_RESERVE() + 1;
 
         vm.startPrank(owner);
         // virtualEthReserve == 0
@@ -114,10 +117,23 @@ contract OwnershipAndParamsTest is Test, V3Deployer {
         // maxBuyPerWallet == 0
         vm.expectRevert(LaunchpadFactory.InvalidCurveParams.selector);
         factory.setCurveParams(30 ether, 100, 0, 120_000_000e18);
-        // antiSnipeThreshold > CURVE_SUPPLY
+        // antiSnipeThreshold >= CURVE_SUPPLY
         vm.expectRevert(LaunchpadFactory.InvalidCurveParams.selector);
         factory.setCurveParams(30 ether, 100, 8_000_000e18, tooHighThreshold);
+        // virtualEthReserve > MAX_VIRTUAL_ETH_RESERVE, which would overflow the per-launch solve
+        vm.expectRevert(LaunchpadFactory.InvalidCurveParams.selector);
+        factory.setCurveParams(tooHighVirtualEth, 100, 8_000_000e18, 120_000_000e18);
         vm.stopPrank();
+
+        // ⚠️ And the values just INSIDE each bound still work - a revert-only test would pass just
+        // as happily against a bound that bricks the product.
+        uint256 maxVEth = factory.MAX_VIRTUAL_ETH_RESERVE();
+        uint16 maxFee = factory.MAX_TRADE_FEE_BPS();
+        uint256 maxThreshold = factory.CURVE_SUPPLY() - 1;
+        vm.prank(owner);
+        factory.setCurveParams(maxVEth, maxFee, 1, maxThreshold);
+        assertEq(factory.antiSnipeThreshold(), maxThreshold, "threshold at its ceiling accepted");
+        assertEq(factory.virtualEthReserve(), maxVEth, "virtualEthReserve at its ceiling accepted");
     }
 
     function test_SetCurveParams_EmitsAndStores() public {

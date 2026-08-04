@@ -21,6 +21,7 @@ Everything here links to where the detail actually lives. Do not restate those d
 | Managed-host + create-flow probe | [`docs/de-risking-probe.md`](docs/de-risking-probe.md) |
 | Auditor hand-off brief | [`docs/audit-scope.md`](docs/audit-scope.md) |
 | Deploy runbook | [`docs/deploy.md`](docs/deploy.md) |
+| Driving a real MetaMask from `agent-browser` | [`docs/metamask-agent-browser.md`](docs/metamask-agent-browser.md) - untracked; needed to test the wallet-connected UI |
 | Indexer runbook, reorg recovery | [`subgraph/README.md`](subgraph/README.md) |
 | Issue tracker / triage / domain workflow | [`docs/agents/`](docs/agents/) |
 
@@ -34,37 +35,32 @@ Builds #12-#32 are merged; #26-#29 were scoped in-session and have no issues of 
 
 ## Current state
 
-🔴 **Contracts are NOT frozen.** The freeze ended 2026-08-02 on purpose: the tokenomics program changes the data shape deliberately, and the contracts are still unaudited, which makes this the cheapest moment.
+🔴 **Contracts are NOT frozen** (ended 2026-08-02, deliberately) and 🔴 **the deployed ones no longer match [`docs/tokenomics.md`](docs/tokenomics.md).**
+The pre-tokenomics build is done and validated on testnet 46630; Stages 3 and 4 have the open items listed below.
 
-**The full pre-tokenomics build is done and validated on testnet 46630.** Stages 1 and 2 closed; Stage 3 (frontend) and Stage 4 (infra) are partly done with the open items listed below.
-🔴 **The deployed contracts no longer match [`docs/tokenomics.md`](docs/tokenomics.md).**
-
-**Suites** (verify, do not trust): contracts `forge test`, matchstick `cd subgraph && npm test`, frontend `cd frontend && npm test` plus `tsc -b` and `vite build`.
+**Suites** (verify, do not trust): `forge test`, `cd subgraph && npm test`, `cd frontend && npm test` plus `tsc -b` and `vite build`.
 
 ## Testnet 46630
 
-Addresses, the full launch table, curve calibration and restore commands are in [`docs/deployments-testnet.md`](docs/deployments-testnet.md).
-Factory `0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7`; deployer = SAFE = treasury `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C`; subgraph `startBlock` 94091260.
+Everything (addresses, launch table, calibration, restore commands) is in [`docs/deployments-testnet.md`](docs/deployments-testnet.md).
 
-⚠️ **All of it is about to become historical.** The tokenomics program requires a full redeploy: every address moves, `startBlock` moves, all three contracts need Blockscout re-verification, and the board needs re-seeding. Plan for it; do not discover it.
+⚠️ **It is all about to become historical.** #38 moves every address and the subgraph `startBlock`, needs all three contracts re-verified on Blockscout, and re-seeds the board. Plan for it; do not discover it.
+⚠️ **Only `CALIB` sits on the current 1 ETH calibration**; the other 16 froze at 0.1 ETH because `setCurveParams` is future-only, and six older launches are on a superseded factory.
 
-⚠️ **Only `CALIB` sits on the current 1 ETH calibration.** The other 16 launches froze at 0.1 ETH, because `setCurveParams` is future-only. Six older launches are on a superseded factory and are unreachable from the current one.
-
-⚠️ **Solidity constants still say 90 ETH.** `DEFAULT_VIRTUAL_ETH_RESERVE` is `30 ether`, so a mainnet deploy today lands at 90 ETH, not the agreed 10. Fixed in ticket #34 below.
 
 ---
 
 # 🔴 THE ACTIVE JOB: the tokenomics build program
 
-Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the lock's security-model change is [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md).
+Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the two property changes it forced are [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) (the lock is conditional) and [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) (the curve allocation is per launch, and it is a pre-mine).
 **Read the spec before touching any of this. Do not re-derive it and do not re-open the settled decisions.**
 
-Six tickets, roughly 7 days, **on top of** the remaining pre-tokenomics work below.
+Six tickets, **on top of** the remaining pre-tokenomics work below. Two done.
 
 | Ticket | Scope | State |
 | --- | --- | --- |
-| `build/33-lplock-lock-records` | Lock records, `origin` enum, monotonic `extend`, permanent sentinel, liveness-gated `reclaim`, 70/30 creator fee split, factory `lockConfigOf` | ⬅️ **built, reviewed, findings applied, UNCOMMITTED** |
-| `build/34-curve-carve` | Dev allocation carved from `C`, per-launch `virtualEthReserve` solve, route (A) constant, anti-snipe clamp | not started |
+| `build/33-lplock-lock-records` | see [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) | ✅ merged (`8e9af94`) |
+| `build/34-curve-carve` | Dev allocation carved from `C`, per-launch solve of **both** virtual reserves, route (A) constant, anti-snipe rescale | ⬅️ **built, reviewed, findings applied, UNCOMMITTED** |
 | `build/35-dev-vesting` | Vesting vault, linear from graduation, `claim()` | not started |
 | `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | not started |
 | `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock/vesting/reclaim state) | not started |
@@ -81,17 +77,16 @@ Full reasoning is in [`docs/tokenomics.md`](docs/tokenomics.md#settled-decisions
 3. **LP lock 1 year default**, creator may extend (monotonic), permanent selectable at creation.
 4. **`reclaim` permissionless**, requires expired AND no pool activity for >= 180 days. Tokens burned, WETH to treasury. Donation is off-chain with published proof, never an on-chain charity address.
 5. **Zero protocol token allocation.**
-6. **Anti-snipe unchanged**, retune from testnet feedback. The only item needing no contract change.
-7. **Target 10 ETH mainnet / 1 ETH testnet.**
-8. **Mainnet calibration route (A)**: `DEFAULT_VIRTUAL_ETH_RESERVE` becomes `uint256(10 ether) / 3`.
-9. **Reclaim inactivity period is monotonic** (lengthen only), settled 2026-08-02.
+6. **Anti-snipe levels unchanged**, retune from testnet feedback. ⚠️ It did NOT survive as "no contract change": #34 had to rescale both params onto each launch's own `C`. See amendment 4.
+7. **Target 10 ETH mainnet / 1 ETH testnet**, via route (A). Both shipped in #34.
+8. **Reclaim inactivity period is monotonic** (lengthen only).
 
 ### Constraints that must survive into the tickets
 
 - ⚠️ **Do NOT widen `LaunchCreated`.** It already carries 12 fields and `_emitLaunchCreated` exists *purely* because inlining it overflows the EVM's 16-slot reachable stack (`viaIR` was rejected as too disruptive). Emit a second `LaunchConfig` event instead.
 - ⚠️ **Beware the same-block dynamic data source.** Anything the factory triggers on the curve inside the creation tx fires before the `BondingCurve` template exists as an indexed source. graph-node 0.40.2's behaviour is **unverified** and we have no evidence on our own chain, because `SeedTestnet.s.sol` uses `--slow`. **Emit anything that matters from the FACTORY**, which is fixed-address and always indexing.
 - ⚠️ **`reclaim` must be structurally impossible for third-party positions.** A public LP-locking service for arbitrary pairs is on the roadmap, which would make `LPLock` a custodian of strangers' assets.
-- ⚠️ **`maxBuyPerWallet` is a share of tokens, not ETH.** The move from 90 to 10 ETH made the same 1% cap cost ~9x less, so the economic barrier to sniping fell by the same factor. Nothing was changed; flagged, not decided.
+- ⚠️ **`maxBuyPerWallet` is a share of tokens, not ETH**, so the 90→10 ETH move made the same 1% cap cost ~9x less. The sniping barrier fell by that factor and nothing has been decided about it. Open question for the testnet retune, with #34's rescale, in [`docs/tokenomics.md`](docs/tokenomics.md#amendments-made-during-implementation) amendment 4.
 
 ---
 
@@ -113,14 +108,14 @@ Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.m
 
 # Open decisions - ask, never assume
 
-- **Commit and push.** `#33` is complete but uncommitted; `main` is 3 commits ahead of `origin/main` from an earlier session. Pushing is a per-request action, not standing permission.
+- **Commit, merge and push.** `#34` is built and reviewed but UNCOMMITTED. `main` is 5 ahead of `origin/main`; nothing has been pushed this whole program. Each is a per-request action, not standing permission.
+- **Two security items raised in #34 and deliberately not actioned**: `pragma solidity ^0.8.24` floats repo-wide (Consensys says lock it; changing it moves bytecode, so do it before #38's redeploy or not at all), and `createLaunch` has no reentrancy guard despite refunding via `.call` (CEI holds and re-entry just buys another launch, so it was judged gas for no threat).
 - **Goldsky migration** is measured and proven but **not done** - a one-line `VITE_SUBGRAPH_URL` change. `octopus-probe/1.0.0` is live on the free tier: keep or delete?
 - **Alchemy paid tier?** The free tier's 10-block `eth_getLogs` cap is the only thing stopping one provider serving everything.
 - ⚠️ **[`docs/rpc-capability.md`](docs/rpc-capability.md) carries two numbers that later re-runs contradicted** (the 5,000-block consistent-depth figure, and `eth_getBlockReceipts` availability). Recording the correction was **declined once**. Re-offer; never silently fix.
 - **`QuoterV2.t.sol`'s `V3_FACTORY = 0x808088B7…`** appears nowhere in `docs/deployments-testnet.md` while claiming to run against "the genuinely deployed stack". Pre-existing and passing.
 - **Em-dash sweep** of existing repo prose: available on request, deliberately not done. New text uses plain hyphens.
 - **`lib/priceSeries.ts` documents one honesty limit deliberately UNFIXED**: resampling keeps the last price per bucket, so a fully-reversing move leaves no trace.
-- **`HomePage` still says "no pre-mine"** - true today, false the moment #34 lands. Fix it in #34, not before.
 
 # 🔭 Out of scope right now
 
@@ -139,6 +134,15 @@ Hard-won, mostly discovered by running something rather than reasoning about it.
 - **`assertGt(x, 0)` cannot see a diversion.** Diverting 70% of fees to a new address left the old test green, because the 30% remainder still satisfied it.
 - **`vm.prank` and `vm.expectRevert` apply to the NEXT call**, and a getter like `factory.MAX_LOCK_DURATION()` inline in the arguments *is* that next call. Hoist reads before the cheatcode. Hit twice in one file, after writing a comment warning about it.
 - **A revert-only test does not prove a bound is safe.** Test that the value AT the ceiling still works, or a clamp that bricks the product passes review.
+
+- **A test buy sized in ETH is coupled to the calibration.** Nine graduation tests opened with a hardcoded `buy{value: 0.15 ether}` per filler wallet, which sat under the 8M anti-snipe cap at 90 ETH and blew through it at 10 ETH - the same ETH buys ~9x the tokens. `test/CurveDriver.sol` now derives the size from the curve's own cap and reserves. Nobody thinks of a literal in a test setup as a test input.
+- ⚠️ **Editing the spec so it describes what you built is not a fix, it is a lost constraint.** #34 changed six things in `docs/tokenomics.md` and declared two. A code review caught it. Every implementation-time change to the spec now goes in its "Amendments made during implementation" table, marked in-scope or not, so it can be reverted deliberately.
+- **A number in a doc has no way to fail.** Four `virtualTokenReserve` values in the `docs/tokenomics.md` table were wrong when written, because they were reasoned out rather than computed. `Calibration.t.sol` now pins the whole published table against the contract.
+
+**Calibration**
+
+- ⚠️ **A value that has always been constant is the one you forget is a variable.** `V_tok = C^2/(C - G)` depends on the curve allocation, so it stopped being a constant the moment #34 carved `C` - yet the ticket scope named only `V_eth`. Pinned at 800M while `C` carves to 760M, the pool opens **9.25% above** the curve's close. `Calibration.t.sol` pins the failure mode.
+- **A clamp can reproduce the exact state it was meant to prevent.** `buyCapActive()` is `tokensSold < antiSnipeThreshold` and sellout is `tokensSold == C`, so clamping an unreachable threshold to `C` still never lifts the cap. Rescaling by `C / CURVE_SUPPLY` was the fix; `setCurveParams` now also rejects a threshold *equal to* `CURVE_SUPPLY`.
 
 **Enums, defaults and zero**
 

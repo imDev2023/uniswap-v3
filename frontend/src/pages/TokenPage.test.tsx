@@ -134,6 +134,8 @@ beforeEach(() => {
     sellCount: 1,
     progressBps: 9750,
     tokensSold: '780000000000000000000000000',
+    // Per launch since #34; this fixture is the no-dev-allocation case.
+    curveTokenAllocation: '800000000000000000000000000',
     graduation: { raisedEth: '100000000000000000' },
   })
   fetchTrades.mockResolvedValue(TRADES)

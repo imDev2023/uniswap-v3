@@ -23,6 +23,20 @@ describe('progressFraction', () => {
   it('clamps values beyond the allocation to 1', () => {
     expect(progressFraction(CURVE_SUPPLY * 2n)).toBe(1)
   })
+
+  // ⚠️ #34: a dev allocation carves the curve supply down per launch. A curve that sells out at
+  // 760M must read 100%, not 95% - the meter would otherwise never fill on any launch with a dev
+  // allocation, and would keep showing room to buy on a curve that has already graduated.
+  it('reaches 1 at a carved curve allocation, not only at the 800M constant', () => {
+    const carved = 760_000_000n * 10n ** 18n
+    expect(progressFraction(carved, carved)).toBe(1)
+    expect(progressFraction(carved)).toBeCloseTo(0.95, 4)
+    expect(progressFraction(carved / 2n, carved)).toBeCloseTo(0.5, 4)
+  })
+
+  it('treats a zero allocation as no progress rather than dividing by zero', () => {
+    expect(progressFraction(100n, 0n)).toBe(0)
+  })
 })
 
 describe('progressFractionFromBps', () => {
@@ -44,6 +58,11 @@ describe('tokensRemaining', () => {
   })
   it('never goes negative', () => {
     expect(tokensRemaining(CURVE_SUPPLY + 1n)).toBe(0n)
+  })
+  it('measures against a carved per-launch allocation (#34)', () => {
+    const carved = 760_000_000n * 10n ** 18n
+    expect(tokensRemaining(0n, carved)).toBe(carved)
+    expect(tokensRemaining(carved, carved)).toBe(0n)
   })
 })
 
@@ -81,5 +100,18 @@ describe('shareOfCurveSupply', () => {
   it('reports the fraction of the 800M curve supply held', () => {
     expect(shareOfCurveSupply(CURVE_SUPPLY / 100n)).toBeCloseTo(0.01, 5)
     expect(shareOfCurveSupply(0n)).toBe(0)
+  })
+
+  // Concentration is read by someone deciding whether to buy, so a denominator that is too large
+  // understates exactly the number they are checking.
+  it('uses the launch\'s own allocation, which understates concentration if left at 800M', () => {
+    const carved = 760_000_000n * 10n ** 18n
+    const balance = carved / 10n
+    expect(shareOfCurveSupply(balance, carved)).toBeCloseTo(0.1, 5)
+    expect(shareOfCurveSupply(balance)).toBeCloseTo(0.095, 5)
+  })
+
+  it('treats a zero allocation as zero share rather than dividing by zero', () => {
+    expect(shareOfCurveSupply(100n, 0n)).toBe(0)
   })
 })

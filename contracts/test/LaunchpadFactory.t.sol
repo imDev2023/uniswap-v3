@@ -47,7 +47,7 @@ contract LaunchpadFactoryTest is Test {
 
     function _create(uint256 value) internal returns (address token) {
         vm.prank(creator);
-        token = factory.createLaunch{value: value}(LaunchParams("Doge Killer", "DOGEK", URI, false));
+        token = factory.createLaunch{value: value}(LaunchParams("Doge Killer", "DOGEK", URI, false, 0));
     }
 
     function test_CreateLaunch_SplitsSupplyCurveAndReserve() public {
@@ -106,7 +106,7 @@ contract LaunchpadFactoryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE)
         );
-        factory.createLaunch{value: FEE - 1}(LaunchParams("X", "X", URI, false));
+        factory.createLaunch{value: FEE - 1}(LaunchParams("X", "X", URI, false, 0));
     }
 
     function test_EmitsLaunchCreated() public {
@@ -129,7 +129,7 @@ contract LaunchpadFactoryTest is Test {
             factory.DEFAULT_ANTI_SNIPE_THRESHOLD()
         );
         vm.prank(creator);
-        factory.createLaunch{value: FEE}(LaunchParams("Doge Killer", "DOGEK", URI, false));
+        factory.createLaunch{value: FEE}(LaunchParams("Doge Killer", "DOGEK", URI, false, 0));
     }
 
     function test_Registry_TracksLaunches() public {
@@ -166,7 +166,7 @@ contract LaunchpadFactoryTest is Test {
     function test_FreeCreation_WhenFeeZero() public {
         LaunchpadFactory freeFactory = new LaunchpadFactory(owner, treasury, 0, positionManager, v3Factory, weth9);
         vm.prank(creator);
-        address token = freeFactory.createLaunch{value: 0}(LaunchParams("Free", "FREE", URI, false));
+        address token = freeFactory.createLaunch{value: 0}(LaunchParams("Free", "FREE", URI, false, 0));
         assertEq(IERC20(token).totalSupply(), SUPPLY);
     }
 
@@ -198,7 +198,7 @@ contract LaunchpadFactoryTest is Test {
             forkFactory.DEFAULT_ANTI_SNIPE_THRESHOLD()
         );
         vm.prank(forkCreator);
-        address token = forkFactory.createLaunch{value: FEE}(LaunchParams("Fork Coin", "FORK", URI, false));
+        address token = forkFactory.createLaunch{value: FEE}(LaunchParams("Fork Coin", "FORK", URI, false, 0));
 
         assertEq(IERC20(token).totalSupply(), SUPPLY, "supply"); // supply
         (bool ok,) = token.call(abi.encodeWithSignature("mint(address,uint256)", forkCreator, 1e18));

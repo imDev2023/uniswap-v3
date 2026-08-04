@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
+import {CurveDriver} from "./CurveDriver.sol";
 import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
 import {BondingCurve, CurveConfig} from "../src/BondingCurve.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -9,7 +9,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockGraduationManager} from "./mocks/MockGraduationManager.sol";
 
 /// @notice Build 04 (#15): anti-snipe per-wallet cap over a progress-based window.
-contract AntiSnipeTest is Test {
+contract AntiSnipeTest is CurveDriver {
     uint256 internal constant V_ETH = 30 ether;
     uint256 internal constant V_TOK = 1_073_000_000e18;
     uint256 internal constant ALLOC = 800_000_000e18;
@@ -140,7 +140,7 @@ contract AntiSnipeTest is Test {
 
     function test_Factory_WiresAntiSnipeDefaults() public {
         LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, 0, positionManager, v3Factory, weth9);
-        address tok = f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false));
+        address tok = f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false, 0));
         BondingCurve c = BondingCurve(f.curveOf(tok));
         assertEq(c.maxBuyPerWallet(), 8_000_000e18, "1% of 800M");
         assertEq(c.antiSnipeThreshold(), 120_000_000e18, "15% of 800M");
@@ -151,7 +151,7 @@ contract AntiSnipeTest is Test {
     ///         the very first buyer on a factory-created curve can't grab more than the cap.
     function test_Factory_FirstBuyRespectsCap() public {
         LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, 0, positionManager, v3Factory, weth9);
-        BondingCurve c = BondingCurve(f.curveOf(f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false))));
+        BondingCurve c = BondingCurve(f.curveOf(f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false, 0))));
 
         vm.deal(buyerA, 100 ether);
         // A 1 ETH first buy would pull well over the 8M-token cap while the window is active.
@@ -161,11 +161,14 @@ contract AntiSnipeTest is Test {
         vm.expectRevert(abi.encodeWithSelector(BondingCurve.BuyCapExceeded.selector, quoted, c.maxBuyPerWallet()));
         c.buy{value: 1 ether}(0);
 
-        // A buy under the cap succeeds and is tracked.
-        (uint256 small,) = c.quoteBuy(0.1 ether);
+        // A buy under the cap succeeds and is tracked. The size is derived from the curve's own cap
+        // rather than hardcoded: at the pre-#34 90 ETH calibration 0.1 ether sat comfortably under
+        // the 8M cap, and at 10 ETH the same ETH buys ~30.7M and trips it.
+        uint256 underCap = _maxBuyUnderCap(c);
+        (uint256 small,) = c.quoteBuy(underCap);
         assertLt(small, c.maxBuyPerWallet(), "small first buy under cap");
         vm.prank(buyerA);
-        c.buy{value: 0.1 ether}(0);
+        c.buy{value: underCap}(0);
         assertEq(c.purchasedOf(buyerA), small, "first-buy purchase tracked");
     }
 }

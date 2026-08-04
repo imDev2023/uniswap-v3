@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {CurveDriver} from "./CurveDriver.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {V3Deployer} from "../src/periphery/V3Deployer.sol";
 import {LaunchpadFactory, LaunchParams} from "../src/LaunchpadFactory.sol";
@@ -16,7 +17,7 @@ import {ForkConfig} from "./ForkConfig.sol";
 ///         against a real Robinhood Chain (4663) fork with our OWN unmodified V3 deployment:
 ///         create → fill the curve (respecting the anti-snipe cap) → the threshold-crossing buy
 ///         atomically graduates into a seeded, full-range TOKEN/WETH pool — all in one transaction.
-contract GraduationTest is Test, V3Deployer {
+contract GraduationTest is Test, V3Deployer, CurveDriver {
     LaunchpadFactory internal factory;
     GraduationManager internal gm;
     address internal positionManager;
@@ -33,20 +34,8 @@ contract GraduationTest is Test, V3Deployer {
         gm = factory.graduationManager();
     }
 
-    /// @dev Push tokensSold past the anti-snipe window with capped per-wallet buys (a fresh wallet
-    ///      each iteration, each buying under the 8M cap), so the crossing buy can be uncapped.
-    function _fillWindow(BondingCurve curve) internal {
-        for (uint256 i = 0; i < 100 && curve.buyCapActive(); i++) {
-            address filler = makeAddr(string(abi.encodePacked("filler", i)));
-            vm.deal(filler, 1 ether);
-            vm.prank(filler);
-            curve.buy{value: 0.15 ether}(0);
-        }
-        assertFalse(curve.buyCapActive(), "anti-snipe window should have lifted");
-    }
-
     function test_FullLifecycle_AtomicGraduation() public {
-        address token = factory.createLaunch(LaunchParams("Graduate Me", "GRAD", "ipfs://QmTestMetadata", false));
+        address token = factory.createLaunch(LaunchParams("Graduate Me", "GRAD", "ipfs://QmTestMetadata", false, 0));
         BondingCurve curve = BondingCurve(factory.curveOf(token));
 
         // Anti-snipe holds on the real create-then-buy path: a whale can't seize > cap in the window.
@@ -56,7 +45,7 @@ contract GraduationTest is Test, V3Deployer {
         vm.expectRevert(abi.encodeWithSelector(BondingCurve.BuyCapExceeded.selector, big, curve.maxBuyPerWallet()));
         curve.buy{value: 1 ether}(0);
 
-        _fillWindow(curve);
+        _liftAntiSnipe(curve, "grad");
 
         // The crossing buy: whale overpays wildly; graduation must fire in THIS transaction.
         uint256 whaleBefore = whale.balance;
@@ -81,9 +70,12 @@ contract GraduationTest is Test, V3Deployer {
 
         uint256 poolToken = IERC20(token).balanceOf(pool);
         uint256 poolWeth = IERC20(Constants.WETH9).balanceOf(pool);
-        // 200M reserve + 100% of the 90 ETH raised seed the pool (no graduation fee in v1).
+        // 200M reserve + 100% of the 10 ETH raised seed the pool (no graduation fee in v1).
+        // 10 ETH, not 90: #34 re-calibrated `DEFAULT_VIRTUAL_ETH_RESERVE` to `uint256(10 ether) / 3`
+        // per settled decision 8. `Calibration.t.sol` pins the target exactly; this is the end-to-end
+        // check that what the curve raised is what actually landed in the pool.
         assertApproxEqRel(poolToken, factory.GRADUATION_RESERVE(), 1e15, "~200M tokens seeded");
-        assertApproxEqRel(poolWeth, 90 ether, 1e15, "~90 WETH seeded (100% of raised)");
+        assertApproxEqRel(poolWeth, 10 ether, 1e15, "~10 WETH seeded (100% of raised)");
 
         // --- Price continuity: the pool seeds at the curve's final marginal price ---
         uint256 curveFinalPrice = curve.priceX18(); // finalEthReserve/finalTokenReserve, 1e18-scaled

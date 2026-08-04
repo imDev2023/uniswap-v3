@@ -5,7 +5,9 @@ Figures are given at the **agreed 10 ETH mainnet graduation target**.
 
 ✅ **The tokenomics discussion opened on 2026-08-01 was completed on 2026-08-02.**
 Every decision is recorded under [Settled decisions](#settled-decisions).
-Nothing has been built yet: this document is the spec, not a description of the deployed system.
+⚠️ This document is the spec, not a description of the deployed system.
+Builds #33 (LP lock records) and #34 (curve carve) have since been implemented against it; #35-#38 have not.
+Where implementation forced a change to this document, it is recorded under [Amendments made during implementation](#amendments-made-during-implementation) rather than edited away.
 
 ⚠️ **The deployed contracts no longer match this document.**
 The settled decisions require contract changes, so the sections below describe the *intended* system.
@@ -113,21 +115,37 @@ Full table in `docs/deployments-testnet.md`.
 
 **Free, creator-selected from 0% to 5% of curve supply, carved out of the curve allocation, and vested linearly from graduation.**
 
-Carving it out of `C` (rather than out of the 200M pool reserve, which would thin the pool and move the FDV ratio) means `virtualEthReserve` must be **re-solved per launch** to hold the 10 ETH target:
+Carving it out of `C` (rather than out of the 200M pool reserve, which would thin the pool and move the FDV ratio) means **both virtual reserves must be re-solved per launch**:
 
-| dev | curve supply `C` | `virtualEthReserve` for a 10 ETH target | price multiple `(C/G)^2` | FDV/raise |
-| --- | --- | --- | --- | --- |
-| 0% | 800M | 3333333333333333333 | **16.00x** | 5.00x |
-| 1% | 792M | 3378378378378378378 | 15.68x | 5.00x |
-| 2% | 784M | 3424657534246575342 | 15.37x | 5.00x |
-| 3% | 776M | 3472222222222222222 | 15.05x | 5.00x |
-| 4% | 768M | 3521126760563380281 | 14.75x | 5.00x |
-| 5% | 760M | 3571428571428571428 | **14.44x** | 5.00x |
+```
+V_tok = C^2 / (C - G)        price continuity      <- depends on C
+V_eth = target * G / (C - G) holds the target      <- depends on C
+```
 
-Two consequences to design for:
+| dev | curve supply `C` | `virtualEthReserve` for a 10 ETH target | `virtualTokenReserve` | price multiple `(C/G)^2` | FDV/raise |
+| --- | --- | --- | --- | --- | --- |
+| 0% | 800M | 3333333333333333333 | 1066666666666666666666666666 | **16.00x** | 5.00x |
+| 1% | 792M | 3378378378378378378 | 1059567567567567567567567567 | 15.68x | 5.00x |
+| 2% | 784M | 3424657534246575342 | 1052493150684931506849315068 | 15.37x | 5.00x |
+| 3% | 776M | 3472222222222222**221** | 1045444444444444444444444444 | 15.05x | 5.00x |
+| 4% | 768M | 3521126760563380281 | 1038422535211267605633802816 | 14.75x | 5.00x |
+| 5% | 760M | 3571428571428571428 | 1031428571428571428571428571 | **14.44x** | 5.00x |
+
+⚠️ **The 3% row ends `...221`, not `...222`, and that is the code being right rather than the table.**
+Route (A) stores `V_eth` at a zero dev allocation as the already-truncated `uint256(10 ether) / 3`, and the per-launch rescale divides that truncated value again.
+At 3% the two truncations compose to land one wei below the exact solve, which is three wei on a 10 ETH target.
+It happens at 3% and nowhere else in 0-5%.
+Corrected here in #34 rather than bending the contract to reproduce a table.
+
+Three consequences to design for:
 
 1. **The 16x headline is dev-dependent.** It erodes to 14.44x at a 5% allocation. The FDV/raise ratio is untouched, because it depends only on `G`.
 2. **`virtualEthReserve` stops being a fixed owner default.** It becomes a per-launch computed value. It is already emitted in `LaunchCreated`, so consumers must read it per launch rather than assume the factory default. The frontend already does this.
+3. ⚠️ **So does `virtualTokenReserve`, and this one is easy to miss.**
+   It was a constant for the whole pre-tokenomics build and reads like one.
+   Left pinned at its 800M value while `C` carves to 760M, the pool opens **9.25% above** the curve's closing price and the raise lands at 8.85 ETH instead of 10 - the invariant broken, and an instant arbitrage gift to the first swapper.
+   It is likewise already emitted in `LaunchCreated`.
+   `contracts/test/Calibration.t.sol` pins this failure mode explicitly.
 
 ### Why it vests, and why from graduation
 
@@ -223,7 +241,18 @@ Defaults are `maxBuyPerWallet` 8M (1% of curve supply) and `antiSnipeThreshold` 
 | Minimum distinct wallets to traverse the window | **15** |
 
 ✅ **Settled: keep as-is and retune from testnet feedback.**
-Both values are already owner-tunable and future-only, so this is the only item on the list requiring no contract change at all.
+Both values are already owner-tunable and future-only.
+
+⚠️ **It did not survive as "no contract change at all".**
+The dev allocation makes `C` per-launch, and both defaults are documented as *shares of the curve allocation* ("1% of 800M", "15% of 800M").
+Held as absolute token counts they stop meaning that: at a 5% allocation the 120M threshold is 15.8% of a 760M curve, and an owner-set threshold anywhere in 760M-800M is simply **unreachable**, so `tokensSold` never crosses it and the per-wallet cap never lifts for the entire life of that curve.
+So #34 rescales both by `C / CURVE_SUPPLY` at creation.
+
+⚠️ **Clamping to `C` does not fix this, which is why it was not the fix.**
+`buyCapActive()` is `tokensSold < antiSnipeThreshold` and sellout is `tokensSold == C`, so a threshold clamped to exactly `C` reproduces the broken state precisely.
+`contracts/test/AntiSnipe.t.sol` constructs `threshold == ALLOC` deliberately, to mean "the window covers the whole curve".
+`setCurveParams` now also rejects a threshold **equal to** `CURVE_SUPPLY` rather than only one above it, because rescaling maps that value to exactly `C`.
+A pre-existing footgun, tightened in #34 because the same validation now feeds the rescale.
 
 ⚠️ Untested at this calibration.
 The friction only bites organic launches: a determined sniper simply uses 15 wallets.
@@ -291,11 +320,11 @@ Published research on pump.fun found only **~0.63%** of tokens graduate, so the 
 | --- | --- | --- |
 | `creationFee` | any | future launches |
 | `tradeFeeBps` | 0 to 10% | **future launches only** |
-| `virtualEthReserve` | any | future launches only |
-| `maxBuyPerWallet` / `antiSnipeThreshold` | see code | future launches only |
+| `virtualEthReserve` | 1 wei to `MAX_VIRTUAL_ETH_RESERVE` (1e6 ETH) | future launches only |
+| `maxBuyPerWallet` / `antiSnipeThreshold` | threshold strictly below `CURVE_SUPPLY`; both rescaled onto each launch's `C` | future launches only |
+| `maxDevAllocationBps` | 0 to `MAX_DEV_ALLOCATION_BPS` (500 = 5%) | future launches only |
 | default lock duration | 30 days to 100 years | future **launches** (frozen at `createLaunch`) |
 | inactivity period for reclaim | lengthen only | ⚠️ applies to existing locks, hence monotonic |
-| dev allocation bounds (0-5%) | any | future launches only |
 | vesting duration | any | future launches only |
 | `protocolFee` | 0, or 4 to 10 (25% down to 10%) | future graduations |
 | `setPoolProtocolFee` | per pool | ⚠️ **yes, retroactive on a live pool** |
@@ -449,6 +478,29 @@ Whether graph-node 0.40.2 matches it is unverified, and there is no evidence eit
 Emit anything that matters from the **factory**, which is a fixed-address source that is always indexing and cannot miss its own event.
 
 ---
+
+# Amendments made during implementation
+
+⚠️ **This section exists because a code review caught the alternative.**
+Build #34 changed six things in this document, and only two were declared at the time.
+Editing a spec so it describes what was built, without saying so, turns the spec into a record of the implementation instead of a constraint on it, and the difference is invisible a month later.
+Everything below is an amendment made by the implementer, listed so it can be accepted or reverted deliberately.
+
+| # | Amendment | Why | Status |
+| --- | --- | --- | --- |
+| 1 | The 3% `virtualEthReserve` row now ends `...221`, not `...222` | Route (A) stores an already-truncated `V_eth`, so the per-launch rescale truncates twice. Three wei on a 10 ETH target. | Declared at the time |
+| 2 | Added the `virtualTokenReserve` column, and consequence 3 | `V_tok = C^2/(C - G)` depends on `C`. The original text named only `V_eth` as per-launch, which would have broken the invariant by 9.25%. | Declared at the time |
+| 3 | Levers row: `virtualEthReserve` from `any` to `1 wei to MAX_VIRTUAL_ETH_RESERVE` | A new bound was added to `setCurveParams`. ⚠️ **A policy bound, not an overflow fix** - the real overflow sits ~26 orders of magnitude higher. It exists for symmetry with `MAX_TRADE_FEE_BPS` and `MAX_LOCK_DURATION`, not because an exploit was found. | ⚠️ **Undeclared, outside ticket scope.** Reverting is a one-line change |
+| 4 | Anti-snipe section: 12 new lines authorising rescale-over-clamp, and deletion of "the only item on the list requiring no contract change at all" | Settled decision 6 said "anti-snipe unchanged", and that turned out to be unachievable once `C` became per-launch: the defaults are documented as *shares* ("1% of 800M"), and a threshold at or above a launch's `C` never lifts the cap. | ⚠️ **Undeclared at the time.** The rescale itself was a user decision, taken over a clamp and a reject-at-validation option |
+| 5 | Levers row added: `maxDevAllocationBps` | New owner param required by decision 2. | In scope |
+| 6 | `setCurveParams` now rejects a threshold *equal to* `CURVE_SUPPLY`, not only above it | Rescaling maps `T == CURVE_SUPPLY` to exactly `C`, which is unreachable. Pre-existing footgun, tightened because the same validation now feeds the rescale. | ⚠️ Outside ticket scope |
+
+⚠️ **Amendment 4 has a known tension that is NOT resolved.**
+The unreachability argument justifies rescaling `antiSnipeThreshold`.
+It does **not** justify rescaling `maxBuyPerWallet`, which breaks nothing at an absolute 8M on a 760M curve (it is 1.05% rather than 1.00%).
+Rescaling both keeps the two params consistent with each other and with their documented meaning, at the cost of moving the cap's absolute level from 8M to 7.6M.
+Settled decision 6 says the anti-snipe values are unchanged; on a carved launch the level now moves.
+Recorded as a live question for the testnet retune, not as settled.
 
 # Roadmap items raised but deliberately not scoped
 

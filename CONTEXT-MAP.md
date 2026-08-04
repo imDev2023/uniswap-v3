@@ -18,6 +18,7 @@ Architectural decisions live in [`docs/adr/`](./docs/adr/). Read one before re-o
 - [0003](./docs/adr/0003-the-launchpad-is-the-root-of-identity.md) - ask the launchpad whether a token is its own; never trust a token's claim about its launchpad.
 - [0004](./docs/adr/0004-managed-subgraph-hosting-on-goldsky.md) - Indexing is hosted, not self-run.
 - [0005](./docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) - ⚠️ the LP lock is no longer permanent. It is 1 year by default and reclaimable once expired **and** the pool has gone quiet. Supersedes the permanent-custody property that `contracts/CONTEXT.md` used to assert.
+- [0006](./docs/adr/0006-the-curve-allocation-is-per-launch.md) - ⚠️ the curve allocation is per Launch (760M-800M), not the 800M constant, and the carve is a pre-mine. Both virtual reserves are re-solved per launch; anything dividing by 800M is now wrong.
 
 ## Relationships
 

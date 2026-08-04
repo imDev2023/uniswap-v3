@@ -116,7 +116,9 @@ contract SeedTestnet is Script {
         // start/stopBroadcast rather than a bare broadcast: forge forbids view calls after a
         // one-shot `broadcast`, and this script has to read curve state between every transaction.
         vm.startBroadcast(creatorKey);
-        address token = launchpad.createLaunch{value: fee}(LaunchParams(p.name, p.symbol, p.metadataURI, false));
+        // Seeds a zero dev allocation: the board's job is to exercise the curve, and a pre-mine
+        // would make every seeded launch's calibration differ from the 0% reference (#34).
+        address token = launchpad.createLaunch{value: fee}(LaunchParams(p.name, p.symbol, p.metadataURI, false, 0));
         vm.stopBroadcast();
 
         BondingCurve curve = BondingCurve(launchpad.curveOf(token));

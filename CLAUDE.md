@@ -31,7 +31,7 @@ Architecture decisions are GitHub issue [#1](https://github.com/imDev2023/uniswa
 
 One ticket per branch, `build/<NN>-<slug>`, branched from `main`.
 Implement plus tests at the fork-test seam, keep the suite green, run `/code-review` (two axes) against `main`, apply findings, merge.
-Builds #12-#32 are merged; #26-#29 were scoped in-session and have no issues of their own.
+Builds #12-#34 are merged; #26-#29 were scoped in-session and have no issues of their own.
 
 ## Current state
 
@@ -44,7 +44,7 @@ The pre-tokenomics build is done and validated on testnet 46630; Stages 3 and 4 
 
 Everything (addresses, launch table, calibration, restore commands) is in [`docs/deployments-testnet.md`](docs/deployments-testnet.md).
 
-⚠️ **It is all about to become historical.** #38 moves every address and the subgraph `startBlock`, needs all three contracts re-verified on Blockscout, and re-seeds the board. Plan for it; do not discover it.
+⚠️ **It is all about to become historical.** #38 moves every address and the subgraph `startBlock`, needs all **four** contracts re-verified on Blockscout (#35 added `DevVesting`, deployed by the factory's constructor like `LPLock` and `GraduationManager`), and re-seeds the board. Plan for it; do not discover it.
 ⚠️ **Only `CALIB` sits on the current 1 ETH calibration**; the other 16 froze at 0.1 ETH because `setCurveParams` is future-only, and six older launches are on a superseded factory.
 
 
@@ -55,13 +55,13 @@ Everything (addresses, launch table, calibration, restore commands) is in [`docs
 Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the two property changes it forced are [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) (the lock is conditional) and [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) (the curve allocation is per launch, and it is a pre-mine).
 **Read the spec before touching any of this. Do not re-derive it and do not re-open the settled decisions.**
 
-Six tickets, **on top of** the remaining pre-tokenomics work below. Two done.
+Six tickets, **on top of** the remaining pre-tokenomics work below. Three done.
 
 | Ticket | Scope | State |
 | --- | --- | --- |
 | `build/33-lplock-lock-records` | see [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) | ✅ merged (`8e9af94`) |
-| `build/34-curve-carve` | Dev allocation carved from `C`, per-launch solve of **both** virtual reserves, route (A) constant, anti-snipe rescale | ⬅️ **built, reviewed, findings applied, UNCOMMITTED** |
-| `build/35-dev-vesting` | Vesting vault, linear from graduation, `claim()` | not started |
+| `build/34-curve-carve` | see [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) | ✅ merged (`f000969`) |
+| `build/35-dev-vesting` | see [ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md) | ⬅️ **built, UNCOMMITTED, not yet reviewed** |
 | `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | not started |
 | `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock/vesting/reclaim state) | not started |
 | `build/38-testnet-redeploy` | Fork tests, full redeploy, Blockscout re-verify, re-seed | not started |
@@ -73,7 +73,7 @@ Six tickets, **on top of** the remaining pre-tokenomics work below. Two done.
 Full reasoning is in [`docs/tokenomics.md`](docs/tokenomics.md#settled-decisions). Outcomes only:
 
 1. **Creator fee share: 70% of the graduated pool's LP share**, 30% treasury. Curve trade fee and the 0.25% pool protocol fee stay 100% protocol. ⚠️ Revised 2026-08-02; reverses the original "no creator fee share".
-2. **Dev allocation** free, 0-5% of curve supply, creator-selected, vested linearly from graduation. This is a pre-mine and retires the "no pre-mine" claim.
+2. **Dev allocation** free, 0-5% of curve supply, creator-selected, vested linearly from graduation over 30 days (owner-tunable, `[30d, 4y]`). A pre-mine; retires the "no pre-mine" claim.
 3. **LP lock 1 year default**, creator may extend (monotonic), permanent selectable at creation.
 4. **`reclaim` permissionless**, requires expired AND no pool activity for >= 180 days. Tokens burned, WETH to treasury. Donation is off-chain with published proof, never an on-chain charity address.
 5. **Zero protocol token allocation.**
@@ -108,7 +108,8 @@ Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.m
 
 # Open decisions - ask, never assume
 
-- **Commit, merge and push.** `#34` is built and reviewed but UNCOMMITTED. `main` is 5 ahead of `origin/main`; nothing has been pushed this whole program. Each is a per-request action, not standing permission.
+- **Commit, merge and push.** `#35` is built but UNCOMMITTED and unreviewed. `main` is 7 ahead of `origin/main`; nothing has been pushed this whole program. Each is a per-request action, not standing permission.
+- **The 30-day vesting default is the shortest the contract allows**, so a 5% allocation is fully liquid a month after graduation (~-30.6% if dumped whole). Chosen 2026-08-04; flagged as a testnet-retune candidate, not as settled.
 - **Two security items raised in #34 and deliberately not actioned**: `pragma solidity ^0.8.24` floats repo-wide (Consensys says lock it; changing it moves bytecode, so do it before #38's redeploy or not at all), and `createLaunch` has no reentrancy guard despite refunding via `.call` (CEI holds and re-entry just buys another launch, so it was judged gas for no threat).
 - **Goldsky migration** is measured and proven but **not done** - a one-line `VITE_SUBGRAPH_URL` change. `octopus-probe/1.0.0` is live on the free tier: keep or delete?
 - **Alchemy paid tier?** The free tier's 10-block `eth_getLogs` cap is the only thing stopping one provider serving everything.
@@ -134,6 +135,7 @@ Hard-won, mostly discovered by running something rather than reasoning about it.
 - **`assertGt(x, 0)` cannot see a diversion.** Diverting 70% of fees to a new address left the old test green, because the 30% remainder still satisfied it.
 - **`vm.prank` and `vm.expectRevert` apply to the NEXT call**, and a getter like `factory.MAX_LOCK_DURATION()` inline in the arguments *is* that next call. Hoist reads before the cheatcode. Hit twice in one file, after writing a comment warning about it.
 - **A revert-only test does not prove a bound is safe.** Test that the value AT the ceiling still works, or a clamp that bricks the product passes review.
+- **A test where the caller IS the beneficiary cannot see a misrouted payout.** Every #35 vesting test that claimed *as* the creator stayed green when `claim` was mutated to pay `msg.sender`; only the one that claims from a stranger caught it. Whenever a function's destination is fixed rather than a parameter, call it from somebody who is not that destination.
 
 - **A test buy sized in ETH is coupled to the calibration.** Nine graduation tests opened with a hardcoded `buy{value: 0.15 ether}` per filler wallet, which sat under the 8M anti-snipe cap at 90 ETH and blew through it at 10 ETH - the same ETH buys ~9x the tokens. `test/CurveDriver.sol` now derives the size from the curve's own cap and reserves. Nobody thinks of a literal in a test setup as a test input.
 - ⚠️ **Editing the spec so it describes what you built is not a fix, it is a lost constraint.** #34 changed six things in `docs/tokenomics.md` and declared two. A code review caught it. Every implementation-time change to the spec now goes in its "Amendments made during implementation" table, marked in-scope or not, so it can be reverted deliberately.

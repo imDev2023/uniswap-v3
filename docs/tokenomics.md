@@ -6,7 +6,7 @@ Figures are given at the **agreed 10 ETH mainnet graduation target**.
 ✅ **The tokenomics discussion opened on 2026-08-01 was completed on 2026-08-02.**
 Every decision is recorded under [Settled decisions](#settled-decisions).
 ⚠️ This document is the spec, not a description of the deployed system.
-Builds #33 (LP lock records) and #34 (curve carve) have since been implemented against it; #35-#38 have not.
+Builds #33 (LP lock records), #34 (curve carve) and #35 (dev vesting) have since been implemented against it; #36-#38 have not.
 Where implementation forced a change to this document, it is recorded under [Amendments made during implementation](#amendments-made-during-implementation) rather than edited away.
 
 ⚠️ **The deployed contracts no longer match this document.**
@@ -167,6 +167,21 @@ Vesting from creation would let a dev on a dying curve claim tokens and sell the
 
 The vesting duration is owner-tunable and future-only, like every other curve parameter.
 
+**The duration is 30 days by default**, chosen 2026-08-04 and implemented in #35.
+The setter is bounded to `[30 days, 1460 days]`, and the default sits exactly ON the floor, so from here the owner can only ever lengthen a schedule.
+Lengthening is the holder-favouring direction, which makes the one-way street the safe one.
+
+⚠️ **At this default a 5% allocation is fully liquid a month after graduation**, releasing roughly 1.33M tokens a day.
+The table above measures a complete 5% exit at **-30.6%**, and 30 days of linear release does not change that number, only the earliest moment it can arrive.
+This is the shortest schedule the contract permits, and it is a live candidate for the testnet retune.
+
+Where the tokens actually sit changed in #35 too.
+#34 left the carve custodied in `LaunchpadFactory` with no withdrawal path at all; `createLaunch` now transfers it to `DevVesting` in the same transaction, alongside the transfers to the curve and the GraduationManager.
+Those three moves take the entire 1B supply out of the factory, so the factory holds no launch tokens and needs no function that can move one - the contract that also owns the V3 factory gains no token-moving capability.
+
+`DevVesting` reads each schedule's start from `GraduationManager.graduatedAt(token)`, which #35 widened from a `bool` to a timestamp.
+⚠️ The vault **reads** the start rather than being **told** it: notifying the vault from inside `graduate()` would put a revertable external call on the one path that must never fail, where a bug in the callee strands a launch mid-migration with its curve already closed.
+
 ## Liquidity
 
 The graduation position is **full range** (`MIN_TICK` / `MAX_TICK` in `GraduationManager`), and it must stay that way.
@@ -325,7 +340,7 @@ Published research on pump.fun found only **~0.63%** of tokens graduate, so the 
 | `maxDevAllocationBps` | 0 to `MAX_DEV_ALLOCATION_BPS` (500 = 5%) | future launches only |
 | default lock duration | 30 days to 100 years | future **launches** (frozen at `createLaunch`) |
 | inactivity period for reclaim | lengthen only | ⚠️ applies to existing locks, hence monotonic |
-| vesting duration | any | future launches only |
+| vesting duration | 30 days to 1460 days (4 x 365) | future launches only (frozen at `createLaunch`) |
 | `protocolFee` | 0, or 4 to 10 (25% down to 10%) | future graduations |
 | `setPoolProtocolFee` | per pool | ⚠️ **yes, retroactive on a live pool** |
 | creator fee share | 0 to 100% | future launches (frozen at `createLaunch`) |
@@ -462,7 +477,7 @@ Roughly **7 tickets on top of** the ~9-9.5 already estimated in `CLAUDE.md`, so 
 | Fork tests, full testnet redeploy, Blockscout re-verify, re-seed the board | 1 |
 
 ⚠️ **The testnet redeploy is mandatory and repeats the #24 experience.**
-Every address in `CLAUDE.md` moves, the subgraph `startBlock` moves, all three contracts need re-verifying, and the board needs re-seeding.
+Every address in `CLAUDE.md` moves, the subgraph `startBlock` moves, all four contracts need re-verifying (#35 added `DevVesting`), and the board needs re-seeding.
 `CALIB` and the other 16 launches become historical.
 
 ### Two architectural notes that make it cheaper
@@ -494,6 +509,9 @@ Everything below is an amendment made by the implementer, listed so it can be ac
 | 4 | Anti-snipe section: 12 new lines authorising rescale-over-clamp, and deletion of "the only item on the list requiring no contract change at all" | Settled decision 6 said "anti-snipe unchanged", and that turned out to be unachievable once `C` became per-launch: the defaults are documented as *shares* ("1% of 800M"), and a threshold at or above a launch's `C` never lifts the cap. | ⚠️ **Undeclared at the time.** The rescale itself was a user decision, taken over a clamp and a reject-at-validation option |
 | 5 | Levers row added: `maxDevAllocationBps` | New owner param required by decision 2. | In scope |
 | 6 | `setCurveParams` now rejects a threshold *equal to* `CURVE_SUPPLY`, not only above it | Rescaling maps `T == CURVE_SUPPLY` to exactly `C`, which is unreachable. Pre-existing footgun, tightened because the same validation now feeds the rescale. | ⚠️ Outside ticket scope |
+| 7 | **#35:** the vesting duration is now specified: 30 days default, bounded `[30 days, 4 years]` | This document settled that vesting is linear and owner-tunable but never named a number, and the contract needs one. Chosen by the user 2026-08-04. | In scope, and a user decision |
+| 8 | **#35:** the dev allocation moved from the factory to `DevVesting` at `createLaunch`, and ⚠️ **this introduces a FOURTH deployed contract** - the "all three contracts need re-verifying" line under the redeploy note is now "all four" | #34 parked it in the factory with no withdrawal path; #35 has to give it one. Moving it out is what keeps the factory free of any token-moving function, rather than adding a vault-only withdrawal to the contract that owns the V3 factory. ⚠️ The fourth contract is the part that changes **#38's** scope: `DevVesting` is deployed by the factory's constructor like `LPLock` and `GraduationManager`, so it needs its own Blockscout verification and its own row in `docs/deployments-testnet.md`. | In scope, and a user decision |
+| 9 | **#35:** `GraduationManager.graduated` became `graduatedAt`, a `uint64` timestamp | Nothing on-chain dated a graduation, and the vesting start has to come from somewhere. Zero still means "has not graduated", so it reads exactly as the bool did. | In scope |
 
 ⚠️ **Amendment 4 has a known tension that is NOT resolved.**
 The unreachability argument justifies rescaling `antiSnipeThreshold`.

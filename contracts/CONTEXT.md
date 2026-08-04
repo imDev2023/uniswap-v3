@@ -68,6 +68,15 @@ _Avoid_: liquidity lock (ambiguous - a Pool also holds third-party liquidity, wh
 
 ⚠️ **"Locked liquidity" is a claim about our position only.** A graduated Pool also accepts third-party liquidity that its providers can pull at will. Say **launch liquidity** when the distinction matters, which is anywhere a person is deciding whether to trust the Pool.
 
+**Vesting**:
+The linear release of a Dev Allocation to its Creator, running from **Graduation** and not from creation, held by `DevVesting`.
+⚠️ **The two release schedules in this protocol are different things and must not be blurred.**
+A **Lock** withholds the Pool's liquidity position from us; **Vesting** withholds the Dev Allocation from the Creator.
+They have separate durations, separate contracts and separate reasons, and only the Lock has a Creator-facing extend.
+⚠️ A Launch that never graduates never vests anything, ever, and the tokens stay in the vault permanently.
+That is the intended outcome, because a schedule running from creation would let a Creator on a dying Curve sell back into the Curve and take the ETH other buyers put in.
+_Avoid_: unlock, cliff (there is no cliff), lockup
+
 ### Fairness guarantees
 
 **Anti-snipe**:

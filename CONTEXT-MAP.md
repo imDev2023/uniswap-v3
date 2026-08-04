@@ -19,6 +19,7 @@ Architectural decisions live in [`docs/adr/`](./docs/adr/). Read one before re-o
 - [0004](./docs/adr/0004-managed-subgraph-hosting-on-goldsky.md) - Indexing is hosted, not self-run.
 - [0005](./docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) - ⚠️ the LP lock is no longer permanent. It is 1 year by default and reclaimable once expired **and** the pool has gone quiet. Supersedes the permanent-custody property that `contracts/CONTEXT.md` used to assert.
 - [0006](./docs/adr/0006-the-curve-allocation-is-per-launch.md) - ⚠️ the curve allocation is per Launch (760M-800M), not the 800M constant, and the carve is a pre-mine. Both virtual reserves are re-solved per launch; anything dividing by 800M is now wrong.
+- [0007](./docs/adr/0007-vesting-runs-from-graduation.md) - the Dev Allocation vests linearly from **Graduation**, never from creation, so a Launch that never graduates never vests. `DevVesting` custodies it from `createLaunch` and **reads** the graduation date rather than being told it, which keeps a revertable call off the graduation path.
 
 ## Relationships
 

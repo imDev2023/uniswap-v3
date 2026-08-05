@@ -61,17 +61,24 @@ abstract contract CurveDriver is Test {
     ///      another. `finalEthReserve - ethReserve` is exactly the net ETH the curve still needs;
     ///      grossing it up for the trade fee is exactly what the buyer must send. The curve clamps
     ///      any excess and refunds it, so rounding up by one wei is safe and rounding down is not.
+    /// @notice Gross ETH (fee included) that a single buy needs to send to close the curve from its
+    ///         CURRENT reserves. Derived from the curve, so it tracks any recalibration.
+    /// @dev Round the fee gross-up UP: a wei short leaves the curve one wei below the threshold and
+    ///      it does not graduate, which is the failure mode `CrossingBuyBoundary.t.sol` pins
+    ///      deliberately. Ceil-div, inlined: `Calibration.t.sol` keeps its own `_ceilDiv`
+    ///      deliberately reimplemented from primitives, and a shared one here would collide with it
+    ///      through this base contract.
+    function _ethToClose(BondingCurve curve) internal view returns (uint256) {
+        uint256 netNeeded = curve.finalEthReserve() - curve.ethReserve();
+        uint256 numerator = netNeeded * BPS;
+        uint256 denominator = BPS - curve.tradeFeeBps();
+        return numerator == 0 ? 0 : (numerator - 1) / denominator + 1;
+    }
+
     function _crossToGraduation(BondingCurve curve, string memory tag) internal {
         _liftAntiSnipe(curve, tag);
 
-        uint256 netNeeded = curve.finalEthReserve() - curve.ethReserve();
-        // Round the fee gross-up UP: a wei short leaves the curve one wei below the threshold and it
-        // does not graduate, which is the failure mode `CrossingBuyBoundary.t.sol` pins deliberately.
-        // Ceil-div, inlined: `Calibration.t.sol` keeps its own `_ceilDiv` deliberately reimplemented
-        // from primitives, and a shared one here would collide with it through this base contract.
-        uint256 numerator = netNeeded * BPS;
-        uint256 denominator = BPS - curve.tradeFeeBps();
-        uint256 ethIn = numerator == 0 ? 0 : (numerator - 1) / denominator + 1;
+        uint256 ethIn = _ethToClose(curve);
 
         address closer = makeAddr(string(abi.encodePacked(tag, "closer")));
         vm.deal(closer, ethIn);

@@ -155,14 +155,22 @@ contract DevVestingTest is Test, V3Deployer, CurveDriver {
 
     /// @dev Asserts `sig`'s selector appears nowhere in `target`'s deployed runtime code, so the
     ///      function does not exist rather than merely having refused this caller.
+    /// @dev Asserts ONCE, after the scan, rather than per byte: an assertion inside the loop made this
+    ///      cost ~600M gas and grow with every byte of bytecode added anywhere in the contract.
     function _assertSelectorAbsent(address target, string memory sig, string memory whose) internal view {
         bytes4 selector = bytes4(keccak256(bytes(sig)));
         bytes memory code = target.code;
+        bool found;
         for (uint256 i = 0; i + 4 <= code.length; ++i) {
-            bool matchesHere = code[i] == selector[0] && code[i + 1] == selector[1]
-                && code[i + 2] == selector[2] && code[i + 3] == selector[3];
-            assertFalse(matchesHere, string.concat(whose, " must not implement ", sig));
+            if (
+                code[i] == selector[0] && code[i + 1] == selector[1] && code[i + 2] == selector[2]
+                    && code[i + 3] == selector[3]
+            ) {
+                found = true;
+                break;
+            }
         }
+        assertFalse(found, string.concat(whose, " must not implement ", sig));
     }
 
     // ---------------------------------------------------------------------------------------------

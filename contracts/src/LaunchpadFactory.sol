@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -233,7 +233,6 @@ contract LaunchpadFactory is Ownable2Step {
     ///         is what makes graduation price continuity (#16) hold for any `virtualEthReserve` AND
     ///         any dev allocation. An owner-settable `V_tok` could break that invariant directly.
     uint256 public virtualEthReserve = DEFAULT_VIRTUAL_ETH_RESERVE;
-    uint16 public tradeFeeBps = DEFAULT_TRADE_FEE_BPS;
     uint256 public maxBuyPerWallet = DEFAULT_MAX_BUY_PER_WALLET;
     uint256 public antiSnipeThreshold = DEFAULT_ANTI_SNIPE_THRESHOLD;
 
@@ -259,18 +258,25 @@ contract LaunchpadFactory is Ownable2Step {
     ///      `DevVesting.t.sol` pins the two together so they cannot drift.
     mapping(address => uint256) public devAllocationOf;
 
-    /// @notice Owner-tunable lock defaults applied to FUTURE launches (#33), frozen per launch at
-    ///         `createLaunch` exactly like the curve params above.
+    /// @notice The owner-tunable params that fit alongside each other, deliberately declared together.
+    ///
+    /// @dev ⚠️ **This grouping is a STORAGE LAYOUT decision, not a stylistic one - do not reorder or
+    ///      split it, and do not insert a `uint256` in the middle.** All five pack into a single slot
+    ///      (8 + 2 + 2 + 8 + 2 = 22 of 32 bytes), and `createLaunch` reads every one of them, so the
+    ///      whole group costs one cold SLOAD instead of two.
+    ///
+    ///      `tradeFeeBps` lives here rather than with the other curve defaults above for exactly that
+    ///      reason: sitting between two `uint256`s it occupied a slot of its own and wasted 30 bytes
+    ///      of it. Moved in #35a and measured, not assumed - see `docs/security-checklist.md`.
+    ///
+    ///      All five apply to FUTURE launches only and are frozen per launch at `createLaunch`
+    ///      (#18/#33/#34/#35), so no in-flight launch changes under a trader.
     uint64 public defaultLockDuration = DEFAULT_LOCK_DURATION;
     uint16 public creatorFeeBps = DEFAULT_CREATOR_FEE_BPS;
-
-    /// @notice Owner-tunable ceiling on the creator-selectable dev allocation, applied to FUTURE
-    ///         launches (#34). Setting it to 0 turns the pre-mine off entirely without a redeploy.
+    /// @notice Setting this to 0 turns the pre-mine off entirely without a redeploy.
     uint16 public maxDevAllocationBps = MAX_DEV_ALLOCATION_BPS;
-
-    /// @notice Owner-tunable linear vesting window for the dev allocation, applied to FUTURE launches
-    ///         (#35) and frozen into each grant at `createLaunch`, exactly like the lock terms above.
     uint64 public vestingDuration = DEFAULT_VESTING_DURATION;
+    uint16 public tradeFeeBps = DEFAULT_TRADE_FEE_BPS;
 
     /// @notice A new launch.
     /// @dev Build 11 (#24) widened this event to be self-sufficient: it carries the metadata URI plus

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 /// @notice Robinhood Chain canonical addresses and identifiers.
 /// @dev Addresses are from the official Robinhood Chain docs (docs.robinhood.com/chain/contracts/).

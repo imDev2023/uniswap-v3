@@ -20,6 +20,7 @@ Everything here links to where the detail actually lives. Do not restate those d
 | RPC capability measurements | [`docs/rpc-capability.md`](docs/rpc-capability.md) |
 | Managed-host + create-flow probe | [`docs/de-risking-probe.md`](docs/de-risking-probe.md) |
 | Auditor hand-off brief | [`docs/audit-scope.md`](docs/audit-scope.md) |
+| ⚠️ **Security checklist** | [`docs/security-checklist.md`](docs/security-checklist.md) - every requirement from the four links in `web3-security.md` mapped to where we satisfy it **or why we deliberately do not**. Read before changing a guard, adding a privileged function, or answering an auditor. Records the two declined items (no pause, no timelock) with reasons |
 | Deploy runbook | [`docs/deploy.md`](docs/deploy.md) |
 | Driving a real MetaMask from `agent-browser` | [`docs/metamask-agent-browser.md`](docs/metamask-agent-browser.md) - untracked; needed to test the wallet-connected UI |
 | Indexer runbook, reorg recovery | [`subgraph/README.md`](subgraph/README.md) |
@@ -31,7 +32,7 @@ Architecture decisions are GitHub issue [#1](https://github.com/imDev2023/uniswa
 
 One ticket per branch, `build/<NN>-<slug>`, branched from `main`.
 Implement plus tests at the fork-test seam, keep the suite green, run `/code-review` (two axes) against `main`, apply findings, merge.
-Builds #12-#34 are merged; #26-#29 were scoped in-session and have no issues of their own.
+Builds #12-#35 are merged; #26-#29 and #33-#35 were scoped in-session and have no issues of their own.
 
 ## Current state
 
@@ -52,19 +53,22 @@ Everything (addresses, launch table, calibration, restore commands) is in [`docs
 
 # 🔴 THE ACTIVE JOB: the tokenomics build program
 
-Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the two property changes it forced are [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) (the lock is conditional) and [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) (the curve allocation is per launch, and it is a pre-mine).
+Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the three property changes it forced are ADR-[0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) (the lock is conditional), [0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) (the curve allocation is per launch, and it is a pre-mine) and [0007](docs/adr/0007-vesting-runs-from-graduation.md) (vesting runs from graduation).
 **Read the spec before touching any of this. Do not re-derive it and do not re-open the settled decisions.**
 
-Six tickets, **on top of** the remaining pre-tokenomics work below. Three done.
+Six tickets, **on top of** the remaining pre-tokenomics work below. Three done, all three contract-side, plus the unplanned #35a hardening pass.
 
 | Ticket | Scope | State |
 | --- | --- | --- |
 | `build/33-lplock-lock-records` | see [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) | ✅ merged (`8e9af94`) |
 | `build/34-curve-carve` | see [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) | ✅ merged (`f000969`) |
-| `build/35-dev-vesting` | see [ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md) | ⬅️ **built, UNCOMMITTED, not yet reviewed** |
-| `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | not started |
+| `build/35-dev-vesting` | see [ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md) | ✅ merged (`9f4bfff`) |
+| `build/35a-security-hardening` | see [`docs/security-checklist.md`](docs/security-checklist.md). Branch coverage, fuzz properties, locked pragma, packed slot | ⬅️ **built, UNCOMMITTED, not yet reviewed** |
+| `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | next |
 | `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock/vesting/reclaim state) | not started |
 | `build/38-testnet-redeploy` | Fork tests, full redeploy, Blockscout re-verify, re-seed | not started |
+
+⚠️ **The contract work is DONE and the read side has not caught up.** #33-#35 added `LaunchConfig`-worthy state that nothing indexes and nothing displays: per-launch lock terms, the dev carve, and the vesting grant. A creator holding up to 40M tokens still reads as **0% concentration** on the panel built to disclose exactly that. #36 and #37 are what close it.
 
 **Governing principle: every new number is owner-tunable and FUTURE-ONLY**, so testnet feedback retunes the platform with a transaction rather than a redeploy, and no in-flight launch ever changes under a trader.
 
@@ -83,10 +87,11 @@ Full reasoning is in [`docs/tokenomics.md`](docs/tokenomics.md#settled-decisions
 
 ### Constraints that must survive into the tickets
 
-- ⚠️ **Do NOT widen `LaunchCreated`.** It already carries 12 fields and `_emitLaunchCreated` exists *purely* because inlining it overflows the EVM's 16-slot reachable stack (`viaIR` was rejected as too disruptive). Emit a second `LaunchConfig` event instead.
+- ⚠️ **Do NOT widen `LaunchCreated`.** It already carries 12 fields and `_emitLaunchCreated` exists *purely* because inlining it overflows the EVM's 16-slot reachable stack (`viaIR` was rejected as too disruptive). Emit a second `LaunchConfig` event instead - that is #36's whole shape.
 - ⚠️ **Beware the same-block dynamic data source.** Anything the factory triggers on the curve inside the creation tx fires before the `BondingCurve` template exists as an indexed source. graph-node 0.40.2's behaviour is **unverified** and we have no evidence on our own chain, because `SeedTestnet.s.sol` uses `--slow`. **Emit anything that matters from the FACTORY**, which is fixed-address and always indexing.
-- ⚠️ **`reclaim` must be structurally impossible for third-party positions.** A public LP-locking service for arbitrary pairs is on the roadmap, which would make `LPLock` a custodian of strangers' assets.
-- ⚠️ **`maxBuyPerWallet` is a share of tokens, not ETH**, so the 90→10 ETH move made the same 1% cap cost ~9x less. The sniping barrier fell by that factor and nothing has been decided about it. Open question for the testnet retune, with #34's rescale, in [`docs/tokenomics.md`](docs/tokenomics.md#amendments-made-during-implementation) amendment 4.
+- ⚠️ **`reclaim` must be structurally impossible for third-party positions.** A public LP-locking service for arbitrary pairs is on the roadmap, which would make `LPLock` a custodian of strangers' assets. `LockOrigin` reserves the ZERO slot for `None`; reordering it silently breaks this.
+- ⚠️ **`maxBuyPerWallet`'s absolute level moved** (8M → 7.6M on a fully-carved launch) when #34 rescaled it, which settled decision 6 said would not happen. Unresolved, and the ETH cost of the same 1% cap also fell ~9x in the 90→10 ETH move. Both are open for the testnet retune: [`docs/tokenomics.md`](docs/tokenomics.md#amendments-made-during-implementation) amendment 4.
+- **Events #36 must index**, all from the factory or a fixed-address periphery contract: `LaunchConfig` (new), `LockRegistered`/`LockExtended`/`Reclaimed` (#33), `GrantRegistered`/`Claimed` (#35).
 
 ---
 
@@ -96,7 +101,7 @@ Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.m
 
 **Stage 3 (frontend), still open:** create-flow URI validation (🔴 the field writes permanently with **no validation at all** - `ipfs//…`, free text, `javascript:`, whitespace all pass, and the read side silently ignores every one of them); name `maxLength={40}` vs validation rejecting `>32`; **no search, no pagination, no address lookup** past `BOARD_PAGE_SIZE = 50`; ⚠️ **injected-only wallets, so mobile cannot connect at all**; "Holders" → **Curve Position** relabel (decided, not built).
 
-**Stage 4 (infra), still open:** frontend hosting; monitoring wiring (`scripts/indexer-health.mjs` exists, nothing runs it); 🔴 **key protection - the RPC key ships verbatim in the browser bundle**, so domain allowlisting or a proxy is required before any public deploy; Stage-2 RPC fallbacks for the homepage list and curve progress; Blockscout verification of the V3 stack + QuoterV2.
+**Stage 4 (infra), still open:** frontend hosting; monitoring wiring (`scripts/indexer-health.mjs` exists, nothing runs it); 🔴 **key protection - the RPC key ships verbatim in the browser bundle**, so domain allowlisting or a proxy is required before any public deploy; Stage-2 RPC fallbacks for the homepage list and curve progress; Blockscout verification of the V3 stack + QuoterV2. All of SlowMist's frontend-hardening section (HSTS, CSP, SRI, headers) is unaddressed and blocked on choosing hosting - itemised in [`docs/security-checklist.md`](docs/security-checklist.md#operational-security).
 
 **Also before mainnet:** production-scale graduation has never run on live testnet (now ~1 test ETH, no longer blocked); adversarial MEV is untested and nothing is scoped.
 
@@ -108,9 +113,10 @@ Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.m
 
 # Open decisions - ask, never assume
 
-- **Commit, merge and push.** `#35` is built but UNCOMMITTED and unreviewed. `main` is 7 ahead of `origin/main`; nothing has been pushed this whole program. Each is a per-request action, not standing permission.
+- 🔴 **Commit #35a, and PUSH.** `main` is **9 ahead of `origin/main` and NOTHING has been pushed this whole program**; #35a is not even committed. Three merged tickets plus a hardening pass exist only on this machine. Ask before each; none is standing permission.
 - **The 30-day vesting default is the shortest the contract allows**, so a 5% allocation is fully liquid a month after graduation (~-30.6% if dumped whole). Chosen 2026-08-04; flagged as a testnet-retune candidate, not as settled.
-- **Two security items raised in #34 and deliberately not actioned**: `pragma solidity ^0.8.24` floats repo-wide (Consensys says lock it; changing it moves bytecode, so do it before #38's redeploy or not at all), and `createLaunch` has no reentrancy guard despite refunding via `.call` (CEI holds and re-entry just buys another launch, so it was judged gas for no threat).
+- **`createLaunch` still has no reentrancy guard** despite refunding via `.call`. CEI holds and re-entry just buys another launch, so it was judged gas for no threat. Want it anyway? (The floating pragma from the same #34 pair was fixed in #35a.)
+- ⚠️ **`setPoolProtocolFee` is the one unmitigated privileged power**: retroactive on a live pool, no delay, no notice, capped at 25% of swap fees and cannot touch principal. The multisig is the only control. Recorded in [`docs/security-checklist.md`](docs/security-checklist.md#deliberate-omissions).
 - **Goldsky migration** is measured and proven but **not done** - a one-line `VITE_SUBGRAPH_URL` change. `octopus-probe/1.0.0` is live on the free tier: keep or delete?
 - **Alchemy paid tier?** The free tier's 10-block `eth_getLogs` cap is the only thing stopping one provider serving everything.
 - ⚠️ **[`docs/rpc-capability.md`](docs/rpc-capability.md) carries two numbers that later re-runs contradicted** (the 5,000-block consistent-depth figure, and `eth_getBlockReceipts` availability). Recording the correction was **declined once**. Re-offer; never silently fix.
@@ -131,13 +137,17 @@ Hard-won, mostly discovered by running something rather than reasoning about it.
 
 **Tests that pass for the wrong reason**
 
-- **A wrong-selector call reverts exactly like an authorization failure.** `IUniswapV3Minimal` declared `decreaseLiquidity` with flat args where the real NPM takes a struct - all members static, so the calldata body is identical and only the 4-byte selector differs. `LpLock.t.sol` asserted "an attacker cannot withdraw principal" with a bare `vm.expectRevert()` and caught the selector miss instead, **for six builds**. Pin reverts to a specific error or message; a bare `expectRevert` proves almost nothing.
+- ⚠️ **A revert never tells you WHY, and two builds were fooled by this in different ways.** (a) A wrong-selector call reverts exactly like an authorization failure: `IUniswapV3Minimal` declared `decreaseLiquidity` with flat args where the real NPM takes a struct, and since all members are static only the 4-byte selector differed, so `LpLock.t.sol`'s bare `vm.expectRevert()` "proved" an attacker cannot withdraw principal **for six builds** while actually catching the selector miss. (b) The same reason means you cannot prove a function is ABSENT by calling names you guessed - a missing function and one that rejects you are indistinguishable, and any name off your list sails through. Pin every revert to a specific error; to prove absence, scan the deployed runtime bytecode for the selector as `DevVesting.t.sol` does (Solidity emits every external selector as a literal in the dispatch table). Both verified by mutation.
 - **`assertGt(x, 0)` cannot see a diversion.** Diverting 70% of fees to a new address left the old test green, because the 30% remainder still satisfied it.
 - **`vm.prank` and `vm.expectRevert` apply to the NEXT call**, and a getter like `factory.MAX_LOCK_DURATION()` inline in the arguments *is* that next call. Hoist reads before the cheatcode. Hit twice in one file, after writing a comment warning about it.
 - **A revert-only test does not prove a bound is safe.** Test that the value AT the ceiling still works, or a clamp that bricks the product passes review.
 - **A test where the caller IS the beneficiary cannot see a misrouted payout.** Every #35 vesting test that claimed *as* the creator stayed green when `claim` was mutated to pay `msg.sender`; only the one that claims from a stranger caught it. Whenever a function's destination is fixed rather than a parameter, call it from somebody who is not that destination.
+- ⚠️ **Line coverage hides the branches an auditor probes.** At 142 green tests `BondingCurve` had **44%** branch coverage and `LaunchpadFactory` 61%; `FeeTransferFailed` and `RefundFailed` had NEVER executed. Revert paths need a contract that rejects ETH, not an EOA. Measure with `forge coverage --ir-minimum`, and read the BRANCH column, not lines.
+- ⚠️ **`CurveConfig memory c = base;` ALIASES, it does not copy.** Mutating `c` to build the next invalid case silently corrupts the baseline, so every later case tests the wrong thing. Build structs from a fresh helper per case.
+- **A mutant that survives is not always a weak test.** Flipping `_previewSell`'s `ceilDiv` to a floor survived every round-trip property - because the buy side's rounding already dominates, so it is not actually a money pump. Check whether the mutant is lethal before "fixing" the test.
+- ⚠️ **Log ORDER inside one transaction is part of the contract's interface.** `LaunchCreated` must be emitted before `GrantRegistered`: an indexer processes logs in order, and the handler that creates the `Launch` entity has to run before the one that loads it. Free to get right at the emit site, expensive to discover in the mapping.
 
-- **A test buy sized in ETH is coupled to the calibration.** Nine graduation tests opened with a hardcoded `buy{value: 0.15 ether}` per filler wallet, which sat under the 8M anti-snipe cap at 90 ETH and blew through it at 10 ETH - the same ETH buys ~9x the tokens. `test/CurveDriver.sol` now derives the size from the curve's own cap and reserves. Nobody thinks of a literal in a test setup as a test input.
+- **A test buy sized in ETH is coupled to the calibration.** Nine graduation tests opened with a hardcoded `buy{value: 0.15 ether}` per filler wallet, which sat under the 8M anti-snipe cap at 90 ETH and blew through it at 10 ETH - the same ETH buys ~9x the tokens. Nobody thinks of a literal in a test setup as a test input. `test/CurveDriver.sol` now owns both moves and derives each from the curve's own reserves: `_liftAntiSnipe` and `_crossToGraduation`. Use them; do not write another `buy{value: N ether}`.
 - ⚠️ **Editing the spec so it describes what you built is not a fix, it is a lost constraint.** #34 changed six things in `docs/tokenomics.md` and declared two. A code review caught it. Every implementation-time change to the spec now goes in its "Amendments made during implementation" table, marked in-scope or not, so it can be reverted deliberately.
 - **A number in a doc has no way to fail.** Four `virtualTokenReserve` values in the `docs/tokenomics.md` table were wrong when written, because they were reasoned out rather than computed. `Calibration.t.sol` now pins the whole published table against the contract.
 

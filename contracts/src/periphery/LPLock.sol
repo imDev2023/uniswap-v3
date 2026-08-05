@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import {INonfungiblePositionManager, IUniswapV3Pool} from "../interfaces/IUniswapV3Minimal.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";

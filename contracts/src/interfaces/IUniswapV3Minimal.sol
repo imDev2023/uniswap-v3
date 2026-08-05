@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 /// @notice Minimal subset of the Uniswap V3 factory interface used by the launchpad.
 /// @dev Declared locally so our 0.8.x code never has to compile v3-core's 0.7.6 source.

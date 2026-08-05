@@ -2,9 +2,9 @@ import { GraphQLClient, gql } from './graphqlClient'
 import { SUBGRAPH_URL } from '../config/contracts'
 import { TRADE_HISTORY_LIMIT } from '../config/constants'
 
-// The subgraph (Build 08 / #19) is the canonical read model: curve progress, trades, holders, and
-// the graduation feed. All numeric fields come back as decimal strings (GraphQL BigInt) — callers
-// convert with BigInt(...) at the edge.
+// The subgraph (Build 08 / #19) is the canonical read model: curve progress, trades, curve
+// positions, launch terms, and the graduation feed. All numeric fields come back as decimal strings
+// (GraphQL BigInt) - callers convert with BigInt(...) at the edge.
 
 export const subgraphClient = new GraphQLClient(SUBGRAPH_URL)
 
@@ -58,7 +58,18 @@ export interface RecentTradeRow extends TradeRow {
   token: { id: string; symbol: string }
 }
 
-export interface HolderRow {
+/**
+ * An address's net stake in one CURVE, netted from its own buys and sells.
+ *
+ * ⚠️ **This is not a holder**, and the entity stopped being called one in #36. Three separate ways
+ * the two differ, each of which has already misled a reader of this panel:
+ *  - It ignores ERC-20 transfers. Buy on the curve, send the tokens away, and this still names you.
+ *  - It ignores the pool. After graduation the curve stops trading forever, so every position here
+ *    is FINAL rather than current, while the real holders change with every swap.
+ *  - It ignores the creator's dev allocation, which is a free carve rather than a curve buy. That
+ *    figure is read from the chain (`hooks/useLaunchTerms.ts`), not from a row here.
+ */
+export interface CurvePositionRow {
   id: string
   account: string
   balance: string
@@ -66,6 +77,27 @@ export interface HolderRow {
   sold: string
   tradeCount: number
   lastTradeTimestamp: string
+}
+
+/**
+ * The LP lock on a graduated position (#33/#36).
+ *
+ * ⚠️ `permanent` is DERIVED by the indexer from the `lockUntil == type(uint64).max` sentinel; there
+ * is no permanent flag on-chain. Branch on it before comparing `lockUntil` to any clock, or a
+ * permanent lock renders as expiring in the year 584942417355. `lib/lock.ts` does this for you.
+ */
+export interface LockRow {
+  id: string
+  pool: string
+  origin: 'None' | 'Launch' | 'ThirdParty'
+  lockUntil: string
+  permanent: boolean
+  creatorFeeBps: number
+  extendCount: number
+  reclaimed: boolean
+  reclaimedEth: string | null
+  reclaimedTokensBurned: string | null
+  reclaimedAtTimestamp: string | null
 }
 
 export interface GraduationRow {
@@ -158,11 +190,41 @@ export const GRADUATED_TOKENS_QUERY = gql`
   }
 `
 
+// The realised lock record (#36), selected ONLY here and deliberately not folded into `TokenFields`.
+// The board fetches 50 rows on a 5s poll and renders none of it.
+//
+// ⚠️ **`devAllocation`, `devClaimed`, `vestingDuration`, `lockDuration`, `creatorFeeBps` and
+// `permanentLock` are all indexed but deliberately NOT selected here.** #37 moved every one of them
+// to a direct chain read (`useLaunchTerms`), because all six are frozen at `createLaunch` and can
+// never change - so the read model was only a second route to the same immutable facts, and gating
+// the panels on it meant an indexer outage removed them from the page entirely. Asking for them
+// anyway would put six fields on the wire that nothing reads, and would make this file look like
+// the source of truth for terms that it is not.
+const TOKEN_LOCK_FIELDS = gql`
+  fragment TokenLockFields on Token {
+    lock {
+      id
+      pool
+      origin
+      lockUntil
+      permanent
+      creatorFeeBps
+      extendCount
+      reclaimed
+      reclaimedEth
+      reclaimedTokensBurned
+      reclaimedAtTimestamp
+    }
+  }
+`
+
 export const TOKEN_QUERY = gql`
   ${TOKEN_FIELDS}
+  ${TOKEN_LOCK_FIELDS}
   query Token($id: ID!) {
     token(id: $id) {
       ...TokenFields
+      ...TokenLockFields
       graduation {
         id
         pool
@@ -199,8 +261,8 @@ export const TRADES_QUERY = gql`
   }
 `
 
-export const HOLDERS_QUERY = gql`
-  query Holders($token: String!, $first: Int!) {
+export const CURVE_POSITIONS_QUERY = gql`
+  query CurvePositions($token: String!, $first: Int!) {
     curvePositions(
       first: $first
       orderBy: balance
@@ -292,7 +354,22 @@ export async function fetchGraduatedTokens(first = 20): Promise<TokenRow[]> {
   return data.tokens
 }
 
-export type TokenWithGraduation = TokenRow & { graduation: GraduationRow | null }
+/**
+ * The realised LP lock on a graduated launch.
+ *
+ * ⚠️ **The launch TERMS are deliberately not here.** `devAllocation`, `devClaimed`,
+ * `vestingDuration`, `lockDuration`, `creatorFeeBps` and `permanentLock` are all indexed, but #37
+ * reads every one of them from the chain instead: all six are frozen at `createLaunch` and can
+ * never change, so this context was only a second route to the same immutable facts - and depending
+ * on it meant an indexer outage removed the lock and vesting panels from the page entirely. See
+ * `hooks/useLaunchTerms.ts`.
+ */
+export interface TokenLockRow {
+  /** The lock record. Null until the launch graduates and the position exists. */
+  lock: LockRow | null
+}
+
+export type TokenWithGraduation = TokenRow & TokenLockRow & { graduation: GraduationRow | null }
 
 export async function fetchToken(id: string): Promise<TokenWithGraduation | null> {
   const data = await subgraphClient.request<{ token: TokenWithGraduation | null }>(TOKEN_QUERY, {
@@ -333,12 +410,13 @@ export async function fetchRecentTrades(first = 25): Promise<RecentTradeRow[]> {
 // ⚠️ The response key is `curvePositions` since #36 renamed the entity. The request type here is an
 // ASSERTION, not something derived from the schema, so tsc cannot catch a mismatch between this key
 // and the query text - it would surface as `undefined` at runtime and render an empty panel, which
-// looks exactly like "nobody has traded". Both must be changed together.
-export async function fetchHolders(token: string, first = 100): Promise<HolderRow[]> {
-  const data = await subgraphClient.request<{ curvePositions: HolderRow[] }>(HOLDERS_QUERY, {
-    token: token.toLowerCase(),
-    first,
-  })
+// looks exactly like "nobody has traded". Both must be changed together, and `subgraph.test.ts`
+// pins the key against the query text for exactly that reason.
+export async function fetchCurvePositions(token: string, first = 100): Promise<CurvePositionRow[]> {
+  const data = await subgraphClient.request<{ curvePositions: CurvePositionRow[] }>(
+    CURVE_POSITIONS_QUERY,
+    { token: token.toLowerCase(), first },
+  )
   return data.curvePositions
 }
 

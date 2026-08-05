@@ -13,7 +13,7 @@ export function IndexerBanner({ status }: { status: IndexerStatus }) {
       {status.state === 'down' ? (
         <>
           <strong>Charts unavailable.</strong> Can’t reach the indexer, so feeds, price charts and
-          holder lists won’t load. <strong>Trading is unaffected</strong> — buys, sells and swaps run
+          curve positions won’t load. <strong>Trading is unaffected</strong> - buys, sells and swaps run
           directly against the chain.
         </>
       ) : (

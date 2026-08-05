@@ -66,7 +66,9 @@ It is not a holder of the token:
 
 **Decision: keep the model, change the words.** Indexing ERC-20 transfers to make "holder" literally true was considered and declined - it is a new data source, new mappings and new tests, a subproject rather than a ticket, and it buys accuracy on a panel that is not on the trade path.
 
-⚠️ **The schema rename SHIPPED in #36**: `Holder` is now `CurvePosition`, `holderCount` is `curvePositionCount`, and the frontend queries were rewired to match. What is still owed is the visible UI copy - the panel heading still says "Holders", and a graduated launch's positions are still not marked as FINAL rather than current. That is #37.
+✅ **Complete.** #36 shipped the schema rename - `Holder` is now `CurvePosition`, `holderCount` is `curvePositionCount` - and #37 finished the job on the frontend: the identifiers (`CurvePositionRow`, `CURVE_POSITIONS_QUERY`, `fetchCurvePositions`, `useCurvePositions`, `CurvePositionsCard`), the visible copy, and the FINAL-versus-current distinction a graduated launch's panel now states outright.
+
+⚠️ **The dev allocation is no longer read from here.** #37 moved it, and the lock terms with it, to direct chain reads: every one of those values is frozen at `createLaunch` and can never change, so this context was only ever a second route to the same immutable facts - and gating the panels on it meant an outage removed them from the page entirely. What this context still uniquely owns is the realised `Lock` record, which exists only after graduation.
 
 ## Open questions
 

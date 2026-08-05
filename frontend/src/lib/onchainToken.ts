@@ -11,7 +11,7 @@ import { zeroAddress, type Address } from 'viem'
 //   v3Factory.getPool(token, WETH, 10000)        -> the graduated pool
 //   token.name() / token.symbol()                -> labels
 //
-// The subgraph is still the read model for feeds, charts and holders - but an indexer outage now
+// The subgraph is still the read model for feeds, charts and curve positions - but an indexer outage now
 // degrades those to "unavailable" instead of taking trading down with them.
 //
 // The launchpad address is deliberately the ROOT OF TRUST rather than `LaunchToken.launchpad()`.

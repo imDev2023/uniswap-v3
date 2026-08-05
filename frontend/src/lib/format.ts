@@ -139,6 +139,32 @@ export function explorerTxUrl(baseUrl: string, txHash: string): string {
   return `${baseUrl.replace(/\/$/, '')}/tx/${txHash}`
 }
 
+/**
+ * A duration in seconds as human copy: "30 days", "1 year", "18 months".
+ *
+ * Deliberately coarse. These are policy terms a reader compares at a glance ("is this the standard
+ * year, or something short?"), not countdowns - so "1 year" beats "365 days 0 hours".
+ */
+export function formatDuration(seconds: bigint): string {
+  if (seconds <= 0n) return 'none'
+  const days = seconds / 86_400n
+  if (days === 0n) {
+    const hours = seconds / 3_600n
+    if (hours === 0n) return `${seconds} seconds`
+    return hours === 1n ? '1 hour' : `${hours} hours`
+  }
+  if (days < 60n) return days === 1n ? '1 day' : `${days} days`
+  if (days < 730n) {
+    const years = days / 365n
+    const rem = days % 365n
+    if (years >= 1n && rem === 0n) return years === 1n ? '1 year' : `${years} years`
+    const months = days / 30n
+    return `${months} months`
+  }
+  const years = days / 365n
+  return `${years} years`
+}
+
 // --- internal ---
 
 function trimDecimals(s: string, maxDecimals: number): string {

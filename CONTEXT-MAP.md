@@ -26,6 +26,7 @@ Architectural decisions live in [`docs/adr/`](./docs/adr/). Read one before re-o
 - **Launchpad → Indexing**: one-way, event-sourced. Indexing consumes `LaunchCreated`, `Bought`, `Sold`, `Graduation` and `Graduated` and makes **no on-chain calls at all**. Everything in the read model is derived, and therefore rebuildable by re-indexing.
 - **Launchpad → Trading UI**: direct. The trade path reads the chain and never the read model, so trading survives an Indexing outage. Trading UI trusts the Launchpad as the root of identity - it asks the launchpad "is this token yours?" rather than asking a token what launchpad it belongs to.
 - **Indexing → Trading UI**: analytics only - charts, feeds, positions, rollups. Every surface fed by Indexing must be able to degrade on its own without taking the trade path with it.
+  ⚠️ **Narrowed in #37.** A Launch's *terms* - the Dev Allocation, the vesting window, the lock duration, the creator fee share, the permanent-lock choice - are frozen at creation and now read from the **Launchpad**, not from Indexing, even though Indexing carries all of them. Anything frozen at `createLaunch` belongs on the direct-read side by default; Indexing is for what only it knows, which here is the realised `Lock` record and everything derived from trades.
 
 ## The one term that spans all three
 

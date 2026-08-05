@@ -3,7 +3,8 @@ import { activeChain } from '../config/chain'
 import { useIndexerStatus } from '../hooks/useIndexerStatus'
 import { useNowSeconds } from '../hooks/useNowSeconds'
 import { useOnchainToken } from '../hooks/useOnchainToken'
-import { useHolders, useToken, useTrades } from '../hooks/useSubgraph'
+import { useCurvePositions, useToken, useTrades } from '../hooks/useSubgraph'
+import { useLaunchTerms } from '../hooks/useLaunchTerms'
 import { parseTokenParam } from '../lib/address'
 import { isTradeable } from '../lib/onchainToken'
 import { isDegraded } from '../lib/indexerHealth'
@@ -18,11 +19,18 @@ import { OnchainTokenGate } from '../components/OnchainTokenGate'
 import { ProgressMeter } from '../components/ProgressMeter'
 import { TradePanel } from '../components/TradePanel'
 import { TokenTradeFeed } from '../components/TokenTradeFeed'
-import { HoldersCard } from '../components/HoldersCard'
+import { CurvePositionsCard } from '../components/CurvePositionsCard'
+import { LockCard } from '../components/LockCard'
+import { VestingCard } from '../components/VestingCard'
 
 // Stage 2 split: the trade path (curve address, graduation state, symbol) comes from RPC, so the
 // buy/sell panel keeps working through an indexer outage. The analytics panels (chart, curve stats,
-// holders) are indexer-derived and degrade individually to a labelled "unavailable" note.
+// curve positions) are indexer-derived and degrade individually to a labelled "unavailable" note.
+//
+// The lock and vesting panels (#37) sit on the CHAIN side of that split, not the indexed side. Every
+// term they show is frozen at `createLaunch` and readable per token, so they survive an outage like
+// the trade panel does. Only the realised `Lock` record - the position's actual expiry, extension
+// count and reclaim outcome - comes from the read model, and that half degrades on its own.
 export function TokenPage() {
   const { address } = useParams<{ address: string }>()
   const tokenAddr = parseTokenParam(address) ?? undefined
@@ -36,7 +44,14 @@ export function TokenPage() {
 
   const { data: token } = useToken(tokenAddr)
   const tradesQuery = useTrades(tokenAddr)
-  const { data: holders } = useHolders(tokenAddr)
+  const { data: curvePositions } = useCurvePositions(tokenAddr)
+  // ⚠️ **The launch's frozen terms come from the CHAIN, not from the indexed row.** Both the lock
+  // and vesting panels used to be gated on `token`, which meant an indexer outage silently removed
+  // the panel a buyer reads to find out whether the liquidity is locked at all - and took the
+  // creator's claim button with it. Found by loading the page with graph-node stopped, not by a
+  // test. Every value is frozen at `createLaunch`, so the read model was only ever a second route
+  // to the same immutable facts. See `useLaunchTerms`.
+  const terms = useLaunchTerms(tokenAddr)
   const trades = tradesQuery.data
   const now = useNowSeconds()
 
@@ -55,6 +70,7 @@ export function TokenPage() {
   // the whole route instead of degrading. `undefined` lets each consumer fall back to the 800M
   // no-dev-allocation default, which is the correct value for every launch created without one.
   const curveAllocation = token?.curveTokenAllocation ? BigInt(token.curveTokenAllocation) : undefined
+
 
   return (
     <div>
@@ -115,7 +131,7 @@ export function TokenPage() {
                 <Kv label="Volume" value={`${formatEth(BigInt(token.volumeEth))} ETH`} />
                 <Kv label="ETH reserve" value={`${formatEth(BigInt(token.ethReserve))} ETH`} />
                 <Kv label="Trades" value={String(token.tradeCount)} />
-                <Kv label="Holders" value={String(token.curvePositionCount)} />
+                <Kv label="Curve positions" value={String(token.curvePositionCount)} />
                 <Kv label="Buys / Sells" value={`${token.buyCount} / ${token.sellCount}`} />
               </div>
             ) : indexedMissing ? (
@@ -125,16 +141,58 @@ export function TokenPage() {
             )}
           </div>
 
+          {/* Terms from the chain, realised lock record from the indexer. Renders in both phases:
+              the terms are frozen at creation, so "is this liquidity locked, and for how long" is
+              worth answering BEFORE someone buys on the curve, not only after graduation. */}
+          <LockCard
+            lock={token?.lock ?? null}
+            lockDuration={terms.lockDuration}
+            permanentLockChoice={terms.permanentLock}
+            creatorFeeBps={terms.creatorFeeBps}
+            graduated={graduated}
+            pool={onchain.status === 'graduated' ? onchain.pool : undefined}
+            nowSeconds={now}
+            symbol={symbol}
+          />
+
+          {/* Renders nothing at all when the launch took no carve - see VestingCard. */}
+          <VestingCard
+            token={tokenAddr}
+            terms={{
+              // An unread allocation renders nothing, which is right: with no carve figure there is
+              // no grant to describe. The concentration panel below is where the failed read is
+              // reported, because that is the panel a reader consults for it.
+              allocation: terms.devAllocation ?? 0n,
+              // ⚠️ Passed through as `undefined`, NEVER defaulted to `0n`. A zero duration means the
+              // grant has fully released, so the default would announce an untouched carve as 100%
+              // vested and fully releasable. `VestingCard` has a state of its own for not-known.
+              duration: terms.vestingDuration,
+              // The only value here the chain does not hand us directly in this shape. A graduated
+              // launch whose row has not been indexed shows the grant and its terms but not the
+              // running schedule, which is the honest degradation: the schedule genuinely cannot be
+              // placed on a timeline without a start date.
+              graduatedAt: token?.graduatedAtTimestamp ? BigInt(token.graduatedAtTimestamp) : null,
+              claimed: terms.devClaimed ?? 0n,
+            }}
+            creator={terms.creator}
+            claimable={terms.claimable}
+            symbol={symbol}
+            nowSeconds={now}
+          />
+
           {indexedMissing ? (
             <div className="card">
-              <p className="section-title">Holders</p>
-              <IndexedDataNotice state={indexer.state} what="Holder table" />
+              <p className="section-title">Curve positions</p>
+              <IndexedDataNotice state={indexer.state} what="Curve positions" />
             </div>
           ) : (
-            <HoldersCard
-              holders={holders ?? []}
+            <CurvePositionsCard
+              positions={curvePositions ?? []}
               creator={token?.creator}
               curveAllocation={curveAllocation}
+              devAllocation={terms.devAllocation}
+              devClaimed={terms.devClaimed}
+              graduated={graduated}
             />
           )}
         </div>

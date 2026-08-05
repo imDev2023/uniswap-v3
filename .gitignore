@@ -21,3 +21,6 @@ contracts/broadcast/
 
 # scratch
 scratchpad/
+
+# Session hand-off prompts: working notes, deleted once the project ships.
+.session-prompts/

@@ -11,6 +11,12 @@ const TOKEN = '0x52eEF29c3c869B4D04F3c1451b16548DEAA923bE'
 const CURVE = '0x81a14013d3F048BcBe4AF0fB8b88aF0ec25D799a'
 const POOL = '0xDC27FeCB8589c0FB0328fd98963c823a1681E933'
 const V3FACTORY = '0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD'
+const DEV_VESTING = '0xFD8BaE689f3d878A15Cec543Fb042230283752d4'
+const LP_LOCK = '0xFBDf081CD189286569678fF60CC4BD5058A09078'
+const GRAD_MANAGER = '0x3e28d8838951C9F1ad229a5506584616E46D5E14'
+/** A graduation instant well before any `nowSeconds` the fixtures use. */
+const GRADUATED_AT = 1_700_000_000n
+const ZERO = '0x0000000000000000000000000000000000000000'
 
 const TRADES = [
   {
@@ -58,11 +64,11 @@ vi.mock('lightweight-charts', () => ({
 
 const fetchToken = vi.fn()
 const fetchTrades = vi.fn()
-const fetchHolders = vi.fn()
+const fetchCurvePositions = vi.fn()
 vi.mock('../lib/subgraph', () => ({
   fetchToken: (...a: unknown[]) => fetchToken(...a),
   fetchTrades: (...a: unknown[]) => fetchTrades(...a),
-  fetchHolders: (...a: unknown[]) => fetchHolders(...a),
+  fetchCurvePositions: (...a: unknown[]) => fetchCurvePositions(...a),
   fetchMeta: vi.fn(() => Promise.reject(new Error('down'))),
 }))
 
@@ -94,14 +100,50 @@ function ok(result: unknown) {
   return { status: 'success' as const, result }
 }
 
-/** Answer whichever round useOnchainToken is asking for, by its contract shape. */
+/**
+ * Answer whichever round the page is asking for, by its contract shape.
+ *
+ * ⚠️ A round this does not recognise must NOT fall through to another round's answer. #37 added the
+ * launch-terms reads, and letting them land on the graduation round's `[bool, address]` handed a
+ * boolean to a `BigInt()` - which at least threw. The silent version of the same mistake is what
+ * this default guards against: an unrecognised round answering with somebody else's plausible data.
+ */
 function chainSays({ graduated }: { graduated: boolean }) {
   readContractsMock.mockImplementation((cfg: { contracts: { functionName: string }[] }) => {
     const fns = cfg.contracts.map((c) => c.functionName)
     if (fns.includes('curveOf')) {
       return { data: [ok(CURVE), ok(V3FACTORY), ok('Meta Test'), ok('META')], isError: false }
     }
-    return { data: [ok(graduated), ok(graduated ? POOL : undefined)], isError: false }
+    if (fns.includes('graduated')) {
+      return { data: [ok(graduated), ok(graduated ? POOL : undefined)], isError: false }
+    }
+    // The three periphery addresses (usePeriphery).
+    //
+    // ⚠️ This array's LENGTH is part of the contract, not just its contents. It returned two entries
+    // while the hook asked for three, so `graduationManager` read as undefined, the graduation date
+    // silently became unknown, and the vesting card sat in its unknown branch - invisible here only
+    // because this fixture takes no carve and renders no card at all.
+    if (fns.includes('devVesting')) {
+      return { data: [ok(DEV_VESTING), ok(LP_LOCK), ok(GRAD_MANAGER)], isError: false }
+    }
+    // The graduation instant (useLaunchTerms), read from GraduationManager and never the indexer.
+    // ⚠️ Zero is the contract's "has not graduated"; it is not a timestamp.
+    if (fns.includes('graduatedAt')) {
+      return { data: [ok(graduated ? GRADUATED_AT : 0n)], isError: false }
+    }
+    // The frozen lock terms + dev carve (useLaunchTerms). This fixture is the no-carve case.
+    if (fns.includes('lockConfigOf')) {
+      return { data: [ok([31_536_000n, 7000, false]), ok(0n)], isError: false }
+    }
+    // The vesting grant + claimable (useLaunchTerms). No grant exists for a no-carve launch.
+    if (fns.includes('grantOf')) {
+      return {
+        data: [ok({ creator: ZERO, duration: 0n, total: 0n, claimed: 0n }), ok(0n)],
+        isError: false,
+      }
+    }
+    // Reclaim status, which only runs once a lock record exists.
+    return { data: undefined, isError: false }
   })
 }
 
@@ -129,17 +171,28 @@ beforeEach(() => {
     volumeEth: '270000000000000000',
     ethReserve: '124000000000000000',
     tradeCount: 2,
-    holderCount: 1,
+    // `holderCount` until #36 renamed the entity. The stale key sat here through the rename with
+    // nothing asserting on it, so the page rendered `undefined` into the curve-position stat and
+    // every test stayed green - the exact shape of the trap #36's review recorded.
+    curvePositionCount: 1,
     buyCount: 1,
     sellCount: 1,
     progressBps: 9750,
     tokensSold: '780000000000000000000000000',
     // Per launch since #34; this fixture is the no-dev-allocation case.
     curveTokenAllocation: '800000000000000000000000000',
+    // Launch terms (#36). The no-carve, standard-lock case.
+    devAllocation: '0',
+    devClaimed: '0',
+    vestingDuration: '2592000',
+    lockDuration: '31536000',
+    creatorFeeBps: 7000,
+    permanentLock: false,
+    lock: null,
     graduation: { raisedEth: '100000000000000000' },
   })
   fetchTrades.mockResolvedValue(TRADES)
-  fetchHolders.mockResolvedValue([])
+  fetchCurvePositions.mockResolvedValue([])
 })
 
 describe('TokenPage - a graduated token gets ONE card, not two', () => {
@@ -221,6 +274,40 @@ describe('TokenPage - a live curve', () => {
     // time-proportional one fills the span, which is the whole point of the rework.
     expect(points.length).toBeGreaterThan(2)
     expect(points[0].time).toBe(1000)
+  })
+})
+
+describe('TokenPage - the lock panel survives an indexer outage', () => {
+  // ⚠️ **Found by loading the page with graph-node stopped, not by any test.** Both the lock and
+  // vesting panels were gated on the indexed token row, so during an outage the page silently
+  // dropped the panel a buyer reads to find out whether the liquidity is locked at all - and took
+  // the creator's claim button with it. Every term on that panel is frozen at `createLaunch` and
+  // readable per token, so it belongs on the chain side of the Stage 2 split, like the trade panel.
+  beforeEach(() => chainSays({ graduated: false }))
+
+  it('still states the lock term when every subgraph fetcher rejects', async () => {
+    fetchToken.mockRejectedValue(new Error('ECONNREFUSED'))
+    fetchTrades.mockRejectedValue(new Error('ECONNREFUSED'))
+    fetchCurvePositions.mockRejectedValue(new Error('ECONNREFUSED'))
+
+    await renderTokenPage()
+    await screen.findByRole('button', { name: /^buy$/i })
+
+    expect(screen.getByText(/liquidity lock/i)).toBeInTheDocument()
+    expect(screen.getByText('1 year')).toBeInTheDocument()
+    // ⚠️ "of the locked position's fees", not "of pool fees". The protocol fee comes off the top
+    // before this share is taken, so the latter overstated the creator's take by a third.
+    expect(screen.getByText("70% of the locked position's fees")).toBeInTheDocument()
+  })
+
+  it('does not report an unindexed launch as having no lock', async () => {
+    // The failure mode being guarded is not a blank panel but a confident wrong one: "Term: none"
+    // on a launch whose liquidity is in fact locked for a year.
+    fetchToken.mockRejectedValue(new Error('ECONNREFUSED'))
+    const { container } = await renderTokenPage()
+    await screen.findByRole('button', { name: /^buy$/i })
+
+    expect(container.textContent).not.toMatch(/Term.{0,12}none/i)
   })
 })
 

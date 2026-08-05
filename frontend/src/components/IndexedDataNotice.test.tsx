@@ -14,7 +14,7 @@ describe('IndexedDataNotice', () => {
   })
 
   it('distinguishes stale from unreachable', () => {
-    render(<IndexedDataNotice state="stale" what="Holder table" />)
+    render(<IndexedDataNotice state="stale" what="Curve positions" />)
     expect(screen.getByRole('status')).toHaveTextContent(/behind the chain/i)
   })
 

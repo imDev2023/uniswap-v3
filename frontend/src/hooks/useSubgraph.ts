@@ -4,7 +4,7 @@ import {
   fetchActiveTokens,
   fetchFactory,
   fetchGraduatedTokens,
-  fetchHolders,
+  fetchCurvePositions,
   fetchRecentTrades,
   fetchToken,
   fetchTrades,
@@ -65,10 +65,18 @@ export function useTrades(token: string | undefined) {
   })
 }
 
-export function useHolders(token: string | undefined) {
+/**
+ * Net curve positions for one launch, largest first.
+ *
+ * ⚠️ Not holders - see {@link CurvePositionRow}. Still polled on the live interval even though a
+ * graduated launch's positions can never change again: the poll is what makes a live curve's panel
+ * track its trades, and branching the interval on graduation would buy nothing but a second code
+ * path. The CARD is what must say which of the two it is showing.
+ */
+export function useCurvePositions(token: string | undefined) {
   return useQuery({
-    queryKey: ['holders', token?.toLowerCase()],
-    queryFn: () => fetchHolders(token!),
+    queryKey: ['curvePositions', token?.toLowerCase()],
+    queryFn: () => fetchCurvePositions(token!),
     enabled: !!token,
     refetchInterval: LIVE_REFETCH_MS,
   })

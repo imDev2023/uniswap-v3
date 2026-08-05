@@ -62,10 +62,21 @@ How launch-scale prices are written, compressing leading zeros rather than falli
 _Avoid_: scientific notation, exponential
 
 **Curve Position**:
-An address's net stake in one Curve. The Holders panel shows these, and they are blind to transfers and frozen at graduation - so the label must say what it counts, and must present a graduated Launch's positions as final rather than current.
+An address's net stake in one Curve. The Curve Positions panel shows these, and they are blind to transfers and frozen at graduation - so the label says what it counts, and presents a graduated Launch's positions as final rather than current.
 _Avoid_: **holder**, holding, balance
 
-⚠️ **Settled 2026-08-01, not yet implemented.** See [Indexing](../subgraph/CONTEXT.md#resolved). The model stays; the words change.
+✅ **Settled 2026-08-01, shipped in #36 (schema) and #37 (identifiers and visible copy).** See [Indexing](../subgraph/CONTEXT.md#resolved). The model stayed; the words changed.
+
+**Launch Terms**:
+The lock duration, creator fee share, permanent-lock choice and dev allocation, all frozen at `createLaunch` and readable per token from the chain.
+
+⚠️ **Terms are Trade Path, not Indexed Panel**, and this was learned the hard way in #37: the lock and vesting panels were first built off the indexed row, and an Indexing outage silently removed the panel a buyer reads to decide whether the liquidity is locked - taking the Creator's claim button with it. Nothing frozen at creation should depend on the read model, because the chain answers it directly and always.
+
+**Dev Allocation**:
+The Creator's free carve out of the Curve Allocation, custodied by the vault and released linearly from Graduation. Always presented as **two** numbers - granted and released - because they differ for the whole vesting window.
+_Avoid_: creator holdings, premine (accurate, but it names the mechanism rather than the term the product uses)
+
+⚠️ **Vested-so-far is computed, never stored.** It is a continuous function of wall-clock time, so any indexed figure is stale between events. See [Indexing](../subgraph/CONTEXT.md#resolved).
 
 ## Open questions
 

@@ -34,7 +34,7 @@ vi.mock('../lib/subgraph', () => ({
   fetchRecentTrades: (...a: unknown[]) => fetchRecentTrades(...a),
   fetchToken: vi.fn(),
   fetchTrades: vi.fn(),
-  fetchHolders: vi.fn(),
+  fetchCurvePositions: vi.fn(),
   fetchMeta: (...a: unknown[]) => fetchMeta(...a),
 }))
 
@@ -74,7 +74,8 @@ function token(id: string, symbol: string, over: Partial<TokenRow> = {}): TokenR
     buyCount: 1,
     sellCount: 0,
     tradeCount: 1,
-    holderCount: 1,
+    // `holderCount` until #36 renamed the entity; the stale key survived the rename unnoticed.
+    curvePositionCount: 1,
     graduated: false,
     graduatedAtTimestamp: null,
     ...over,

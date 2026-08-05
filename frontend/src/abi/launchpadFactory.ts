@@ -18,11 +18,11 @@ export const launchpadFactoryAbi = [
           // Permanent, set once at creation - the contract has no setter. See CreatePage.
           { name: 'metadataURI', type: 'string' },
           // Lock the graduation LP forever instead of the default 1 year. Terminal: it can never be
-          // walked back. The UI control for this lands in #37; v1 of the struct defaults it to false.
+          // walked back. Surfaced on the create form in #37.
           { name: 'permanentLock', type: 'bool' },
-          // #34: the creator's free allocation, in bps of the curve supply, 0 to 500 (5%). Carved out
-          // of the curve allocation and vested linearly from graduation (#35). The UI control lands
-          // in #37; until then this is always 0, which is the no-pre-mine case.
+          // #34: the creator's free allocation, in bps of the CURVE SUPPLY constant (not of this
+          // launch's carved allocation), 0 to `maxDevAllocationBps`. Carved out of the curve
+          // allocation and vested linearly from graduation (#35). Surfaced on the create form in #37.
           { name: 'devAllocationBps', type: 'uint16' },
         ],
       },
@@ -62,6 +62,100 @@ export const launchpadFactoryAbi = [
   {
     type: 'function',
     name: 'v3Factory',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  // --- the four owner-tunable launch terms the create form quotes back (#37) ---
+  //
+  // ⚠️ **Read, never hardcoded.** All four are owner-tunable and future-only, and the whole point of
+  // that design is that testnet feedback retunes the platform with a transaction. A form carrying
+  // `500` or `365 days` as a literal turns every retune into a frontend deploy, and - worse - keeps
+  // quoting the old terms to creators in the window before that deploy lands.
+  {
+    type: 'function',
+    name: 'maxDevAllocationBps',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint16' }],
+  },
+  {
+    type: 'function',
+    name: 'defaultLockDuration',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint64' }],
+  },
+  {
+    type: 'function',
+    name: 'vestingDuration',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint64' }],
+  },
+  {
+    type: 'function',
+    name: 'creatorFeeBps',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint16' }],
+  },
+  // The curve-supply constant the dev allocation is a share OF. `devAllocationBps` is bps of this,
+  // not of the launch's own carved allocation, so the token figure the form previews must divide by
+  // this one. Immutable.
+  {
+    type: 'function',
+    name: 'CURVE_SUPPLY',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  // --- this launch's own FROZEN terms, read per token (#37) ---
+  //
+  // ⚠️ Read from the chain rather than only from the indexer, and that is a Stage-2 decision. Both
+  // are frozen at `createLaunch` and neither can ever change, so the indexer adds nothing but a
+  // dependency - and during an indexer outage the lock panel would otherwise disappear entirely
+  // from the page a buyer reads to find out whether the liquidity is locked at all.
+  {
+    type: 'function',
+    name: 'lockConfigOf',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    // A public mapping over a struct flattens its members into separate return values.
+    outputs: [
+      { name: 'lockDuration', type: 'uint64' },
+      { name: 'creatorFeeBps', type: 'uint16' },
+      { name: 'permanent', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'devAllocationOf',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  // Immutable addresses of the three periphery contracts the token page reads. Taken from the
+  // factory rather than from env vars, per ADR-0003: the launchpad is the root of identity, and all
+  // three are deployed by its own constructor, so there is no configuration here that could drift
+  // out of step with the factory the rest of the app is pointed at.
+  {
+    type: 'function',
+    name: 'devVesting',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'lpLock',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'graduationManager',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'address' }],

@@ -1465,3 +1465,79 @@ code {
   background: var(--bg-raised-2);
   color: var(--accent);
 }
+
+/* Range + checkbox controls (#37's create-form choices).
+   The browser defaults render in the platform blue, which reads as a foreign widget dropped into an
+   otherwise all-green surface - and on the one form where a creator is making two irreversible
+   decisions, "this control is not part of this app" is the wrong impression to give. */
+.range {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  height: 20px;
+  margin: 2px 0 6px;
+  cursor: pointer;
+}
+.range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+      to right,
+      var(--accent) 0 var(--range-fill, 0%),
+      var(--bg-inset) var(--range-fill, 0%) 100%
+    );
+  border: 1px solid var(--border);
+}
+.range::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+      to right,
+      var(--accent) 0 var(--range-fill, 0%),
+      var(--bg-inset) var(--range-fill, 0%) 100%
+    );
+  border: 1px solid var(--border);
+}
+.range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 0 10px -2px var(--accent);
+}
+.range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  box-shadow: 0 0 10px -2px var(--accent);
+}
+.range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--accent-dim);
+  outline-offset: 2px;
+}
+
+/* The ceiling is owner-tunable, so it is worth showing rather than leaving a creator to discover it
+   by dragging to the end. */
+.range-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  margin-top: -4px;
+  margin-bottom: 6px;
+}
+
+.check {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}

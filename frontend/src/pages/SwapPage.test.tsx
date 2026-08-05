@@ -19,7 +19,7 @@ const SUBGRAPH_DOWN = new Error('fetch failed: ECONNREFUSED')
 vi.mock('../lib/subgraph', () => ({
   fetchToken: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
   fetchTrades: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
-  fetchHolders: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
+  fetchCurvePositions: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
   fetchActiveTokens: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
   fetchGraduatedTokens: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
   fetchFactory: vi.fn(() => Promise.reject(SUBGRAPH_DOWN)),
@@ -118,7 +118,7 @@ describe('SwapPage with the indexer down', () => {
     // fetchToken may be called for the garnish, but the page must have rendered without its result.
     // The real assertion is above: pool + panel present while every fetcher rejects.
     expect(vi.mocked(subgraph.fetchTrades)).not.toHaveBeenCalled()
-    expect(vi.mocked(subgraph.fetchHolders)).not.toHaveBeenCalled()
+    expect(vi.mocked(subgraph.fetchCurvePositions)).not.toHaveBeenCalled()
   })
 })
 

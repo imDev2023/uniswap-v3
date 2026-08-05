@@ -205,7 +205,9 @@ contract LaunchpadFactory is Ownable2Step {
     /// @notice Executes atomic graduation and escrows the 200M reserve for every launch (#16).
     GraduationManager public immutable graduationManager;
 
-    /// @notice Permanent lock that owns every graduated LP position (#17).
+    /// @notice Custodian that owns every graduated LP position (#17, rewritten in #33).
+    /// @dev ⚠️ Not a *permanent* lock since #33 - see ADR-0005. The term is per position, one year by
+    ///      default, and an expired lock over a pool that has gone quiet is reclaimable by anyone.
     LPLock public immutable lpLock;
 
     /// @notice Custodian for every creator's dev allocation, releasing it linearly from graduation (#35).

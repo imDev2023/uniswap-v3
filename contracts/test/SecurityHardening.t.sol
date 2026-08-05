@@ -551,10 +551,35 @@ contract SecurityHardeningTest is Test, V3Deployer, CurveDriver {
     ///         `createLaunch` and an extra 17k gas on every factory deployment.
     /// @dev Asserts the layout itself rather than a gas number, because a gas assertion would drift
     ///      with every unrelated change. Measured deltas are in `docs/security-checklist.md`.
+    /// @dev Reads the RAW slot and decodes each field out of it, rather than calling the five
+    ///      getters. A getter returns the right value wherever the variable lives, so a
+    ///      getters-only test passes with the packing entirely undone - which is what this
+    ///      assertion previously did, and why it was replaced.
+    ///
+    ///      Solidity fills a slot from the LOW-ORDER end, so `offset` in `forge inspect`'s table is
+    ///      a byte offset from the right of the word: shift right by `offset * 8` and truncate.
+    ///      Offsets 0/8/10/12/20, occupying 22 of the 32 bytes.
+    ///
+    ///      ⚠️ If a state variable is legitimately added to `LaunchpadFactory` BEFORE these five,
+    ///      the group shifts to a new slot and this test fails. That is intended: confirm the five
+    ///      are still contiguous in `forge inspect LaunchpadFactory storageLayout`, then update
+    ///      `SLOT` here. Do not "fix" it by going back to comparing getters.
     function test_OwnerParams_SharePackedStorageSlot() public view {
-        // A read of all five in one call must not cost more than a single cold SLOAD plus warm ones.
-        // The layout claim itself is checked by `forge inspect`; here we pin the VALUES round-trip so
-        // a mis-packed reorder that corrupted a neighbour would fail loudly.
+        uint256 SLOT = 12;
+        uint256 w = uint256(vm.load(address(factory), bytes32(SLOT)));
+
+        assertEq(uint256(uint64(w)), factory.defaultLockDuration(), "defaultLockDuration at offset 0");
+        assertEq(uint256(uint16(w >> 64)), factory.creatorFeeBps(), "creatorFeeBps at offset 8");
+        assertEq(uint256(uint16(w >> 80)), factory.maxDevAllocationBps(), "maxDevAllocationBps at offset 10");
+        assertEq(uint256(uint64(w >> 96)), factory.vestingDuration(), "vestingDuration at offset 12");
+        assertEq(uint256(uint16(w >> 160)), factory.tradeFeeBps(), "tradeFeeBps at offset 20");
+
+        // The top 10 bytes are free. A field that grew past 22 bytes, or a sixth squeezed in here,
+        // would show up as a dirty high word rather than as a silent overlap.
+        assertEq(w >> 176, 0, "bytes 22..32 of the slot are unused");
+
+        // Values are still the deployed defaults, so a reorder that corrupted a neighbour through
+        // a bad mask fails here rather than surfacing as a wrong launch parameter later.
         assertEq(factory.defaultLockDuration(), factory.DEFAULT_LOCK_DURATION(), "lock duration intact");
         assertEq(factory.creatorFeeBps(), factory.DEFAULT_CREATOR_FEE_BPS(), "creator fee intact");
         assertEq(factory.maxDevAllocationBps(), factory.MAX_DEV_ALLOCATION_BPS(), "max dev intact");

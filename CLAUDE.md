@@ -57,18 +57,14 @@ Everything (addresses, launch table, calibration, restore commands) is in [`docs
 Agreed 2026-08-02. Spec is [`docs/tokenomics.md`](docs/tokenomics.md); the three property changes it forced are ADR-[0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) (the lock is conditional), [0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) (the curve allocation is per launch, and it is a pre-mine) and [0007](docs/adr/0007-vesting-runs-from-graduation.md) (vesting runs from graduation).
 **Read the spec before touching any of this. Do not re-derive it and do not re-open the settled decisions.**
 
-Six tickets, **on top of** the remaining pre-tokenomics work below. Three done, all three contract-side, plus the unplanned #35a hardening pass.
+Everything contract-side and indexer-side is **done and merged**: #33 ([ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md)), #34 ([ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md)), #35 ([ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md)), #35a + #35b ([`docs/security-checklist.md`](docs/security-checklist.md)) and #36 (`LaunchConfig`, the `Lock` entity, `Holder` → `CurvePosition`). `git log --oneline main` has the detail; do not restate it here.
 
-| Ticket | Scope | State |
+| Remaining ticket | Scope | State |
 | --- | --- | --- |
-| `build/33-lplock-lock-records` | see [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) | ✅ merged (`8e9af94`) |
-| `build/34-curve-carve` | see [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) | ✅ merged (`f000969`) |
-| `build/35-dev-vesting` | see [ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md) | ✅ merged (`9f4bfff`) |
-| `build/35a-security-hardening` | see [`docs/security-checklist.md`](docs/security-checklist.md). Branch coverage, fuzz properties, locked pragma, packed slot | ✅ merged (`a411975`) |
-| `build/35b-pin-packed-slot` | `vm.load` assertion on slot 12. The #35a test compared getters, which pass with the packing fully undone | ✅ merged (`fd476a9`) |
-| `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | ⬅️ **built, UNCOMMITTED** |
-| `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock/vesting/reclaim state) | not started |
+| `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock / vesting / reclaim state), and the `Holder` → Curve Position relabel | ⬅️ **next** |
 | `build/38-testnet-redeploy` | Fork tests, full redeploy, Blockscout re-verify, re-seed | not started |
+
+⚠️ **#37 and #38 are ordering-coupled.** `DevVesting` has NEVER been deployed, so its `subgraph/networks.json` entry is `0x0` and the vesting half of #37 cannot be verified against live testnet data until #38 lands. #37 first means matchstick and mocks only.
 
 ⚠️ **The INDEXER has caught up; the UI has not.** #36 indexes the dev carve, the vesting grant and the per-launch lock terms, and renamed `Holder` to `CurvePosition` **in the subgraph** (schema, mappings, matchstick) plus the frontend's GraphQL queries. The frontend's own identifiers are deliberately untouched and still say holder: `HolderRow`, `HOLDERS_QUERY`, `fetchHolders`, `useHolders`, `HoldersCard`. #37 owns those and the visible copy. What #37 still owes: the panel does not yet DISPLAY any of it, so a creator holding up to 40M tokens still reads as **0% concentration** on screen.
 
@@ -104,7 +100,8 @@ Full reasoning is in [`docs/tokenomics.md`](docs/tokenomics.md#settled-decisions
 
 Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.md). ~9-9.5 tickets, several invalidated by the mandatory redeploy.
 
-**Stage 3 (frontend), still open:** create-flow URI validation (🔴 the field writes permanently with **no validation at all** - `ipfs//…`, free text, `javascript:`, whitespace all pass, and the read side silently ignores every one of them); name `maxLength={40}` vs validation rejecting `>32`; **no search, no pagination, no address lookup** past `BOARD_PAGE_SIZE = 50`; ⚠️ **injected-only wallets, so mobile cannot connect at all**; "Holders" → **Curve Position** relabel (decided, not built).
+**Stage 3 (frontend), still open:** create-flow URI validation (🔴 the field writes permanently with **no validation at all** - `ipfs//…`, free text, `javascript:`, whitespace all pass, and the read side silently ignores every one of them); name `maxLength={40}` vs validation rejecting `>32`; **no search, no pagination, no address lookup** past `BOARD_PAGE_SIZE = 50`; ⚠️ **injected-only wallets, so mobile cannot connect at all**; "Holders" → **Curve Position** relabel (the subgraph did it in #36; the frontend's identifiers and visible copy are #37's).
+⚠️ **`CreatePage.tsx:57,60` hardcodes `permanentLock: false` and `devAllocationBps: 0`.** The ABI already carries both. So every launch created through the UI today silently takes no dev carve and no permanent lock - the creator is never asked. That is #37's first job, not a nice-to-have.
 
 **Stage 4 (infra), still open:** frontend hosting; monitoring wiring (`scripts/indexer-health.mjs` exists, nothing runs it); 🔴 **key protection - the RPC key ships verbatim in the browser bundle**, so domain allowlisting or a proxy is required before any public deploy; Stage-2 RPC fallbacks for the homepage list and curve progress; Blockscout verification of the V3 stack + QuoterV2. All of SlowMist's frontend-hardening section (HSTS, CSP, SRI, headers) is unaddressed and blocked on choosing hosting - itemised in [`docs/security-checklist.md`](docs/security-checklist.md#operational-security).
 
@@ -118,7 +115,7 @@ Estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.m
 
 # Open decisions - ask, never assume
 
-- 🔴 **Commit #35a, and PUSH.** `main` is **9 ahead of `origin/main` and NOTHING has been pushed this whole program**; #35a is not even committed. Three merged tickets plus a hardening pass exist only on this machine. Ask before each; none is standing permission.
+- 🔴 **`FeesCollected` is not indexed**, so settled decision 1 - the creator's 70% share of the graduated pool's LP fees - has **no read side at all**. A creator cannot see what they have earned. Surfaced by #36's review; not in #37's scope as written. Fold into #37, or give it its own ticket?
 - **The 30-day vesting default is the shortest the contract allows**, so a 5% allocation is fully liquid a month after graduation (~-30.6% if dumped whole). Chosen 2026-08-04; flagged as a testnet-retune candidate, not as settled.
 - **`createLaunch` still has no reentrancy guard** despite refunding via `.call`. CEI holds and re-entry just buys another launch, so it was judged gas for no threat. Want it anyway? (The floating pragma from the same #34 pair was fixed in #35a.)
 - ⚠️ **`setPoolProtocolFee` is the one unmitigated privileged power**: retroactive on a live pool, no delay, no notice, capped at 25% of swap fees and cannot touch principal. The multisig is the only control. Recorded in [`docs/security-checklist.md`](docs/security-checklist.md#deliberate-omissions).

@@ -13,6 +13,9 @@ const POOL = '0xDC27FeCB8589c0FB0328fd98963c823a1681E933'
 const V3FACTORY = '0x158a14f6Aa8C86921e624e3ed0526F31520cB2BD'
 const DEV_VESTING = '0xFD8BaE689f3d878A15Cec543Fb042230283752d4'
 const LP_LOCK = '0xFBDf081CD189286569678fF60CC4BD5058A09078'
+const GRAD_MANAGER = '0x3e28d8838951C9F1ad229a5506584616E46D5E14'
+/** A graduation instant well before any `nowSeconds` the fixtures use. */
+const GRADUATED_AT = 1_700_000_000n
 const ZERO = '0x0000000000000000000000000000000000000000'
 
 const TRADES = [
@@ -114,9 +117,19 @@ function chainSays({ graduated }: { graduated: boolean }) {
     if (fns.includes('graduated')) {
       return { data: [ok(graduated), ok(graduated ? POOL : undefined)], isError: false }
     }
-    // The two periphery addresses (usePeriphery).
+    // The three periphery addresses (usePeriphery).
+    //
+    // ⚠️ This array's LENGTH is part of the contract, not just its contents. It returned two entries
+    // while the hook asked for three, so `graduationManager` read as undefined, the graduation date
+    // silently became unknown, and the vesting card sat in its unknown branch - invisible here only
+    // because this fixture takes no carve and renders no card at all.
     if (fns.includes('devVesting')) {
-      return { data: [ok(DEV_VESTING), ok(LP_LOCK)], isError: false }
+      return { data: [ok(DEV_VESTING), ok(LP_LOCK), ok(GRAD_MANAGER)], isError: false }
+    }
+    // The graduation instant (useLaunchTerms), read from GraduationManager and never the indexer.
+    // ⚠️ Zero is the contract's "has not graduated"; it is not a timestamp.
+    if (fns.includes('graduatedAt')) {
+      return { data: [ok(graduated ? GRADUATED_AT : 0n)], isError: false }
     }
     // The frozen lock terms + dev carve (useLaunchTerms). This fixture is the no-carve case.
     if (fns.includes('lockConfigOf')) {
@@ -282,7 +295,9 @@ describe('TokenPage - the lock panel survives an indexer outage', () => {
 
     expect(screen.getByText(/liquidity lock/i)).toBeInTheDocument()
     expect(screen.getByText('1 year')).toBeInTheDocument()
-    expect(screen.getByText('70% of pool fees')).toBeInTheDocument()
+    // ⚠️ "of the locked position's fees", not "of pool fees". The protocol fee comes off the top
+    // before this share is taken, so the latter overstated the creator's take by a third.
+    expect(screen.getByText("70% of the locked position's fees")).toBeInTheDocument()
   })
 
   it('does not report an unindexed launch as having no lock', async () => {

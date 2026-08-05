@@ -22,7 +22,7 @@ import { formatPercent, formatTokenAmount, shortAddress } from '../lib/format'
 export function CurvePositionsCard({
   positions,
   creator,
-  curveAllocation = CURVE_SUPPLY,
+  curveAllocation,
   devAllocation,
   devClaimed,
   graduated,
@@ -31,12 +31,17 @@ export function CurvePositionsCard({
   /** Undefined when the creator isn't known - the indexer supplies it, and it may be unavailable. */
   creator: string | undefined
   /**
-   * ⚠️ This launch's own curve allocation. Since #34 a dev allocation carves it below the 800M
-   * constant, and concentration is read by someone deciding whether to buy - a denominator that is
-   * too large understates exactly the number they are checking. Defaults to the no-dev-allocation
-   * case, which is correct for every launch created without one.
+   * ⚠️ This launch's own curve allocation, from the indexed row. Since #34 a dev allocation carves
+   * it below the 800M constant, and concentration is read by someone deciding whether to buy - a
+   * denominator that is too large understates exactly the number they are checking.
    *
-   * Every percentage in this card shares this denominator, deliberately. Two denominators in one
+   * ⚠️ `undefined` here does NOT mean 800M. It is reconstructed from the chain-read carve instead,
+   * because `curveAllocation == CURVE_SUPPLY - devAllocation` exactly (`LaunchpadFactory._grantDevCarve`),
+   * and `devAllocation` arrives over RPC in the same render. Falling back to the constant while
+   * holding the exact carve printed a 40M grant as 5.00% when it is 5.26% - the ADR-0006 error, on
+   * the panel written to avoid it, in the direction that flatters the launch.
+   *
+   * Every percentage in this card shares one denominator, deliberately. Two denominators in one
    * table is how a reader ends up comparing figures that are not comparable.
    */
   curveAllocation?: bigint
@@ -61,6 +66,12 @@ export function CurvePositionsCard({
   const creatorBought = creatorPosition ? BigInt(creatorPosition.balance) : 0n
   const carveUnknown = devAllocation === undefined
   const hasCarve = devAllocation !== undefined && devAllocation > 0n
+
+  // The indexed figure when we have it; otherwise rebuilt from the chain-read carve, which is the
+  // same number by construction. Only when BOTH are unavailable does this fall back to the bare
+  // constant, and that is the no-carve case, where the constant is the right answer.
+  const allocation =
+    curveAllocation ?? (devAllocation !== undefined ? CURVE_SUPPLY - devAllocation : CURVE_SUPPLY)
 
   return (
     <div className="card">
@@ -116,7 +127,7 @@ export function CurvePositionsCard({
                   just quoted. This card uses one denominator throughout, so its rows stay
                   comparable, and the label now names it. */}
               <div className="kv-label">
-                dev allocation · {formatPercent(shareOfCurveSupply(devAllocation, curveAllocation))} of
+                dev allocation · {formatPercent(shareOfCurveSupply(devAllocation, allocation))} of
                 the curve allocation
               </div>
               {/* The second of the two numbers. Shown even at zero: "0 released" is a fact a buyer
@@ -178,7 +189,7 @@ export function CurvePositionsCard({
                   </td>
                   <td style={{ textAlign: 'right' }}>{formatTokenAmount(BigInt(p.balance))}</td>
                   <td style={{ textAlign: 'right' }}>
-                    {formatPercent(shareOfCurveSupply(BigInt(p.balance), curveAllocation))}
+                    {formatPercent(shareOfCurveSupply(BigInt(p.balance), allocation))}
                   </td>
                 </tr>
               )

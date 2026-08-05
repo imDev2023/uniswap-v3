@@ -329,9 +329,15 @@ export function CreatePage() {
             {creationFee !== undefined ? `${formatEth(creationFee)} ETH` : '…'}
           </span>
         </div>
+        {/* ⚠️ "of the locked position's fees", NOT "of pool fees". The protocol fee comes off the
+            top of the pool's fee and only the remainder accrues to the locked LP position, of which
+            this is the creator's cut - so "of pool fees" overstated the take by a third, on the
+            single number a creator weighs when deciding to launch. Not restated as a share of
+            volume, because `setProtocolFee` is owner-tunable and that figure is not a constant.
+            docs/tokenomics.md section 4 carries the full split. */}
         {creatorFeeBps !== undefined && (
           <div className="quote-line" style={{ margin: '0 0 16px' }}>
-            <span>Your share of pool fees after graduation</span>
+            <span>Your share of the locked position&rsquo;s fees after graduation</span>
             <span className="num">{creatorFeeBps / 100}%</span>
           </div>
         )}

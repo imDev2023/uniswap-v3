@@ -114,6 +114,26 @@ describe('creator concentration', () => {
     // create form had just quoted for the identical launch.
     expect(screen.getByText(/5\.3% of\s*the curve allocation/i)).toBeInTheDocument()
   })
+
+  it('rebuilds the denominator from the chain carve when the indexed allocation is missing', () => {
+    // ⚠️ `curveAllocation` comes from the indexed row and `devAllocation` over RPC, so an indexer
+    // outage leaves the exact carve in hand and the denominator absent. Defaulting to the 800M
+    // constant there printed 5.00% for a launch that is 5.3% concentrated - the ADR-0006 error, in
+    // the direction that flatters the launch, on the panel that exists to disclose concentration.
+    // `curveAllocation == CURVE_SUPPLY - devAllocation` exactly, so nothing has to be guessed.
+    render(
+      <CurvePositionsCard
+        positions={[]}
+        creator={CREATOR}
+        curveAllocation={undefined}
+        devAllocation={FORTY_MILLION}
+        devClaimed={0n}
+        graduated={false}
+      />,
+    )
+    expect(screen.getByText(/5\.3% of\s*the curve allocation/i)).toBeInTheDocument()
+    expect(screen.queryByText(/5\.0% of/i)).not.toBeInTheDocument()
+  })
 })
 
 describe('an UNREAD carve is not an absent carve', () => {

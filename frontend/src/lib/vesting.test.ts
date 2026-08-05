@@ -131,6 +131,38 @@ describe('an UNKNOWN duration is not a zero duration', () => {
   })
 })
 
+describe('an UNKNOWN graduation date is not an ungraduated launch', () => {
+  // ⚠️ The mirror of the unknown-duration defect above, and it shipped for a whole ticket because
+  // `graduatedAt` was the one value on the card still taken from the indexer. With graph-node down,
+  // `undefined` fell through to the `null` branch and a launch that graduated a month ago rendered
+  // as "the schedule starts at graduation - so if this curve never graduates, the creator never
+  // receives any of it". A statement about the future, made confidently, about the past.
+  it('gets its own state rather than reading as not-started', () => {
+    const state = vestingState(grant({ graduatedAt: undefined }), GRAD + THIRTY_DAYS)
+    expect(state.kind).toBe('schedule-unknown')
+  })
+
+  it('still reads as not-started for a launch genuinely on its curve', () => {
+    // Both directions again: `null` is a real answer and must keep its own, different copy.
+    expect(vestingState(grant({ graduatedAt: null }), GRAD + THIRTY_DAYS).kind).toBe('not-started')
+  })
+
+  it('vests nothing, and does not fall through to arithmetic against undefined', () => {
+    // `undefined <= 0n` is silently false, so an unchecked date would reach the elapsed-time maths
+    // and vest against NaN rather than returning zero.
+    const g = grant({ graduatedAt: undefined })
+    expect(vestedAmount(g, GRAD + 10n * THIRTY_DAYS)).toBe(0n)
+    expect(claimableAmount(g, GRAD + 10n * THIRTY_DAYS)).toBe(0n)
+  })
+
+  it('reports unknown TERMS before an unknown graduation date', () => {
+    // With neither known there is even less to say, and the terms branch says the less specific
+    // thing. Pinned so the two unknown states cannot silently swap priority.
+    const state = vestingState(grant({ duration: undefined, graduatedAt: undefined }), GRAD)
+    expect(state.kind).toBe('terms-unknown')
+  })
+})
+
 describe('formatDuration', () => {
   it('names the two terms this product actually ships', () => {
     expect(formatDuration(THIRTY_DAYS)).toBe('30 days')

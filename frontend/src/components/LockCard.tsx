@@ -29,22 +29,22 @@ export function LockCard({
   /** The indexed lock record. Null before graduation, and null if the indexer has not caught up. */
   lock: LockRow | null
   /**
-   * `Token.lockDuration` - seconds from graduation. Meaningless when permanent.
+   * `LaunchTerms.lockDuration` - seconds from graduation. Meaningless when permanent.
    *
-   * ⚠️ `undefined` means NOT INDEXED, and must not collapse to zero anywhere below. Zero renders as
-   * "Term: none" on the one panel a buyer reads to decide whether the liquidity is locked at all -
-   * a confident, specific, wrong answer in place of an honest blank.
+   * ⚠️ `undefined` means THE CHAIN READ HAS NOT RETURNED, and must not collapse to zero anywhere
+   * below. Zero renders as "Term: none" on the one panel a buyer reads to decide whether the
+   * liquidity is locked at all - a confident, specific, wrong answer in place of an honest blank.
    */
   lockDuration: bigint | undefined
   /**
-   * `Token.permanentLock` - the creator's CHOICE at creation.
+   * `LaunchTerms.permanentLock` - the creator's CHOICE at creation.
    *
    * ⚠️ A different fact from `lock.permanent`, which is the realised state, and the two may
    * legitimately diverge: `extend` can turn the second true on a launch whose creator originally
    * chose a term. Neither is mirrored onto the other here.
    */
   permanentLockChoice: boolean | undefined
-  /** ⚠️ `undefined` means not indexed. Zero would tell a creator they earn nothing. */
+  /** ⚠️ `undefined` means the chain read has not returned. Zero would tell a creator they earn nothing. */
   creatorFeeBps: number | undefined
   graduated: boolean
   pool: Address | undefined
@@ -54,9 +54,13 @@ export function LockCard({
   const tokenId = lock ? BigInt(lock.id) : undefined
   const reclaim = useReclaimStatus(tokenId, pool)
 
-  // ⚠️ "Not indexed" is a distinct state from every real term, and it is checked first. The terms
-  // are frozen on-chain either way; what is missing is our view of them, and saying "none" or "0%"
+  // ⚠️ "Not known" is a distinct state from every real term, and it is checked first. The terms are
+  // frozen on-chain either way; what is missing is our view of them, and saying "none" or "0%"
   // would misreport a lock that certainly exists.
+  //
+  // ⚠️ These three arrive over RPC from `useLaunchTerms`, NOT from the indexer, so nothing on this
+  // path may tell the reader to wait for indexing. That advice would send a buyer to wait on a
+  // subsystem which is not involved and whose recovery cannot help them.
   const termsKnown = lockDuration !== undefined && permanentLockChoice !== undefined
 
   return (
@@ -68,16 +72,26 @@ export function LockCard({
           label="Term"
           value={!termsKnown ? 'unknown' : permanentLockChoice ? 'Permanent' : formatDuration(lockDuration)}
         />
+        {/* ⚠️ "of the locked position's fees", NOT "of pool fees". The pool's fee splits before this
+            share is taken: the protocol fee comes off the top and only the remainder accrues to the
+            locked LP position, of which this is the creator's cut. Labelling it "of pool fees"
+            overstated the creator's actual take by a third on the number they decide to launch on.
+            The volume-denominated figure is deliberately not quoted here because it is not a
+            constant - `setProtocolFee` is owner-tunable. See docs/tokenomics.md section 4. */}
         <Kv
           label="Creator fee share"
-          value={creatorFeeBps === undefined ? 'unknown' : `${creatorFeeBps / 100}% of pool fees`}
+          value={
+            creatorFeeBps === undefined
+              ? 'unknown'
+              : `${creatorFeeBps / 100}% of the locked position's fees`
+          }
         />
       </div>
 
       {!termsKnown ? (
         <p className="muted" style={{ marginTop: 'var(--s-3)', marginBottom: 0, fontSize: 13 }}>
-          The lock terms have not been indexed for this launch. They are still frozen on-chain and
-          still binding - this page just cannot read them yet.
+          The lock terms could not be read for this launch. They are still frozen on-chain and still
+          binding - this page just cannot reach them right now.
         </p>
       ) : !graduated ? (
         <p className="muted" style={{ marginTop: 'var(--s-3)', marginBottom: 0, fontSize: 13 }}>

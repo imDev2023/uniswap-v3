@@ -169,7 +169,9 @@ describe('LockCard', () => {
     expect(container.textContent).not.toMatch(/reclaimable now/i)
   })
 
-  it('reports unindexed terms as unknown rather than as "none" and "0%"', () => {
+  // ⚠️ "unread", not "unindexed": these terms come from `useLaunchTerms` over RPC and the indexer is
+  // not on the path at all. The old name was residue from before #37 moved them onto the chain.
+  it('reports unread terms as unknown rather than as "none" and "0%"', () => {
     // ⚠️ A zero here is a claim, not a blank: "Term: none" on this panel says the liquidity is not
     // locked, which is the worst available lie about a lock that certainly exists on-chain.
     const { container } = render(
@@ -185,7 +187,7 @@ describe('LockCard', () => {
       />,
     )
     expect(container.textContent).not.toMatch(/none/i)
-    expect(container.textContent).not.toMatch(/0% of pool fees/)
+    expect(container.textContent).not.toMatch(/0% of the locked position/)
     expect(screen.getByText(/still frozen on-chain and still binding/i)).toBeInTheDocument()
   })
 
@@ -275,6 +277,49 @@ describe('VestingCard', () => {
     expect(screen.getByText(/nothing has vested/i)).toBeInTheDocument()
     expect(screen.getByText(/never receives any of it/i)).toBeInTheDocument()
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('does not claim a launch never graduated when the graduation date is merely unread', () => {
+    // ⚠️ The defect this state exists for. `graduatedAt` used to come from the indexed row, so with
+    // graph-node down an unread date fell through to `not-started` and a launch that graduated a
+    // month ago told its reader "if this curve never graduates, the creator never receives any of
+    // it" - a specific, confident falsehood about a schedule already running. `undefined` is now a
+    // state of its own and must never render the not-started copy.
+    render(
+      <VestingCard
+        token={TOKEN}
+        terms={{ ...terms, graduatedAt: undefined }}
+        creator={CREATOR}
+        claimable={undefined}
+        symbol="RDOGE"
+        nowSeconds={NOW}
+      />,
+    )
+    expect(screen.queryByText(/never receives any of it/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nothing has vested/i)).not.toBeInTheDocument()
+    // Nor may it assert the opposite: no progress figure can be honest without a start date.
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.getByText(/could not be read/i)).toBeInTheDocument()
+    // The grant and its terms are still known and still disclosed.
+    expect(screen.getByText(/40M RDOGE/)).toBeInTheDocument()
+  })
+
+  it('keeps the creator’s claim button when the graduation date is unread', () => {
+    // ⚠️ `claimable` is its own read against the vault and does not depend on the graduation date,
+    // so the button must survive a failure of anything else on the card. It used to live inside the
+    // schedule branch, which meant one unread value withdrew it from the only person it serves.
+    connected.mockReturnValue({ address: CREATOR, isConnected: true, chainId: 46630 })
+    render(
+      <VestingCard
+        token={TOKEN}
+        terms={{ ...terms, graduatedAt: undefined }}
+        creator={CREATOR}
+        claimable={FORTY_MILLION / 2n}
+        symbol="RDOGE"
+        nowSeconds={NOW}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /claim vested tokens/i })).toBeEnabled()
   })
 
   it('shows a ticking vested figure computed from the terms, not read from the indexer', () => {

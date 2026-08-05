@@ -135,10 +135,10 @@ export const launchpadFactoryAbi = [
     inputs: [{ name: '', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
-  // Immutable addresses of the two periphery contracts the token page reads. Taken from the factory
-  // rather than from env vars, per ADR-0003: the launchpad is the root of identity, and both are
-  // deployed by its own constructor, so there is no configuration here that could drift out of step
-  // with the factory the rest of the app is pointed at.
+  // Immutable addresses of the three periphery contracts the token page reads. Taken from the
+  // factory rather than from env vars, per ADR-0003: the launchpad is the root of identity, and all
+  // three are deployed by its own constructor, so there is no configuration here that could drift
+  // out of step with the factory the rest of the app is pointed at.
   {
     type: 'function',
     name: 'devVesting',
@@ -149,6 +149,13 @@ export const launchpadFactoryAbi = [
   {
     type: 'function',
     name: 'lpLock',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'graduationManager',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'address' }],

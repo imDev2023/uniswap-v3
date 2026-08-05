@@ -67,10 +67,9 @@ export function TokenPage() {
 
   // This launch's own curve allocation (#34). ⚠️ Guarded rather than `BigInt(token.x)` directly:
   // the row comes from the indexer, and an absent field would throw inside render and white-screen
-  // the whole route instead of degrading. `undefined` lets each consumer fall back to the 800M
-  // no-dev-allocation default, which is the correct value for every launch created without one.
+  // the whole route instead of degrading. `undefined` does NOT mean 800M: `CurvePositionsCard`
+  // rebuilds the figure from the chain-read carve, which is the same number by construction.
   const curveAllocation = token?.curveTokenAllocation ? BigInt(token.curveTokenAllocation) : undefined
-
 
   return (
     <div>
@@ -167,11 +166,13 @@ export function TokenPage() {
               // grant has fully released, so the default would announce an untouched carve as 100%
               // vested and fully releasable. `VestingCard` has a state of its own for not-known.
               duration: terms.vestingDuration,
-              // The only value here the chain does not hand us directly in this shape. A graduated
-              // launch whose row has not been indexed shows the grant and its terms but not the
-              // running schedule, which is the honest degradation: the schedule genuinely cannot be
-              // placed on a timeline without a start date.
-              graduatedAt: token?.graduatedAtTimestamp ? BigInt(token.graduatedAtTimestamp) : null,
+              // ⚠️ From `GraduationManager`, NOT from the indexed row, and tri-state all the way
+              // through: `undefined` not known, `null` still on the curve, a `bigint` graduated.
+              // This was the one value on the card still sourced from the read model, and an
+              // indexer outage therefore rendered a launch that had graduated as one that never
+              // would - taking the creator's claim button with it. That is the exact regression the
+              // rest of this panel was moved onto the chain to prevent.
+              graduatedAt: terms.graduatedAt,
               claimed: terms.devClaimed ?? 0n,
             }}
             creator={terms.creator}

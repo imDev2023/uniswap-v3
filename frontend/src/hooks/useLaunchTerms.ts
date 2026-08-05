@@ -1,12 +1,16 @@
 import type { Address } from 'viem'
 import { useReadContracts } from 'wagmi'
 import { devVestingAbi } from '../abi/devVesting'
+import { graduationManagerAbi } from '../abi/graduationManager'
 import { launchpadFactoryAbi } from '../abi/launchpadFactory'
 import { FACTORY_ADDRESS, isLaunchpadConfigured } from '../config/contracts'
 import { usePeriphery } from './usePeriphery'
 
 /**
- * One launch's frozen terms, read from the CHAIN.
+ * One launch's terms, read from the CHAIN.
+ *
+ * Almost everything here is frozen at `createLaunch`. The three exceptions are `devClaimed`,
+ * `claimable` and `graduatedAt`, which each move at most once or monotonically and are polled.
  *
  * ⚠️ **This hook exists because the lock and vesting panels used to vanish during an indexer
  * outage**, which was found by loading the page rather than by any test. Both were gated on the
@@ -27,7 +31,10 @@ import { usePeriphery } from './usePeriphery'
 /** All frozen. Fetched once and never refetched - except `claimed`, see below. */
 const FROZEN = { staleTime: Infinity, gcTime: Infinity } as const
 
-/** `claimed` moves whenever the creator claims, so the grant is re-read on a slow interval. */
+/**
+ * `claimed` moves whenever the creator claims, and `graduatedAt` flips once at graduation, so both
+ * are re-read on a slow interval rather than cached forever.
+ */
 const GRANT_POLL_MS = 15_000
 
 export interface LaunchTerms {
@@ -46,6 +53,20 @@ export interface LaunchTerms {
   /** What `claim` would pay right now. */
   claimable: bigint | undefined
   /**
+   * When this launch graduated, and therefore when its vesting schedule started (ADR-0007).
+   *
+   * ⚠️ **Three states, and collapsing any two of them misreports a live schedule.** `undefined` is
+   * NOT KNOWN - the read is in flight or failed. `null` is a launch still on its curve, which may
+   * never graduate at all. A `bigint` is the graduation timestamp.
+   *
+   * ⚠️ Read from `GraduationManager`, never from the indexed row. Sourcing it from the read model
+   * meant a graduated launch rendered, during an indexer outage, as "if this curve never graduates,
+   * the creator never receives any of it" - a positive falsehood about a schedule already running,
+   * and it took the creator's claim button with it. Exactly the defect this whole hook exists to
+   * prevent, reached through the one value that had been left behind.
+   */
+  graduatedAt: bigint | null | undefined
+  /**
    * The grant's beneficiary.
    *
    * ⚠️ Taken from the grant rather than from `factory.creatorOf` or the indexed row, because this is
@@ -57,7 +78,7 @@ export interface LaunchTerms {
 }
 
 export function useLaunchTerms(token: Address | undefined): LaunchTerms {
-  const { devVesting } = usePeriphery()
+  const { devVesting, graduationManager } = usePeriphery()
 
   const { data: lockCfg } = useReadContracts({
     allowFailure: true,
@@ -97,11 +118,25 @@ export function useLaunchTerms(token: Address | undefined): LaunchTerms {
     query: { enabled: !!devVesting && !!token, refetchInterval: GRANT_POLL_MS },
   })
 
+  const { data: graduatedData } = useReadContracts({
+    allowFailure: true,
+    contracts: [
+      {
+        address: graduationManager,
+        abi: graduationManagerAbi,
+        functionName: 'graduatedAt',
+        args: token ? [token] : undefined,
+      },
+    ],
+    query: { enabled: !!graduationManager && !!token, refetchInterval: GRANT_POLL_MS },
+  })
+
   const cfg = lockCfg?.[0]
   const alloc = lockCfg?.[1]
   const grantEntry = grantData?.[0]
   const claimableEntry = grantData?.[1]
   const grant = grantEntry?.status === 'success' ? grantEntry.result : undefined
+  const graduatedEntry = graduatedData?.[0]
 
   return {
     // ⚠️ Left `undefined` on a failed read rather than defaulted. A zero lock duration renders as
@@ -118,5 +153,14 @@ export function useLaunchTerms(token: Address | undefined): LaunchTerms {
     devClaimed: grant ? grant.claimed : undefined,
     claimable: claimableEntry?.status === 'success' ? claimableEntry.result : undefined,
     creator: grant ? grant.creator : undefined,
+    // ⚠️ Zero is the contract's "has not graduated" and is mapped to `null`, which is a different
+    // answer from the `undefined` a failed or in-flight read yields. Returning `0n` raw would let a
+    // caller treat an unreachable RPC as a fact about the curve.
+    graduatedAt:
+      graduatedEntry?.status === 'success'
+        ? graduatedEntry.result > 0n
+          ? graduatedEntry.result
+          : null
+        : undefined,
   }
 }

@@ -7,6 +7,14 @@
     "GraduationManager": {
       "address": "0x0000000000000000000000000000000000000000",
       "startBlock": 0
+    },
+    "DevVesting": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    },
+    "LPLock": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
     }
   },
   "robinhood-testnet": {
@@ -16,6 +24,14 @@
     },
     "GraduationManager": {
       "address": "0x3e28d8838951C9F1ad229a5506584616E46D5E14",
+      "startBlock": 94091260
+    },
+    "DevVesting": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 94091260
+    },
+    "LPLock": {
+      "address": "0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1",
       "startBlock": 94091260
     }
   }

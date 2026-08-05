@@ -63,6 +63,32 @@
   },
   {
     "type": "function",
+    "name": "DEFAULT_CREATOR_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_LOCK_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "DEFAULT_MAX_BUY_PER_WALLET",
     "inputs": [],
     "outputs": [
@@ -83,6 +109,19 @@
         "name": "",
         "type": "uint16",
         "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DEFAULT_VESTING_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -128,6 +167,32 @@
   },
   {
     "type": "function",
+    "name": "MAX_DEV_ALLOCATION_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_LOCK_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_TRADE_FEE_BPS",
     "inputs": [],
     "outputs": [
@@ -135,6 +200,58 @@
         "name": "",
         "type": "uint16",
         "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_VESTING_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_VIRTUAL_ETH_RESERVE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_LOCK_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_VESTING_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -201,19 +318,36 @@
     "name": "createLaunch",
     "inputs": [
       {
-        "name": "name",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "symbol",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "metadataURI",
-        "type": "string",
-        "internalType": "string"
+        "name": "p",
+        "type": "tuple",
+        "internalType": "struct LaunchParams",
+        "components": [
+          {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "symbol",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "metadataURI",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
+            "name": "permanentLock",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "devAllocationBps",
+            "type": "uint16",
+            "internalType": "uint16"
+          }
+        ]
       }
     ],
     "outputs": [
@@ -240,6 +374,19 @@
   },
   {
     "type": "function",
+    "name": "creatorFeeBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "creatorOf",
     "inputs": [
       {
@@ -259,6 +406,40 @@
   },
   {
     "type": "function",
+    "name": "curveCalibrationFor",
+    "inputs": [
+      {
+        "name": "devAllocationBps_",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "devAllocation",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "curveAllocation",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "virtualEth",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "virtualToken",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "curveOf",
     "inputs": [
       {
@@ -272,6 +453,51 @@
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "defaultLockDuration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "devAllocationOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "devVesting",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract DevVesting"
       }
     ],
     "stateMutability": "view"
@@ -323,6 +549,35 @@
   },
   {
     "type": "function",
+    "name": "lockConfigOf",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "lockDuration",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint16",
+        "internalType": "uint16"
+      },
+      {
+        "name": "permanent",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "lpLock",
     "inputs": [],
     "outputs": [
@@ -343,6 +598,19 @@
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxDevAllocationBps",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
     "stateMutability": "view"
@@ -436,6 +704,37 @@
   },
   {
     "type": "function",
+    "name": "setLockParams",
+    "inputs": [
+      {
+        "name": "lockDuration_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "creatorFeeBps_",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setMaxDevAllocationBps",
+    "inputs": [
+      {
+        "name": "maxDevAllocationBps_",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setPoolProtocolFee",
     "inputs": [
       {
@@ -473,6 +772,19 @@
         "name": "newTreasury",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setVestingDuration",
+    "inputs": [
+      {
+        "name": "vestingDuration_",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "outputs": [],
@@ -526,6 +838,19 @@
         "name": "",
         "type": "address",
         "internalType": "contract IUniswapV3Factory"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vestingDuration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -589,6 +914,49 @@
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LaunchConfig",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "devAllocation",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "vestingDuration",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "lockDuration",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "permanentLock",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -668,6 +1036,44 @@
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LockParamsUpdated",
+    "inputs": [
+      {
+        "name": "defaultLockDuration",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "creatorFeeBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MaxDevAllocationUpdated",
+    "inputs": [
+      {
+        "name": "oldMaxBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "newMaxBps",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
       }
     ],
     "anonymous": false
@@ -812,6 +1218,25 @@
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "VestingDurationUpdated",
+    "inputs": [
+      {
+        "name": "oldDuration",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "newDuration",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "FeeTransferFailed",
     "inputs": []
@@ -839,6 +1264,16 @@
   },
   {
     "type": "error",
+    "name": "InvalidDevAllocation",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidLockParams",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidProtocolFee",
     "inputs": [
       {
@@ -847,6 +1282,11 @@
         "internalType": "uint8"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidVestingDuration",
+    "inputs": []
   },
   {
     "type": "error",

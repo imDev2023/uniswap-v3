@@ -1,6 +1,8 @@
 import { Address, BigInt, ethereum, Bytes } from "@graphprotocol/graph-ts";
 import { newMockEvent } from "matchstick-as";
-import { LaunchCreated } from "../generated/LaunchpadFactory/LaunchpadFactory";
+import { LaunchCreated, LaunchConfig } from "../generated/LaunchpadFactory/LaunchpadFactory";
+import { Claimed } from "../generated/DevVesting/DevVesting";
+import { LockRegistered, LockExtended, Reclaimed } from "../generated/LPLock/LPLock";
 import { Graduated } from "../generated/GraduationManager/GraduationManager";
 import { Bought, Sold, Graduation } from "../generated/templates/BondingCurve/BondingCurve";
 
@@ -190,7 +192,124 @@ export function graduatedEvent(
   return e;
 }
 
-/// The deterministic Holder id used by the mappings: 20-byte token ++ 20-byte account, hex-encoded.
-export function holderIdHex(token: Address, account: Address): string {
+/// The deterministic CurvePosition id used by the mappings: 20-byte token ++ 20-byte account, hex-encoded.
+export function curvePositionIdHex(token: Address, account: Address): string {
   return (token as Bytes).concat(account as Bytes).toHexString();
+}
+
+// =================================================================================================
+// #36 event builders: LaunchConfig, and the DevVesting / LPLock events that #33-#35 added
+// =================================================================================================
+
+/// Production defaults, matching the factory's constants.
+export let DEV_ALLOCATION = "40000000000000000000000000"; // 40M == 5% of the 800M curve supply
+export let VESTING_DURATION = "2592000"; // 30 days
+export let LOCK_DURATION = "31536000"; // 365 days
+export let CREATOR_FEE_BPS = 7000; // 70% of the position's LP fees
+export let LOCK_TOKEN_ID = "42";
+/// LPLock's permanent sentinel: type(uint64).max. Not a date - a flag.
+export let PERMANENT_SENTINEL = "18446744073709551615";
+
+export function launchConfigEvent(
+  token: Address,
+  devAllocation: BigInt,
+  vestingDuration: BigInt,
+  lockDuration: BigInt,
+  creatorFeeBps: i32,
+  permanentLock: boolean,
+  timestamp: i64,
+  logIndex: i64
+): LaunchConfig {
+  let e = changetype<LaunchConfig>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("token", ethereum.Value.fromAddress(token)));
+  e.parameters.push(new ethereum.EventParam("devAllocation", ethereum.Value.fromUnsignedBigInt(devAllocation)));
+  e.parameters.push(new ethereum.EventParam("vestingDuration", ethereum.Value.fromUnsignedBigInt(vestingDuration)));
+  e.parameters.push(new ethereum.EventParam("lockDuration", ethereum.Value.fromUnsignedBigInt(lockDuration)));
+  e.parameters.push(new ethereum.EventParam("creatorFeeBps", ethereum.Value.fromI32(creatorFeeBps)));
+  e.parameters.push(new ethereum.EventParam("permanentLock", ethereum.Value.fromBoolean(permanentLock)));
+  stamp(e, timestamp, 100, logIndex);
+  return e;
+}
+
+/// The default 5% carve on production terms.
+export function defaultLaunchConfigEvent(): LaunchConfig {
+  return launchConfigEvent(
+    TOKEN, bi(DEV_ALLOCATION), bi(VESTING_DURATION), bi(LOCK_DURATION), CREATOR_FEE_BPS, false, 1000, 1
+  );
+}
+
+export function claimedEvent(
+  token: Address,
+  creator: Address,
+  amount: BigInt,
+  remaining: BigInt,
+  timestamp: i64,
+  logIndex: i64
+): Claimed {
+  let e = changetype<Claimed>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("token", ethereum.Value.fromAddress(token)));
+  e.parameters.push(new ethereum.EventParam("creator", ethereum.Value.fromAddress(creator)));
+  e.parameters.push(new ethereum.EventParam("amount", ethereum.Value.fromUnsignedBigInt(amount)));
+  e.parameters.push(new ethereum.EventParam("remaining", ethereum.Value.fromUnsignedBigInt(remaining)));
+  stamp(e, timestamp, 104, logIndex);
+  return e;
+}
+
+/// `origin` is the on-chain enum's own ordering: 0 None, 1 Launch, 2 ThirdParty.
+export function lockRegisteredEvent(
+  tokenId: BigInt,
+  launchToken: Address,
+  pool: Address,
+  origin: i32,
+  lockUntil: BigInt,
+  creatorFeeBps: i32,
+  timestamp: i64,
+  logIndex: i64
+): LockRegistered {
+  let e = changetype<LockRegistered>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("tokenId", ethereum.Value.fromUnsignedBigInt(tokenId)));
+  e.parameters.push(new ethereum.EventParam("launchToken", ethereum.Value.fromAddress(launchToken)));
+  e.parameters.push(new ethereum.EventParam("pool", ethereum.Value.fromAddress(pool)));
+  e.parameters.push(new ethereum.EventParam("origin", ethereum.Value.fromI32(origin)));
+  e.parameters.push(new ethereum.EventParam("lockUntil", ethereum.Value.fromUnsignedBigInt(lockUntil)));
+  e.parameters.push(new ethereum.EventParam("creatorFeeBps", ethereum.Value.fromI32(creatorFeeBps)));
+  stamp(e, timestamp, 103, logIndex);
+  return e;
+}
+
+export function lockExtendedEvent(
+  tokenId: BigInt,
+  oldLockUntil: BigInt,
+  newLockUntil: BigInt,
+  timestamp: i64,
+  logIndex: i64
+): LockExtended {
+  let e = changetype<LockExtended>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("tokenId", ethereum.Value.fromUnsignedBigInt(tokenId)));
+  e.parameters.push(new ethereum.EventParam("oldLockUntil", ethereum.Value.fromUnsignedBigInt(oldLockUntil)));
+  e.parameters.push(new ethereum.EventParam("newLockUntil", ethereum.Value.fromUnsignedBigInt(newLockUntil)));
+  stamp(e, timestamp, 105, logIndex);
+  return e;
+}
+
+export function reclaimedEvent(
+  tokenId: BigInt,
+  launchToken: Address,
+  ethAmount: BigInt,
+  tokensBurned: BigInt,
+  timestamp: i64,
+  logIndex: i64
+): Reclaimed {
+  let e = changetype<Reclaimed>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("tokenId", ethereum.Value.fromUnsignedBigInt(tokenId)));
+  e.parameters.push(new ethereum.EventParam("launchToken", ethereum.Value.fromAddress(launchToken)));
+  e.parameters.push(new ethereum.EventParam("ethAmount", ethereum.Value.fromUnsignedBigInt(ethAmount)));
+  e.parameters.push(new ethereum.EventParam("tokensBurned", ethereum.Value.fromUnsignedBigInt(tokensBurned)));
+  stamp(e, timestamp, 106, logIndex);
+  return e;
 }

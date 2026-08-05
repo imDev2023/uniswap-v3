@@ -64,7 +64,7 @@ It is not a holder of the token:
 
 **Decision: keep the model, change the words.** Indexing ERC-20 transfers to make "holder" literally true was considered and declined - it is a new data source, new mappings and new tests, a subproject rather than a ticket, and it buys accuracy on a panel that is not on the trade path.
 
-⚠️ **The rename is decided but NOT yet implemented.** The canonical term is Curve Position; the UI must say what it counts, and must mark a graduated Launch's positions as final rather than current.
+⚠️ **The schema rename SHIPPED in #36**: `Holder` is now `CurvePosition`, `holderCount` is `curvePositionCount`, and the frontend queries were rewired to match. What is still owed is the visible UI copy - the panel heading still says "Holders", and a graduated launch's positions are still not marked as FINAL rather than current. That is #37.
 
 ## Open questions
 

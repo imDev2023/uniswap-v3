@@ -1,5 +1,5 @@
 import { Bytes, DataSourceContext } from "@graphprotocol/graph-ts";
-import { LaunchCreated } from "../generated/LaunchpadFactory/LaunchpadFactory";
+import { LaunchCreated, LaunchConfig } from "../generated/LaunchpadFactory/LaunchpadFactory";
 import { Factory, Token } from "../generated/schema";
 import { BondingCurve } from "../generated/templates";
 import { FACTORY_ID, ONE_E18, ZERO_BI } from "./constants";
@@ -66,7 +66,21 @@ export function handleLaunchCreated(event: LaunchCreated): void {
   token.sellCount = 0;
   token.tradeCount = 0;
   token.volumeEth = ZERO_BI;
-  token.holderCount = 0;
+  token.curvePositionCount = 0;
+
+  // Placeholders only. `LaunchConfig` is emitted immediately after `LaunchCreated` in this same
+  // transaction and fills all six in; they are initialised here because the schema makes them
+  // non-nullable and an entity cannot be saved half-built.
+  //
+  // ⚠️ If you ever see a launch sitting at these zero values, `LaunchConfig` did not arrive - check
+  // the manifest's handler wiring rather than assuming the launch really has no carve and no lock.
+  // A zero `devAllocation` is legitimate (the creator took no carve); a zero `lockDuration` is not.
+  token.devAllocation = ZERO_BI;
+  token.devClaimed = ZERO_BI;
+  token.vestingDuration = ZERO_BI;
+  token.lockDuration = ZERO_BI;
+  token.creatorFeeBps = 0;
+  token.permanentLock = false;
 
   token.graduated = false;
   token.save();
@@ -76,6 +90,30 @@ export function handleLaunchCreated(event: LaunchCreated): void {
   let factory = loadFactory();
   factory.launchCount = factory.launchCount + 1;
   factory.save();
+}
+
+/// The launch's dev carve, vesting schedule and frozen LP lock terms (#36).
+///
+/// ⚠️ Ordering is a hard dependency, not an optimisation. `LaunchConfig` is emitted AFTER
+/// `LaunchCreated` in the same transaction, deliberately, so the Token entity exists by the time
+/// this runs. If the emit sites are ever reordered this handler loads null and drops the config
+/// silently - which is why `LaunchConfig.t.sol` pins the log order on the contract side.
+///
+/// Guarded rather than assumed: a null Token means that ordering broke, and skipping is better than
+/// constructing a half-built entity that would then look like a real launch missing its curve params.
+export function handleLaunchConfig(event: LaunchConfig): void {
+  let token = Token.load(event.params.token);
+  if (token == null) return;
+
+  token.devAllocation = event.params.devAllocation;
+  token.vestingDuration = event.params.vestingDuration;
+  token.lockDuration = event.params.lockDuration;
+  token.creatorFeeBps = event.params.creatorFeeBps;
+  token.permanentLock = event.params.permanentLock;
+  // devClaimed is NOT touched here. It is owned by the DevVesting Claimed handler, and vesting
+  // cannot start until graduation, so it is always still zero at this point - but writing it would
+  // make this handler a second owner of the field, and a replay would then reset a real balance.
+  token.save();
 }
 
 /// Pass the token address to the curve template so its handlers can resolve their Token.

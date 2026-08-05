@@ -22,7 +22,7 @@ function token(over: Partial<TokenRow> & { id: string }): TokenRow {
     buyCount: 0,
     sellCount: 0,
     tradeCount: 0,
-    holderCount: 0,
+    curvePositionCount: 0,
     graduated: false,
     graduatedAtTimestamp: null,
     ...over,

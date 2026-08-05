@@ -307,6 +307,32 @@ contract LaunchpadFactory is Ownable2Step {
         uint256 maxBuyPerWallet,
         uint256 antiSnipeThreshold
     );
+    /// @notice The per-launch terms that `LaunchCreated` has no room to carry: the dev carve, the
+    ///         vesting schedule it vests on, and this launch's frozen LP lock terms.
+    /// @dev A SECOND event rather than more fields on `LaunchCreated`, which already carries 12 and
+    ///      only fits because `_emitLaunchCreated` exists to give it a shallow stack frame.
+    ///
+    ///      No `devAllocationBps`. The percentage is exactly derivable from `devAllocation` and the
+    ///      `CURVE_SUPPLY` constant, and a second encoding of one fact is a thing that can drift.
+    ///
+    ///      `lockDuration` is meaningless when `permanentLock` is true, and is emitted anyway so the
+    ///      value is not silently reinterpreted; consumers must branch on `permanentLock` first.
+    /// @param token The launch this configuration belongs to.
+    /// @param devAllocation Tokens carved from the curve supply for the creator, held by
+    ///        `DevVesting` from this transaction. Zero means no carve and no grant was registered.
+    /// @param vestingDuration Seconds the carve vests over, linearly, measured FROM GRADUATION and
+    ///        not from creation ([ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md)).
+    /// @param lockDuration Seconds the graduated LP position stays locked, from graduation.
+    /// @param creatorFeeBps The creator's share of the graduated position's LP fees.
+    /// @param permanentLock True if the creator chose a permanent lock at creation, which is terminal.
+    event LaunchConfig(
+        address indexed token,
+        uint256 devAllocation,
+        uint64 vestingDuration,
+        uint64 lockDuration,
+        uint16 creatorFeeBps,
+        bool permanentLock
+    );
     event CreationFeeUpdated(uint256 oldFee, uint256 newFee);
     event TreasuryUpdated(address oldTreasury, address newTreasury);
     event ProtocolFeeUpdated(uint8 oldFee, uint8 newFee);
@@ -459,6 +485,21 @@ contract LaunchpadFactory is Ownable2Step {
     /// @dev A zero carve registers nothing at all, rather than a zero-value grant. `DevVesting` then
     ///      reads that token as `UnknownGrant` instead of as an empty schedule, which is the honest
     ///      distinction: the launch has no creator allocation, not one worth nothing.
+    /// @dev Its own function for the same reason `_emitLaunchCreated` is: `createLaunch` is already
+    ///      at the EVM's 16-slot reachable stack limit, so the six event fields get a shallow frame
+    ///      rather than six more locals on that one.
+    ///
+    ///      Takes `curveAllocation` and derives the dev carve from it rather than reading
+    ///      `devAllocationOf`, because that mapping is written by `_grantDevCarve`, which runs after
+    ///      this. Same derivation as `_grantDevCarve` uses, from the same argument, so the event and
+    ///      the transfer cannot disagree about the amount.
+    function _emitLaunchConfig(address token, uint256 curveAllocation) private {
+        LaunchLockConfig memory lock = lockConfigOf[token];
+        emit LaunchConfig(
+            token, CURVE_SUPPLY - curveAllocation, vestingDuration, lock.lockDuration, lock.creatorFeeBps, lock.permanent
+        );
+    }
+
     function _grantDevCarve(address token, uint256 curveAllocation) private {
         uint256 devAllocation = CURVE_SUPPLY - curveAllocation;
         devAllocationOf[token] = devAllocation;
@@ -521,6 +562,10 @@ contract LaunchpadFactory is Ownable2Step {
         // running first would `load()` a null and either drop the grant or have to construct a
         // half-built entity. Cheap to order correctly here, expensive to discover in #36.
         _emitLaunchCreated(curve, LaunchStrings(p.name, p.symbol, p.metadataURI), cfg);
+        // Between the two, deliberately: it completes the launch's configuration before
+        // `_grantDevCarve` emits `GrantRegistered`, so an indexer sees the terms and then the grant
+        // that honours them, never the reverse.
+        _emitLaunchConfig(token, cfg.curveTokenAllocation);
         _grantDevCarve(token, cfg.curveTokenAllocation);
 
         // Interactions last.

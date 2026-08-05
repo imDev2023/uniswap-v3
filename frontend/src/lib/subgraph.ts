@@ -36,7 +36,7 @@ export interface TokenRow {
   buyCount: number
   sellCount: number
   tradeCount: number
-  holderCount: number
+  curvePositionCount: number
   graduated: boolean
   graduatedAtTimestamp: string | null
 }
@@ -119,7 +119,7 @@ const TOKEN_FIELDS = gql`
     buyCount
     sellCount
     tradeCount
-    holderCount
+    curvePositionCount
     graduated
     graduatedAtTimestamp
   }
@@ -201,7 +201,7 @@ export const TRADES_QUERY = gql`
 
 export const HOLDERS_QUERY = gql`
   query Holders($token: String!, $first: Int!) {
-    holders(
+    curvePositions(
       first: $first
       orderBy: balance
       orderDirection: desc
@@ -330,12 +330,16 @@ export async function fetchRecentTrades(first = 25): Promise<RecentTradeRow[]> {
   return data.trades
 }
 
+// ⚠️ The response key is `curvePositions` since #36 renamed the entity. The request type here is an
+// ASSERTION, not something derived from the schema, so tsc cannot catch a mismatch between this key
+// and the query text - it would surface as `undefined` at runtime and render an empty panel, which
+// looks exactly like "nobody has traded". Both must be changed together.
 export async function fetchHolders(token: string, first = 100): Promise<HolderRow[]> {
-  const data = await subgraphClient.request<{ holders: HolderRow[] }>(HOLDERS_QUERY, {
+  const data = await subgraphClient.request<{ curvePositions: HolderRow[] }>(HOLDERS_QUERY, {
     token: token.toLowerCase(),
     first,
   })
-  return data.holders
+  return data.curvePositions
 }
 
 export interface MetaRow {

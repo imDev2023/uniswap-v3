@@ -1,8 +1,8 @@
 import { Address, BigInt, Bytes, dataSource } from "@graphprotocol/graph-ts";
 import { Bought, Sold, Graduation } from "../generated/templates/BondingCurve/BondingCurve";
-import { Token, Trade, Holder } from "../generated/schema";
+import { Token, Trade, CurvePosition } from "../generated/schema";
 import { loadFactory } from "./factory";
-import { BPS, ZERO_BI, holderId } from "./constants";
+import { BPS, ZERO_BI, curvePositionId } from "./constants";
 
 /// The token this curve belongs to, from the template's data-source context (set in factory.ts).
 function contextToken(): Bytes {
@@ -32,7 +32,7 @@ function refreshCurveState(
   token.lastTradeTimestamp = timestamp;
 }
 
-/// Buy on the curve: record the trade, refresh curve progress, credit the buyer's holder position.
+/// Buy on the curve: record the trade, refresh curve progress, credit the buyer's curve position.
 export function handleBought(event: Bought): void {
   let token = Token.load(contextToken());
   if (token == null) return;
@@ -71,7 +71,7 @@ export function handleBought(event: Bought): void {
   token.tradeCount = token.tradeCount + 1;
   token.volumeEth = token.volumeEth.plus(volume);
 
-  applyHolderDelta(token, event.params.buyer, event.params.tokensOut, true, event.block.timestamp);
+  applyCurvePositionDelta(token, event.params.buyer, event.params.tokensOut, true, event.block.timestamp);
   token.save();
 
   let factory = loadFactory();
@@ -81,7 +81,7 @@ export function handleBought(event: Bought): void {
   factory.save();
 }
 
-/// Sell back to the curve: record the trade, refresh curve state, debit the seller's holder position.
+/// Sell back to the curve: record the trade, refresh curve state, debit the seller's curve position.
 export function handleSold(event: Sold): void {
   let token = Token.load(contextToken());
   if (token == null) return;
@@ -119,7 +119,7 @@ export function handleSold(event: Sold): void {
   token.tradeCount = token.tradeCount + 1;
   token.volumeEth = token.volumeEth.plus(volume);
 
-  applyHolderDelta(token, event.params.seller, event.params.tokensIn, false, event.block.timestamp);
+  applyCurvePositionDelta(token, event.params.seller, event.params.tokensIn, false, event.block.timestamp);
   token.save();
 
   let factory = loadFactory();
@@ -142,48 +142,52 @@ export function handleGraduation(event: Graduation): void {
   token.save();
 }
 
-/// Net a holder's on-curve position by `amount` (a gross buy or sell), maintaining the token's count
-/// of distinct positive holders. `balance` is clamped at zero so rounding can never drive it negative.
-function applyHolderDelta(
+/// Net an account's curve position by `amount` (a gross buy or sell), maintaining the token's count
+/// of distinct positive positions. `balance` is clamped at zero so rounding can never drive it
+/// negative.
+///
+/// ⚠️ This tracks CURVE activity only, never ERC-20 balances, and it does not see the creator's dev
+/// allocation - that is a free carve rather than a curve buy and lives on `Token.devAllocation`.
+function applyCurvePositionDelta(
   token: Token,
   account: Address,
   amount: BigInt,
   isBuy: boolean,
   timestamp: BigInt
 ): void {
-  let id = holderId(token.id, account);
-  let holder = Holder.load(id);
-  if (holder == null) {
-    holder = new Holder(id);
-    holder.token = token.id;
-    holder.account = account;
-    holder.balance = ZERO_BI;
-    holder.bought = ZERO_BI;
-    holder.sold = ZERO_BI;
-    holder.firstTradeTimestamp = timestamp;
-    holder.lastTradeTimestamp = timestamp;
-    holder.tradeCount = 0;
+  let id = curvePositionId(token.id, account);
+  let position = CurvePosition.load(id);
+  if (position == null) {
+    position = new CurvePosition(id);
+    position.token = token.id;
+    position.account = account;
+    position.balance = ZERO_BI;
+    position.bought = ZERO_BI;
+    position.sold = ZERO_BI;
+    position.firstTradeTimestamp = timestamp;
+    position.lastTradeTimestamp = timestamp;
+    position.tradeCount = 0;
   }
 
-  let wasPositive = holder.balance.gt(ZERO_BI);
+  let wasPositive = position.balance.gt(ZERO_BI);
 
   if (isBuy) {
-    holder.balance = holder.balance.plus(amount);
-    holder.bought = holder.bought.plus(amount);
+    position.balance = position.balance.plus(amount);
+    position.bought = position.bought.plus(amount);
   } else {
-    holder.balance = holder.balance.minus(amount);
-    if (holder.balance.lt(ZERO_BI)) holder.balance = ZERO_BI;
-    holder.sold = holder.sold.plus(amount);
+    position.balance = position.balance.minus(amount);
+    if (position.balance.lt(ZERO_BI)) position.balance = ZERO_BI;
+    position.sold = position.sold.plus(amount);
   }
-  holder.lastTradeTimestamp = timestamp;
-  holder.tradeCount = holder.tradeCount + 1;
-  holder.save();
+  position.lastTradeTimestamp = timestamp;
+  position.tradeCount = position.tradeCount + 1;
+  position.save();
 
-  let isPositive = holder.balance.gt(ZERO_BI);
+  let isPositive = position.balance.gt(ZERO_BI);
   if (!wasPositive && isPositive) {
-    token.holderCount = token.holderCount + 1;
+    token.curvePositionCount = token.curvePositionCount + 1;
   } else if (wasPositive && !isPositive) {
-    token.holderCount = token.holderCount - 1;
+    token.curvePositionCount = token.curvePositionCount - 1;
   }
 }
 

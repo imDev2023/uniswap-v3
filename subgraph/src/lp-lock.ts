@@ -1,0 +1,78 @@
+import { BigInt } from "@graphprotocol/graph-ts";
+import { LockRegistered, LockExtended, Reclaimed } from "../generated/LPLock/LPLock";
+import { Lock, Token } from "../generated/schema";
+import { LOCK_ORIGINS, PERMANENT_LOCK_SENTINEL, ZERO_BI } from "./constants";
+
+/// A graduated position was locked (#33).
+///
+/// ⚠️ Keyed by the position NFT id, NOT by the token: `LPLock` is designed to become a public
+/// locking service for arbitrary pairs, where a lock has no launch token at all. `launchToken` is
+/// `address(0)` for those, and this handler skips them rather than inventing a Token relation.
+export function handleLockRegistered(event: LockRegistered): void {
+  let token = Token.load(event.params.launchToken);
+  if (token == null) return;
+
+  let lock = new Lock(event.params.tokenId.toString());
+  lock.token = token.id;
+  lock.pool = event.params.pool;
+  // The enum's ZERO slot is `None`, and that ordering is load-bearing on-chain: every field of an
+  // unregistered key reads as zero, so a status enum whose first member were the privileged one
+  // would silently grant that status to everything never registered.
+  // Bounds-guarded: an origin added on-chain but not here would otherwise index out of range and
+  // halt the whole subgraph deterministically, which is a disproportionate failure for one unknown
+  // enum member. `None` is the honest fallback - it is the schema's "unregistered" value, so an
+  // unrecognised origin reads as not-a-launch-position rather than as a reclaimable one.
+  let origin = event.params.origin;
+  lock.origin = origin < LOCK_ORIGINS.length ? LOCK_ORIGINS[origin] : "None";
+  lock.lockUntil = event.params.lockUntil;
+  // Derived, because there is no permanent flag on-chain - `LPLock` encodes it as a sentinel.
+  lock.permanent = event.params.lockUntil.equals(PERMANENT_LOCK_SENTINEL);
+  lock.creatorFeeBps = event.params.creatorFeeBps;
+  lock.extendCount = 0;
+  lock.reclaimed = false;
+
+  lock.registeredAtTimestamp = event.block.timestamp;
+  lock.registeredAtBlock = event.block.number;
+  lock.registeredAtTx = event.transaction.hash;
+  lock.save();
+
+  // Link the lock so a launch can reach its position in one hop.
+  //
+  // ⚠️ `Token.permanentLock` is NOT the same fact and is deliberately not written here. It is the
+  // creator's CHOICE AT CREATION, from `LaunchConfig`; `Lock.permanent` is the REALISED state of the
+  // position, which `extend` can turn true later. They agree at graduation and can legitimately
+  // diverge afterwards, so a client asking "is this position locked forever" must read `Lock`.
+  token.lock = lock.id;
+  token.save();
+}
+
+/// The creator lengthened the lock (#33). Monotonic on-chain: it can only ever move later.
+///
+/// ⚠️ Does not verify `newLockUntil > oldLockUntil`. The contract enforces that with
+/// `CannotShortenLock`, and re-deriving a contract invariant in a mapping creates a second place it
+/// can be stated differently. The count is tracked so a UI can show that a lock has been extended,
+/// which is a materially different signal from one that never has.
+export function handleLockExtended(event: LockExtended): void {
+  let lock = Lock.load(event.params.tokenId.toString());
+  if (lock == null) return;
+
+  lock.lockUntil = event.params.newLockUntil;
+  lock.permanent = event.params.newLockUntil.equals(PERMANENT_LOCK_SENTINEL);
+  lock.extendCount = lock.extendCount + 1;
+  lock.save();
+}
+
+/// The position was reclaimed (#33): expired, and no pool activity for >= 180 days. Terminal.
+///
+/// Tokens are burned and the WETH goes to the treasury, so this is the end of the position's life,
+/// not a transfer of it.
+export function handleReclaimed(event: Reclaimed): void {
+  let lock = Lock.load(event.params.tokenId.toString());
+  if (lock == null) return;
+
+  lock.reclaimed = true;
+  lock.reclaimedEth = event.params.ethAmount;
+  lock.reclaimedTokensBurned = event.params.tokensBurned;
+  lock.reclaimedAtTimestamp = event.block.timestamp;
+  lock.save();
+}

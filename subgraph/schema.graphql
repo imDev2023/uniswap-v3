@@ -1,7 +1,7 @@
 # Subgraph schema — launchpad indexing (Build 08 / #19).
 #
 # Entities are shaped for the launchpad UI (spec #11, stories 11/26/27/28/29): a live curve-progress
-# view per token, per-holder positions, a trade history for charts, and a "just graduated" feed.
+# view per token, per-account curve positions, a trade history for charts, and a "just graduated" feed.
 #
 # Everything is derived from the launchpad's own rich events (BondingCurve.Bought/Sold/Graduation,
 # LaunchpadFactory.LaunchCreated, GraduationManager.Graduated) — no eth_calls — so indexing is
@@ -77,8 +77,34 @@ type Token @entity(immutable: false) {
   tradeCount: Int!
   "Cumulative gross ETH traded against this curve, in wei (excludes graduation refunds)."
   volumeEth: BigInt!
-  "Number of distinct addresses currently holding a positive curve position."
-  holderCount: Int!
+  "Number of distinct addresses currently holding a positive curve position. NOT a token holder count - see CurvePosition."
+  curvePositionCount: Int!
+
+  # --- creator allocation, from LaunchConfig + DevVesting (#36) ---
+  # ⚠️ Two honest numbers, and they differ for the whole vesting window. `devAllocation` is what the
+  # creator is contractually entitled to and holds from creation; `devClaimed` is what has actually
+  # reached their wallet. A UI showing only the first overstates near-term sell pressure; showing
+  # only the second reads 0% for a launch where the tokens are already spoken for.
+  "Tokens carved from the curve supply for the creator, held by DevVesting from the creation tx. 0 means no carve was taken and no grant exists."
+  devAllocation: BigInt!
+  "Cumulative tokens the creator has actually claimed out of the vault. Always <= devAllocation."
+  devClaimed: BigInt!
+  "Seconds the carve vests over, linearly. Measured FROM GRADUATION, so it does not start at creation. ⚠️ Always populated with the factory's setting at creation time, INCLUDING when devAllocation is 0 and no grant exists - it describes the terms that would have applied, not a live schedule. Check devAllocation > 0 before rendering any vesting UI."
+  vestingDuration: BigInt!
+  # ⚠️ There is deliberately NO `devVestedSoFar` field. The vested amount is a continuous function
+  # of wall-clock time, and a subgraph only writes when an event fires, so any stored figure would
+  # be silently stale between trades - worst on a quiet launch, where it would be most trusted.
+  # Clients compute it from devAllocation, vestingDuration and graduatedAtTimestamp.
+
+  # --- LP lock terms, frozen per launch at creation (#36) ---
+  "Seconds the graduated LP position stays locked, from graduation. Meaningless when permanentLock is true - branch on that first."
+  lockDuration: BigInt!
+  "The creator's share of the graduated position's LP fees, in basis points."
+  creatorFeeBps: Int!
+  "True if the creator chose a permanent lock at creation. Terminal: it can never be undone."
+  permanentLock: Boolean!
+  "The lock record, once the launch has graduated and the position exists."
+  lock: Lock
 
   # --- graduation ---
   graduated: Boolean!
@@ -86,7 +112,7 @@ type Token @entity(immutable: false) {
   graduation: Graduation
 
   trades: [Trade!]! @derivedFrom(field: "token")
-  holders: [Holder!]! @derivedFrom(field: "token")
+  curvePositions: [CurvePosition!]! @derivedFrom(field: "token")
 }
 
 enum TradeType {
@@ -122,8 +148,21 @@ type Trade @entity(immutable: true) {
   logIndex: BigInt!
 }
 
-"An address's position on a token's curve, netted from its buys and sells (stories 26/27)."
-type Holder @entity(immutable: false) {
+"""
+An address's position on a token's CURVE, netted from its buys and sells (stories 26/27).
+
+⚠️ This is NOT a token holder, and was called `Holder` until #36. It counts curve activity only:
+ - It ignores ERC-20 transfers. Buy on the curve, send the tokens away, and this still names you.
+ - It ignores the pool. After graduation the curve stops trading forever, so every position here
+   freezes permanently while the real holders change with every swap. A graduated launch's
+   positions are FINAL, not current, and a UI must say so.
+ - It ignores the creator's dev allocation, which is a free carve rather than a curve buy. That
+   figure lives on `Token.devAllocation`, not here.
+
+Indexing ERC-20 transfers to make "holder" literally true was considered and declined: a new data
+source, new mappings and new tests, for accuracy on a panel that is not on the trade path.
+"""
+type CurvePosition @entity(immutable: false) {
   "token-account."
   id: Bytes!
   token: Token!
@@ -159,4 +198,56 @@ type Graduation @entity(immutable: false) {
   timestamp: BigInt!
   block: BigInt!
   txHash: Bytes!
+}
+
+"""
+The LP lock on a graduated position (#33, #36). One per graduated launch.
+
+⚠️ The lock is CONDITIONAL, not permanent, unless `permanent` is true - see ADR-0005. Any UI string
+saying "locked forever" is wrong for the default case.
+"""
+type Lock @entity(immutable: false) {
+  "The locked position NFT id, as a decimal string."
+  id: ID!
+  token: Token!
+  "The TOKEN/WETH V3 pool the position is in."
+  pool: Bytes!
+  """
+  Which system created this lock. ⚠️ `None` is the ZERO slot and means unregistered; only `Launch`
+  positions are ever reclaimable. Reordering this enum on-chain silently makes third-party
+  positions reclaimable, so the ordering is load-bearing.
+  """
+  origin: LockOrigin!
+  "Unix seconds until which the position is locked. Meaningless when `permanent` - branch on that first."
+  lockUntil: BigInt!
+  """
+  True if this lock can never expire. Terminal.
+
+  ⚠️ DERIVED, not emitted. There is no permanent flag on-chain: `LPLock` encodes it as the sentinel
+  `lockUntil == type(uint64).max`. A client that compared `lockUntil` against `block.timestamp`
+  without checking this would render a permanent lock as expiring in the year 584942417355.
+  """
+  permanent: Boolean!
+  "The creator's share of this position's LP fees, in basis points."
+  creatorFeeBps: Int!
+  "Number of times the creator has extended the lock. Extension is monotonic: it can only lengthen."
+  extendCount: Int!
+  "True once the position has been reclaimed, which is terminal."
+  reclaimed: Boolean!
+  "ETH sent to the treasury on reclaim, in wei. Null until reclaimed."
+  reclaimedEth: BigInt
+  "Tokens burned on reclaim. Null until reclaimed."
+  reclaimedTokensBurned: BigInt
+  reclaimedAtTimestamp: BigInt
+
+  registeredAtTimestamp: BigInt!
+  registeredAtBlock: BigInt!
+  registeredAtTx: Bytes!
+}
+
+"⚠️ `None` MUST stay the zero slot: every field of an unregistered key reads as zero, so a status enum whose first member is a privileged one silently grants that status to everything never registered."
+enum LockOrigin {
+  None
+  Launch
+  ThirdParty
 }

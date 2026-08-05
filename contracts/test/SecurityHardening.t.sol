@@ -568,10 +568,18 @@ contract SecurityHardeningTest is Test, V3Deployer, CurveDriver {
         uint256 SLOT = 12;
         uint256 w = uint256(vm.load(address(factory), bytes32(SLOT)));
 
+        // Every cast below truncates deliberately: truncating to the field's own width is HOW you
+        // read one field out of a shared slot, and the assertion is that the truncated value equals
+        // the getter. A cast that lost data would fail these, not pass them quietly.
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(uint256(uint64(w)), factory.defaultLockDuration(), "defaultLockDuration at offset 0");
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(uint256(uint16(w >> 64)), factory.creatorFeeBps(), "creatorFeeBps at offset 8");
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(uint256(uint16(w >> 80)), factory.maxDevAllocationBps(), "maxDevAllocationBps at offset 10");
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(uint256(uint64(w >> 96)), factory.vestingDuration(), "vestingDuration at offset 12");
+        // forge-lint: disable-next-line(unsafe-typecast)
         assertEq(uint256(uint16(w >> 160)), factory.tradeFeeBps(), "tradeFeeBps at offset 20");
 
         // The top 10 bytes are free. A field that grew past 22 bytes, or a sixth squeezed in here,

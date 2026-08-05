@@ -46,6 +46,7 @@ The pre-tokenomics build is done and validated on testnet 46630; Stages 3 and 4 
 Everything (addresses, launch table, calibration, restore commands) is in [`docs/deployments-testnet.md`](docs/deployments-testnet.md).
 
 ⚠️ **It is all about to become historical.** #38 moves every address and the subgraph `startBlock`, needs all **four** contracts re-verified on Blockscout (#35 added `DevVesting`, deployed by the factory's constructor like `LPLock` and `GraduationManager`), and re-seeds the board. Plan for it; do not discover it.
+🔴 **#36 added `DevVesting` and `LPLock` to `subgraph/networks.json`, so #38 must fill FOUR addresses and four `startBlock`s, not two.** `LPLock`'s current testnet address is filled in; `DevVesting` is still `0x0` because it has never been deployed (#35 added it). A zero-address data source does not error, it indexes nothing, so the vesting panel would read empty and look like "this launch has no carve".
 ⚠️ **Only `CALIB` sits on the current 1 ETH calibration**; the other 16 froze at 0.1 ETH because `setCurveParams` is future-only, and six older launches are on a superseded factory.
 
 
@@ -63,12 +64,16 @@ Six tickets, **on top of** the remaining pre-tokenomics work below. Three done, 
 | `build/33-lplock-lock-records` | see [ADR-0005](docs/adr/0005-the-lp-lock-is-conditional-not-permanent.md) | ✅ merged (`8e9af94`) |
 | `build/34-curve-carve` | see [ADR-0006](docs/adr/0006-the-curve-allocation-is-per-launch.md) | ✅ merged (`f000969`) |
 | `build/35-dev-vesting` | see [ADR-0007](docs/adr/0007-vesting-runs-from-graduation.md) | ✅ merged (`9f4bfff`) |
-| `build/35a-security-hardening` | see [`docs/security-checklist.md`](docs/security-checklist.md). Branch coverage, fuzz properties, locked pragma, packed slot | ⬅️ **built, UNCOMMITTED, not yet reviewed** |
-| `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | next |
+| `build/35a-security-hardening` | see [`docs/security-checklist.md`](docs/security-checklist.md). Branch coverage, fuzz properties, locked pragma, packed slot | ✅ merged (`a411975`) |
+| `build/35b-pin-packed-slot` | `vm.load` assertion on slot 12. The #35a test compared getters, which pass with the packing fully undone | ✅ merged (`fd476a9`) |
+| `build/36-launchconfig-subgraph` | New `LaunchConfig` event, schema, mappings, matchstick | ⬅️ **built, UNCOMMITTED** |
 | `build/37-frontend-lock-vesting` | Create form (dev %, lock choice), token page (lock/vesting/reclaim state) | not started |
 | `build/38-testnet-redeploy` | Fork tests, full redeploy, Blockscout re-verify, re-seed | not started |
 
-⚠️ **The contract work is DONE and the read side has not caught up.** #33-#35 added `LaunchConfig`-worthy state that nothing indexes and nothing displays: per-launch lock terms, the dev carve, and the vesting grant. A creator holding up to 40M tokens still reads as **0% concentration** on the panel built to disclose exactly that. #36 and #37 are what close it.
+⚠️ **The INDEXER has caught up; the UI has not.** #36 indexes the dev carve, the vesting grant and the per-launch lock terms, and renamed `Holder` to `CurvePosition` **in the subgraph** (schema, mappings, matchstick) plus the frontend's GraphQL queries. The frontend's own identifiers are deliberately untouched and still say holder: `HolderRow`, `HOLDERS_QUERY`, `fetchHolders`, `useHolders`, `HoldersCard`. #37 owns those and the visible copy. What #37 still owes: the panel does not yet DISPLAY any of it, so a creator holding up to 40M tokens still reads as **0% concentration** on screen.
+
+**Creator concentration means two numbers, decided 2026-08-05**: `devAllocation` (granted, the headline) plus `devClaimed` (actually released), shown together. They diverge for the whole 30 days after graduation.
+⚠️ There is deliberately **no `devVestedSoFar` field**: vested-so-far is a continuous function of wall-clock time, and a subgraph only writes when an event fires, so any stored figure would be silently stale between trades - worst on a quiet launch, where it would be most trusted. #37 computes it client-side from `devAllocation`, `vestingDuration` and `graduatedAtTimestamp`.
 
 **Governing principle: every new number is owner-tunable and FUTURE-ONLY**, so testnet feedback retunes the platform with a transaction rather than a redeploy, and no in-flight launch ever changes under a trader.
 
@@ -145,6 +150,9 @@ Hard-won, mostly discovered by running something rather than reasoning about it.
 - ⚠️ **Line coverage hides the branches an auditor probes.** At 142 green tests `BondingCurve` had **44%** branch coverage and `LaunchpadFactory` 61%; `FeeTransferFailed` and `RefundFailed` had NEVER executed. Revert paths need a contract that rejects ETH, not an EOA. Measure with `forge coverage --ir-minimum`, and read the BRANCH column, not lines.
 - ⚠️ **`CurveConfig memory c = base;` ALIASES, it does not copy.** Mutating `c` to build the next invalid case silently corrupts the baseline, so every later case tests the wrong thing. Build structs from a fresh helper per case.
 - **A mutant that survives is not always a weak test.** Flipping `_previewSell`'s `ceilDiv` to a floor survived every round-trip property - because the buy side's rounding already dominates, so it is not actually a money pump. Check whether the mutant is lethal before "fixing" the test.
+- ⚠️ **A getter-based test cannot see a storage LAYOUT change.** #35a's packed-slot test compared five getters to five constants; a getter returns the right value wherever the variable lives, so inserting one `uint256` into the group split it across three slots and **all 177 other tests still passed**. Read the raw slot with `vm.load` and decode each field at its byte offset. Same shape as the getters-only blindness in the `assertGt` and beneficiary traps: the assertion has to be about the thing you actually claim.
+- ⚠️ **`vm.getRecordedLogs()` CONSUMES the buffer.** A second call returns an empty array, so `logs[_indexOf(vm.getRecordedLogs(), SIG)]` panics with an out-of-bounds rather than saying what went wrong. Capture into a local exactly once per `vm.recordLogs()`.
+- ⚠️ **A GraphQL response key is an assertion, not a type.** `request<{ holders: Row[] }>(QUERY)` typechecks against whatever you write, so renaming the entity in the query text while leaving the destructure alone yields `undefined` at runtime and an empty panel - indistinguishable from "nobody has traded". #36 shipped that state through **302 green frontend tests**. When renaming a schema entity, grep the response destructures, not just the query documents.
 - ⚠️ **Log ORDER inside one transaction is part of the contract's interface.** `LaunchCreated` must be emitted before `GrantRegistered`: an indexer processes logs in order, and the handler that creates the `Launch` entity has to run before the one that loads it. Free to get right at the emit site, expensive to discover in the mapping.
 
 - **A test buy sized in ETH is coupled to the calibration.** Nine graduation tests opened with a hardcoded `buy{value: 0.15 ether}` per filler wallet, which sat under the 8M anti-snipe cap at 90 ETH and blew through it at 10 ETH - the same ETH buys ~9x the tokens. Nobody thinks of a literal in a test setup as a test input. `test/CurveDriver.sol` now owns both moves and derives each from the curve's own reserves: `_liftAntiSnipe` and `_crossToGraduation`. Use them; do not write another `buy{value: N ether}`.

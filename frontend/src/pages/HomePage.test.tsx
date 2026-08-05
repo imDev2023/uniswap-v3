@@ -70,7 +70,7 @@ function token(over: Partial<TokenRow> & { id: string; symbol: string }): TokenR
     buyCount: 0,
     sellCount: 0,
     tradeCount: 1,
-    holderCount: 1,
+    curvePositionCount: 1,
     graduated: false,
     graduatedAtTimestamp: null,
     ...over,
@@ -81,7 +81,7 @@ function token(over: Partial<TokenRow> & { id: string; symbol: string }): TokenR
 const LIVE: TokenRow[] = [
   token({ id: '0xa', symbol: 'RDOGE', progressBps: 9_600, createdAtTimestamp: '100', volumeEth: '86500000000000000' }),
   token({ id: '0xb', symbol: 'DIAMOND', progressBps: 5_800, createdAtTimestamp: '200', volumeEth: '25900000000000000' }),
-  token({ id: '0xc', symbol: 'QUIET', progressBps: 0, createdAtTimestamp: '300', volumeEth: '0', tradeCount: 0, holderCount: 0 }),
+  token({ id: '0xc', symbol: 'QUIET', progressBps: 0, createdAtTimestamp: '300', volumeEth: '0', tradeCount: 0, curvePositionCount: 0 }),
 ]
 
 const GRADUATED: TokenRow[] = [

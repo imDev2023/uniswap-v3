@@ -24,7 +24,7 @@ import {
   soldEvent,
   graduationEvent,
   graduatedEvent,
-  holderIdHex,
+  curvePositionIdHex,
   V_ETH,
   V_TOKEN,
   ALLOCATION,
@@ -85,7 +85,7 @@ describe("LaunchCreated", () => {
     assert.fieldEquals("Token", id, "tokensSold", "0");
     assert.fieldEquals("Token", id, "progressBps", "0");
     assert.fieldEquals("Token", id, "graduated", "false");
-    assert.fieldEquals("Token", id, "holderCount", "0");
+    assert.fieldEquals("Token", id, "curvePositionCount", "0");
 
     assert.fieldEquals("Factory", "launchpad", "launchCount", "1");
   });
@@ -197,7 +197,7 @@ describe("Bought", () => {
     dataSourceMock.resetValues();
   });
 
-  test("records a BUY trade, refreshes curve progress, and credits the buyer as a holder", () => {
+  test("records a BUY trade, refreshes curve progress, and credits the buyer as a curve position", () => {
     seedLaunchAndBuy();
 
     let tokenId = TOKEN.toHexString();
@@ -208,17 +208,17 @@ describe("Bought", () => {
     assert.fieldEquals("Token", tokenId, "buyCount", "1");
     assert.fieldEquals("Token", tokenId, "tradeCount", "1");
     assert.fieldEquals("Token", tokenId, "volumeEth", "1000000000000000000");
-    assert.fieldEquals("Token", tokenId, "holderCount", "1");
+    assert.fieldEquals("Token", tokenId, "curvePositionCount", "1");
 
     // one immutable Trade
     assert.entityCount("Trade", 1);
 
-    // holder position
-    let hid = holderIdHex(TOKEN, BUYER);
-    assert.fieldEquals("Holder", hid, "account", BUYER.toHexString());
-    assert.fieldEquals("Holder", hid, "balance", FIFTEEN_PCT);
-    assert.fieldEquals("Holder", hid, "bought", FIFTEEN_PCT);
-    assert.fieldEquals("Holder", hid, "sold", "0");
+    // the buyer's curve position
+    let positionId = curvePositionIdHex(TOKEN, BUYER);
+    assert.fieldEquals("CurvePosition", positionId, "account", BUYER.toHexString());
+    assert.fieldEquals("CurvePosition", positionId, "balance", FIFTEEN_PCT);
+    assert.fieldEquals("CurvePosition", positionId, "bought", FIFTEEN_PCT);
+    assert.fieldEquals("CurvePosition", positionId, "sold", "0");
 
     // factory rollups
     assert.fieldEquals("Factory", "launchpad", "buyCount", "1");
@@ -226,7 +226,7 @@ describe("Bought", () => {
     assert.fieldEquals("Factory", "launchpad", "totalVolumeEth", "1000000000000000000");
   });
 
-  test("a second buy by the same wallet accumulates its position without double-counting holders", () => {
+  test("a second buy by the same wallet accumulates its position without double-counting curve positions", () => {
     seedLaunchAndBuy();
     handleBought(
       boughtEvent(
@@ -246,11 +246,11 @@ describe("Bought", () => {
     );
 
     let tokenId = TOKEN.toHexString();
-    assert.fieldEquals("Token", tokenId, "holderCount", "1");
+    assert.fieldEquals("Token", tokenId, "curvePositionCount", "1");
     assert.fieldEquals("Token", tokenId, "buyCount", "2");
-    let hid = holderIdHex(TOKEN, BUYER);
-    assert.fieldEquals("Holder", hid, "balance", "130000000000000000000000000");
-    assert.fieldEquals("Holder", hid, "tradeCount", "2");
+    let positionId = curvePositionIdHex(TOKEN, BUYER);
+    assert.fieldEquals("CurvePosition", positionId, "balance", "130000000000000000000000000");
+    assert.fieldEquals("CurvePosition", positionId, "tradeCount", "2");
   });
 
   test("the graduation-crossing buy counts only ETH that reached the curve, not the refund", () => {
@@ -281,7 +281,7 @@ describe("Bought", () => {
     assert.fieldEquals("Factory", "launchpad", "totalVolumeEth", "3000000000000000000");
   });
 
-  test("a distinct buyer is counted as a separate holder", () => {
+  test("a distinct buyer is counted as a separate curve position", () => {
     seedLaunchAndBuy();
     handleBought(
       boughtEvent(
@@ -299,8 +299,8 @@ describe("Bought", () => {
         0
       )
     );
-    assert.fieldEquals("Token", TOKEN.toHexString(), "holderCount", "2");
-    assert.entityCount("Holder", 2);
+    assert.fieldEquals("Token", TOKEN.toHexString(), "curvePositionCount", "2");
+    assert.entityCount("CurvePosition", 2);
   });
 });
 
@@ -310,7 +310,7 @@ describe("Sold", () => {
     dataSourceMock.resetValues();
   });
 
-  test("debits the seller and drops the holder count when the position is fully exited", () => {
+  test("debits the seller and drops the curve position count when the position is fully exited", () => {
     seedLaunchAndBuy();
     // sell the entire 120M position back
     handleSold(
@@ -334,12 +334,12 @@ describe("Sold", () => {
     assert.fieldEquals("Token", tokenId, "progressBps", "0");
     assert.fieldEquals("Token", tokenId, "sellCount", "1");
     assert.fieldEquals("Token", tokenId, "tradeCount", "2");
-    assert.fieldEquals("Token", tokenId, "holderCount", "0");
+    assert.fieldEquals("Token", tokenId, "curvePositionCount", "0");
 
-    let hid = holderIdHex(TOKEN, BUYER);
-    assert.fieldEquals("Holder", hid, "balance", "0");
-    assert.fieldEquals("Holder", hid, "sold", FIFTEEN_PCT);
-    assert.fieldEquals("Holder", hid, "bought", FIFTEEN_PCT);
+    let positionId = curvePositionIdHex(TOKEN, BUYER);
+    assert.fieldEquals("CurvePosition", positionId, "balance", "0");
+    assert.fieldEquals("CurvePosition", positionId, "sold", FIFTEEN_PCT);
+    assert.fieldEquals("CurvePosition", positionId, "bought", FIFTEEN_PCT);
 
     assert.fieldEquals("Factory", "launchpad", "sellCount", "1");
   });

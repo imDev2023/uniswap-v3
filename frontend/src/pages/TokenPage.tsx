@@ -115,7 +115,7 @@ export function TokenPage() {
                 <Kv label="Volume" value={`${formatEth(BigInt(token.volumeEth))} ETH`} />
                 <Kv label="ETH reserve" value={`${formatEth(BigInt(token.ethReserve))} ETH`} />
                 <Kv label="Trades" value={String(token.tradeCount)} />
-                <Kv label="Holders" value={String(token.holderCount)} />
+                <Kv label="Holders" value={String(token.curvePositionCount)} />
                 <Kv label="Buys / Sells" value={`${token.buyCount} / ${token.sellCount}`} />
               </div>
             ) : indexedMissing ? (

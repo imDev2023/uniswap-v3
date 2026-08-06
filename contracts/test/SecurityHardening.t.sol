@@ -13,6 +13,7 @@ import {DevVesting} from "../src/periphery/DevVesting.sol";
 import {Constants} from "../src/Constants.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ForkConfig} from "./ForkConfig.sol";
 
 /// @notice A contract that refuses every ETH transfer, for reaching the failure branches that a
@@ -28,6 +29,53 @@ contract RejectsEth {
 
 /// @notice A contract with no `receive` and no payable fallback, so plain ETH sends fail.
 contract NoReceive {}
+
+/// @notice A creator contract that re-enters `createLaunch` from the `receive()` that takes its
+///         refund - the only re-entrancy vector `createLaunch` has, since the refund is the one
+///         `.call` that reaches an address the caller controls.
+///
+/// @dev ⚠️ It SWALLOWS the inner revert and records it rather than bubbling it, and that is the
+///      entire point of the design. If `receive()` reverted, the outer `createLaunch` would fail
+///      with `RefundFailed` - which is also what it does for a callee that merely has no `receive`
+///      (see `test_CreateLaunch_RevertsWhenRefundIsRejected` above). A test asserting on the OUTER
+///      revert would therefore pass with `nonReentrant` deleted, proving nothing but that reverting
+///      in `receive` reverts the creation. Capturing the INNER revert data is what makes the
+///      assertion about re-entrancy specifically. Same trap as the wrong-selector `decreaseLiquidity`
+///      call that "proved" an attacker could not withdraw principal for six builds.
+contract ReentrantCreator {
+    LaunchpadFactory public immutable factory;
+
+    /// @notice Did `receive()` actually run the inner call? Asserted, because a test where the
+    ///         re-entry never happened is green for the wrong reason.
+    bool public reentered;
+    bool public innerSucceeded;
+    bytes public innerRevert;
+
+    bool private armed;
+
+    constructor(LaunchpadFactory f) {
+        factory = f;
+    }
+
+    function attack(uint256 value) external {
+        armed = true;
+        factory.createLaunch{value: value}(LaunchParams("Reenter", "REENT", "", false, 0));
+    }
+
+    receive() external payable {
+        if (!armed) return;
+        armed = false;
+        reentered = true;
+
+        // Exactly the fee, so the inner call would take the no-refund path and could not recurse
+        // further even if the guard were absent.
+        try factory.createLaunch{value: factory.creationFee()}(LaunchParams("Inner", "INNER", "", false, 0)) {
+            innerSucceeded = true;
+        } catch (bytes memory err) {
+            innerRevert = err;
+        }
+    }
+}
 
 /// @notice Build #35a: the security-hardening pass driven by the four documents in
 ///         `web3-security.md` (SlowMist, Alchemy, Consensys Diligence, WTF gas).
@@ -197,6 +245,31 @@ contract SecurityHardeningTest is Test, V3Deployer, CurveDriver {
         vm.prank(payer);
         vm.expectRevert(LaunchpadFactory.RefundFailed.selector);
         factory.createLaunch{value: CREATION_FEE + 1 wei}(_params("NOREFUND", 0));
+    }
+
+    /// @notice ⚠️ #38: the refund `.call` cannot be used to re-enter `createLaunch`.
+    /// @dev Added at the last redeploy of the tokenomics program, which was the last moment the
+    ///      guard was free. CEI already held, so this is belt-and-braces rather than a fixed hole -
+    ///      but "the ordering makes it safe" is a claim that must be re-verified on every edit, and
+    ///      the modifier is a claim that does not.
+    ///
+    ///      Note what is asserted: the inner call's OWN revert selector, captured by the attacker.
+    ///      See `ReentrantCreator` for why asserting on the outer revert would be worthless.
+    function test_CreateLaunch_RefundCannotReenter() public {
+        ReentrantCreator attacker = new ReentrantCreator(factory);
+        vm.deal(address(attacker), 1 ether);
+
+        uint256 before = factory.launchCount();
+        attacker.attack(CREATION_FEE + 0.5 ether); // overpay, so a refund actually fires
+
+        assertTrue(attacker.reentered(), "the refund reached receive() - without this the test proves nothing");
+        assertFalse(attacker.innerSucceeded(), "the re-entrant createLaunch was refused");
+        assertEq(
+            bytes4(attacker.innerRevert()),
+            ReentrancyGuard.ReentrancyGuardReentrantCall.selector,
+            "refused BY THE GUARD, not by some unrelated revert"
+        );
+        assertEq(factory.launchCount(), before + 1, "exactly one launch exists, not two");
     }
 
     /// @notice Paying exactly the fee takes the no-refund path, so an unrefundable caller can still
@@ -564,8 +637,15 @@ contract SecurityHardeningTest is Test, V3Deployer, CurveDriver {
     ///      the group shifts to a new slot and this test fails. That is intended: confirm the five
     ///      are still contiguous in `forge inspect LaunchpadFactory storageLayout`, then update
     ///      `SLOT` here. Do not "fix" it by going back to comparing getters.
+    ///
+    ///      ⚠️ It has happened once, and the mechanism is worth knowing. #38 added `ReentrancyGuard`
+    ///      to the inheritance list, whose `_status` is a full `uint256` that lands in slot 2 -
+    ///      BEFORE every variable declared in `LaunchpadFactory` itself, because Solidity lays out
+    ///      base-contract storage first. Adding one modifier to one function therefore moved the
+    ///      packed group from slot 12 to 13. This test is what caught it; the getters all kept
+    ///      returning the right values throughout, which is exactly the blindness it exists to fix.
     function test_OwnerParams_SharePackedStorageSlot() public view {
-        uint256 SLOT = 12;
+        uint256 SLOT = 13;
         uint256 w = uint256(vm.load(address(factory), bytes32(SLOT)));
 
         // Every cast below truncates deliberately: truncating to the field's own width is HOW you

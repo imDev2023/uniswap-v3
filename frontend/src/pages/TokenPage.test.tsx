@@ -80,6 +80,9 @@ vi.mock('wagmi', () => ({
   useBalance: () => ({ data: undefined }),
   useBlock: () => ({ data: undefined }),
   useSimulateContract: () => ({ data: undefined, isFetching: false }),
+  // #39's accrued-fees read goes through the PUBLIC client, not useSimulateContract, because the
+  // latter needs a connected wallet. Undefined here leaves the panel in its honest not-known state.
+  usePublicClient: () => undefined,
   useWriteContract: () => ({ writeContract: vi.fn(), isPending: false, reset: vi.fn() }),
   useWaitForTransactionReceipt: () => ({ isLoading: false, isSuccess: false }),
   useChainId: () => 46630,

@@ -21,6 +21,7 @@ import { TradePanel } from '../components/TradePanel'
 import { TokenTradeFeed } from '../components/TokenTradeFeed'
 import { CurvePositionsCard } from '../components/CurvePositionsCard'
 import { LockCard } from '../components/LockCard'
+import { FeeEarningsCard } from '../components/FeeEarningsCard'
 import { VestingCard } from '../components/VestingCard'
 
 // Stage 2 split: the trade path (curve address, graduation state, symbol) comes from RPC, so the
@@ -152,6 +153,23 @@ export function TokenPage() {
             pool={onchain.status === 'graduated' ? onchain.pool : undefined}
             nowSeconds={now}
             symbol={symbol}
+          />
+
+          {/* What the creator has actually earned from the locked position (#39). Renders nothing
+              before graduation, when no position exists yet. Deliberately reads BOTH sides: what has
+              been collected comes from the indexer, what is waiting comes from the chain, and on a
+              permissionless collector the second is routinely non-zero while the first is zero. */}
+          <FeeEarningsCard
+            lock={token?.lock ?? null}
+            // ⚠️ From the CHAIN, not from `lock.id`. The accrued half of this card is a chain read
+            // and must not be gated on the indexer - see the prop's own note.
+            positionTokenId={terms.positionTokenId}
+            token={tokenAddr}
+            pool={onchain.status === 'graduated' ? onchain.pool : undefined}
+            creatorFeeBps={terms.creatorFeeBps}
+            graduated={graduated}
+            symbol={symbol}
+            nowSeconds={now}
           />
 
           {/* Renders nothing at all when the launch took no carve - see VestingCard. */}

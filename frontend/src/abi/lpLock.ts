@@ -3,6 +3,26 @@
 //
 // The lock's address is read from `LaunchpadFactory.lpLock()`, per ADR-0003.
 export const lpLockAbi = [
+  // Collect a locked position's accrued fees, splitting them between the treasury and the creator.
+  //
+  // ⚠️ Present here to be SIMULATED, not sent. `collect` is nonpayable, so an `eth_call` against it
+  // returns the gross `(amount0, amount1)` it would collect without moving anything - which is the
+  // only way to learn what a position has accrued. The indexer can only ever report what has already
+  // been collected, and since `collect` is permissionless it may simply never have been called: a
+  // creator with a year of real fees would otherwise be shown a lifetime total of zero.
+  //
+  // ⚠️ The return is GROSS, before the `creatorFeeBps` split. Apply the split with the same floor
+  // division the contract uses, or the figure quoted to the creator is not the figure they get.
+  {
+    type: 'function',
+    name: 'collect',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+  },
   // Why a reclaim would be refused right now, or `NoBlocker` (0) if it would succeed.
   //
   // ⚠️ **This is read from the chain and cannot come from the indexer**, which is the whole reason it

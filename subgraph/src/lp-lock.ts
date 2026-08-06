@@ -1,6 +1,6 @@
-import { BigInt } from "@graphprotocol/graph-ts";
-import { LockRegistered, LockExtended, Reclaimed } from "../generated/LPLock/LPLock";
-import { Lock, Token } from "../generated/schema";
+import { Address, BigInt } from "@graphprotocol/graph-ts";
+import { LockRegistered, LockExtended, FeesCollected, Reclaimed } from "../generated/LPLock/LPLock";
+import { FeeCollection, Lock, Token } from "../generated/schema";
 import { LOCK_ORIGINS, PERMANENT_LOCK_SENTINEL, ZERO_BI } from "./constants";
 
 /// A graduated position was locked (#33).
@@ -31,6 +31,12 @@ export function handleLockRegistered(event: LockRegistered): void {
   lock.extendCount = 0;
   lock.reclaimed = false;
 
+  lock.collectionCount = 0;
+  lock.creatorFees0 = ZERO_BI;
+  lock.creatorFees1 = ZERO_BI;
+  lock.treasuryFees0 = ZERO_BI;
+  lock.treasuryFees1 = ZERO_BI;
+
   lock.registeredAtTimestamp = event.block.timestamp;
   lock.registeredAtBlock = event.block.number;
   lock.registeredAtTx = event.transaction.hash;
@@ -59,6 +65,53 @@ export function handleLockExtended(event: LockExtended): void {
   lock.lockUntil = event.params.newLockUntil;
   lock.permanent = event.params.newLockUntil.equals(PERMANENT_LOCK_SENTINEL);
   lock.extendCount = lock.extendCount + 1;
+  lock.save();
+}
+
+/// Fees were collected from a locked position and split between the treasury and the creator (#39).
+///
+/// ⚠️ `collect` is PERMISSIONLESS. Its presence proves a collection happened, not that the creator
+/// did anything, and its ABSENCE proves nothing at all: a position can accrue fees for a year with
+/// no collection ever called, in which case every total here is legitimately zero while the creator
+/// is genuinely owed money. Anything rendering these numbers has to say which question it answers.
+///
+/// ⚠️ A `Lock` only exists for launch positions - `handleLockRegistered` skips third-party ones,
+/// which have no launch token and pay 100% to the treasury. Loading it is therefore the filter, and
+/// a null lock is a third-party collection rather than an error.
+export function handleFeesCollected(event: FeesCollected): void {
+  let lock = Lock.load(event.params.tokenId.toString());
+  if (lock == null) return;
+
+  // One transaction can collect for several positions, so the log index is part of the key.
+  let collection = new FeeCollection(
+    event.transaction.hash.toHexString() + "-" + event.logIndex.toString()
+  );
+  collection.lock = lock.id;
+  collection.token = lock.token;
+  // ⚠️ Stored VERBATIM in the pool's token0/token1 ordering, not resolved to assets. Resolving them
+  // needs `token0()` on the pool, and calling that from here deadlocks the subgraph: our RPC prunes
+  // state, so a historical eth_call returns "missing trie node" and graph-node retries forever while
+  // still reporting healthy. The client does the attribution at the chain head instead.
+  collection.creator0 = event.params.creatorAmount0;
+  collection.creator1 = event.params.creatorAmount1;
+  collection.treasury0 = event.params.treasuryAmount0;
+  collection.treasury1 = event.params.treasuryAmount1;
+  // `LPLock` emits the zero address when the split did not apply. Null is the honest reading of
+  // "there was no creator side to this collection"; defaulting it to an address would invent one.
+  collection.creator = event.params.creator.equals(Address.zero()) ? null : event.params.creator;
+  // ⚠️ `FeesCollected` carries no `msg.sender`, so this is the transaction's sender, which is not
+  // the caller when a contract sits in between. The schema and the UI both label it as the sender.
+  collection.sentBy = event.transaction.from;
+  collection.collectedAtTimestamp = event.block.timestamp;
+  collection.collectedAtBlock = event.block.number;
+  collection.collectedAtTx = event.transaction.hash;
+  collection.save();
+
+  lock.collectionCount = lock.collectionCount + 1;
+  lock.creatorFees0 = lock.creatorFees0.plus(event.params.creatorAmount0);
+  lock.creatorFees1 = lock.creatorFees1.plus(event.params.creatorAmount1);
+  lock.treasuryFees0 = lock.treasuryFees0.plus(event.params.treasuryAmount0);
+  lock.treasuryFees1 = lock.treasuryFees1.plus(event.params.treasuryAmount1);
   lock.save();
 }
 

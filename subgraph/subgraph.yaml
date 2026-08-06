@@ -101,6 +101,7 @@ dataSources:
       entities:
         - Lock
         - Token
+        - FeeCollection
       abis:
         - name: LPLock
           file: ./abis/LPLock.json
@@ -109,6 +110,13 @@ dataSources:
           handler: handleLockRegistered
         - event: LockExtended(indexed uint256,uint64,uint64)
           handler: handleLockExtended
+        # ⚠️ No UniswapV3Pool ABI here, deliberately. #39 first resolved the pool's token0/token1
+        # ordering with a `token0()` call from handleLockRegistered; against the real chain that
+        # DEADLOCKED the subgraph, because our RPC prunes state and a historical eth_call returns
+        # "missing trie node" forever while the status stays `healthy`. The client resolves the
+        # ordering at the chain head instead - see frontend/src/hooks/usePoolTokenOrder.ts.
+        - event: FeesCollected(indexed uint256,indexed address,indexed address,uint256,uint256,uint256,uint256)
+          handler: handleFeesCollected
         - event: Reclaimed(indexed uint256,indexed address,uint256,uint256)
           handler: handleReclaimed
 templates:

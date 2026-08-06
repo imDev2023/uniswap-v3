@@ -240,9 +240,85 @@ type Lock @entity(immutable: false) {
   reclaimedTokensBurned: BigInt
   reclaimedAtTimestamp: BigInt
 
+  "Number of times fees have been collected. `collect` is permissionless, so this is not a creator action."
+  collectionCount: Int!
+  """
+  Lifetime fees actually PAID OUT to the launch creator, in the POOL's own token0/token1 ordering.
+
+  ⚠️ **These are NOT "launch token" and "WETH", and the mapping deliberately does not decide which is
+  which.** V3 sorts a pool's pair by address, so the launch token is token0 on some launches and
+  token1 on others. Working that out needs `token0()` on the pool, and calling it from a handler
+  DEADLOCKS this subgraph: our RPC prunes state, so a historical `eth_call` returns `missing trie
+  node` and graph-node retries it forever - healthy, no fatalError, and permanently stuck. The
+  attribution therefore belongs to the client, which reads the pool at the chain head where the same
+  call is cheap and reliable. See `frontend/src/hooks/usePoolTokenOrder.ts`.
+
+  ⚠️ This is also what has been COLLECTED, not what the position has EARNED. `collect` is
+  permissionless and may simply never have been called, so zero here means "nothing was collected",
+  never "nothing accrued". The accrued figure is a chain read: `frontend/src/hooks/useClaimableFees.ts`.
+  """
+  creatorFees0: BigInt!
+  creatorFees1: BigInt!
+  "Lifetime fees paid out to the treasury, the other side of the `creatorFeeBps` split. Same caveats."
+  treasuryFees0: BigInt!
+  treasuryFees1: BigInt!
+
+  """
+  Every collection. Empty until one happens.
+
+  ⚠️ UNORDERED. A `@derivedFrom` list carries no ordering of its own, so any caller that needs
+  newest-first must pass `orderBy: collectedAtTimestamp, orderDirection: desc` itself - and two
+  collections in the same block still tie.
+  """
+  collections: [FeeCollection!]! @derivedFrom(field: "lock")
+
   registeredAtTimestamp: BigInt!
   registeredAtBlock: BigInt!
   registeredAtTx: Bytes!
+}
+
+"""
+One `LPLock.collect` call. Immutable: a collection is a settled historical fact.
+
+⚠️ `collect` is PERMISSIONLESS - anyone may trigger one, and the funds still reach only the treasury
+and the creator, never the caller. So the presence of collections says nothing about creator activity.
+"""
+type FeeCollection @entity(immutable: true) {
+  "`<tx hash>-<log index>`, because one transaction can collect for several positions."
+  id: ID!
+  lock: Lock!
+  token: Token!
+
+  """
+  Paid to the creator, in the POOL's token0/token1 ordering. See `Lock.creatorFees0` for why the
+  mapping does not resolve these to assets.
+  """
+  creator0: BigInt!
+  creator1: BigInt!
+  "Paid to the treasury, same ordering."
+  treasury0: BigInt!
+  treasury1: BigInt!
+  """
+  The creator this collection paid.
+
+  ⚠️ Null when the split did not apply - `LPLock` emits the zero address when `creatorFeeBps` is 0 or
+  the launch has no creator, and pays 100% to the treasury. Null is the honest reading; do not
+  default it to an address.
+  """
+  creator: Bytes
+
+  """
+  The EOA that SENT the collecting transaction.
+
+  ⚠️ Not necessarily the caller. `FeesCollected` carries no `msg.sender`, so this is
+  `transaction.from`, which differs from the direct caller whenever a contract sits in between.
+  Label it as the sender in any UI, never as "collected by".
+  """
+  sentBy: Bytes!
+
+  collectedAtTimestamp: BigInt!
+  collectedAtBlock: BigInt!
+  collectedAtTx: Bytes!
 }
 
 "⚠️ `None` MUST stay the zero slot: every field of an unregistered key reads as zero, so a status enum whose first member is a privileged one silently grants that status to everything never registered."

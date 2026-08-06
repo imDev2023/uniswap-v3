@@ -67,6 +67,15 @@ export interface LaunchTerms {
    */
   graduatedAt: bigint | null | undefined
   /**
+   * The locked LP position's NFT id, or `null` before graduation.
+   *
+   * ⚠️ From the CHAIN, deliberately not from `Lock.id`. Everything that reads the position live -
+   * the reclaim verdict, the accrued fees - needs this, and sourcing it from the indexed row would
+   * make those chain reads fail whenever the indexer does. That is the #37 defect exactly: a panel
+   * is not on the chain until EVERY value it reads is.
+   */
+  positionTokenId: bigint | null | undefined
+  /**
    * The grant's beneficiary.
    *
    * ⚠️ Taken from the grant rather than from `factory.creatorOf` or the indexed row, because this is
@@ -127,6 +136,12 @@ export function useLaunchTerms(token: Address | undefined): LaunchTerms {
         functionName: 'graduatedAt',
         args: token ? [token] : undefined,
       },
+      {
+        address: graduationManager,
+        abi: graduationManagerAbi,
+        functionName: 'tokenIdOf',
+        args: token ? [token] : undefined,
+      },
     ],
     query: { enabled: !!graduationManager && !!token, refetchInterval: GRANT_POLL_MS },
   })
@@ -137,6 +152,7 @@ export function useLaunchTerms(token: Address | undefined): LaunchTerms {
   const claimableEntry = grantData?.[1]
   const grant = grantEntry?.status === 'success' ? grantEntry.result : undefined
   const graduatedEntry = graduatedData?.[0]
+  const tokenIdEntry = graduatedData?.[1]
 
   return {
     // ⚠️ Left `undefined` on a failed read rather than defaulted. A zero lock duration renders as
@@ -160,6 +176,14 @@ export function useLaunchTerms(token: Address | undefined): LaunchTerms {
       graduatedEntry?.status === 'success'
         ? graduatedEntry.result > 0n
           ? graduatedEntry.result
+          : null
+        : undefined,
+    // ⚠️ Zero means "no position yet", mapped to `null`, and kept distinct from the `undefined` of
+    // an unread call - the same tri-state as `graduatedAt` above and for the same reason.
+    positionTokenId:
+      tokenIdEntry?.status === 'success'
+        ? tokenIdEntry.result > 0n
+          ? tokenIdEntry.result
           : null
         : undefined,
   }

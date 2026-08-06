@@ -17,7 +17,20 @@ export const graduationManagerAbi = [
   // receives any of it" - a positive falsehood about a schedule that is already running, on the one
   // panel that exists to disclose it. The same Stage-2 reason the lock terms and the grant are read
   // directly: see `hooks/useLaunchTerms.ts`.
+    // The locked LP position's NFT id for a launch, or 0 if it has not graduated.
+  //
+  // ⚠️ Read from the CHAIN, not from the indexed `Lock.id`. The accrued-fees panel is a chain read,
+  // and taking its tokenId off the indexed row would gate it on the indexer - reproducing exactly
+  // the #37 defect where a panel "moved onto the chain" kept one value on the read model and so
+  // still vanished during an outage.
   {
+    type: 'function',
+    name: 'tokenIdOf',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+{
     type: 'function',
     name: 'graduatedAt',
     stateMutability: 'view',

@@ -47,6 +47,12 @@ function lock(over: Partial<LockRow> = {}): LockRow {
     reclaimedEth: null,
     reclaimedTokensBurned: null,
     reclaimedAtTimestamp: null,
+    collectionCount: 0,
+    creatorFees0: '0',
+    creatorFees1: '0',
+    treasuryFees0: '0',
+    treasuryFees1: '0',
+    collections: [],
     ...over,
   }
 }

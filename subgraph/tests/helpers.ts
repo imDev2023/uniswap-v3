@@ -2,7 +2,7 @@ import { Address, BigInt, ethereum, Bytes } from "@graphprotocol/graph-ts";
 import { newMockEvent } from "matchstick-as";
 import { LaunchCreated, LaunchConfig } from "../generated/LaunchpadFactory/LaunchpadFactory";
 import { Claimed } from "../generated/DevVesting/DevVesting";
-import { LockRegistered, LockExtended, Reclaimed } from "../generated/LPLock/LPLock";
+import { LockRegistered, LockExtended, FeesCollected, Reclaimed } from "../generated/LPLock/LPLock";
 import { Graduated } from "../generated/GraduationManager/GraduationManager";
 import { Bought, Sold, Graduation } from "../generated/templates/BondingCurve/BondingCurve";
 
@@ -293,6 +293,36 @@ export function lockExtendedEvent(
   e.parameters.push(new ethereum.EventParam("oldLockUntil", ethereum.Value.fromUnsignedBigInt(oldLockUntil)));
   e.parameters.push(new ethereum.EventParam("newLockUntil", ethereum.Value.fromUnsignedBigInt(newLockUntil)));
   stamp(e, timestamp, 105, logIndex);
+  return e;
+}
+
+/// `treasuryAmount0/1` and `creatorAmount0/1` are in the POOL's token0/token1 ordering, which is
+/// also how the mapping stores them: resolving them to assets is the client's job, because the call
+/// that would do it here cannot be served at a historical block by our pruning RPC.
+export function feesCollectedEvent(
+  tokenId: BigInt,
+  treasury: Address,
+  creator: Address,
+  treasuryAmount0: BigInt,
+  treasuryAmount1: BigInt,
+  creatorAmount0: BigInt,
+  creatorAmount1: BigInt,
+  sender: Address,
+  timestamp: i64,
+  logIndex: i64
+): FeesCollected {
+  let e = changetype<FeesCollected>(newMockEvent());
+  e.parameters = new Array<ethereum.EventParam>();
+  e.parameters.push(new ethereum.EventParam("tokenId", ethereum.Value.fromUnsignedBigInt(tokenId)));
+  e.parameters.push(new ethereum.EventParam("treasury", ethereum.Value.fromAddress(treasury)));
+  e.parameters.push(new ethereum.EventParam("creator", ethereum.Value.fromAddress(creator)));
+  e.parameters.push(new ethereum.EventParam("treasuryAmount0", ethereum.Value.fromUnsignedBigInt(treasuryAmount0)));
+  e.parameters.push(new ethereum.EventParam("treasuryAmount1", ethereum.Value.fromUnsignedBigInt(treasuryAmount1)));
+  e.parameters.push(new ethereum.EventParam("creatorAmount0", ethereum.Value.fromUnsignedBigInt(creatorAmount0)));
+  e.parameters.push(new ethereum.EventParam("creatorAmount1", ethereum.Value.fromUnsignedBigInt(creatorAmount1)));
+  // `FeesCollected` carries no msg.sender, so the mapping reads transaction.from.
+  e.transaction.from = sender;
+  stamp(e, timestamp, 107, logIndex);
   return e;
 }
 

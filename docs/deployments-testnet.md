@@ -150,6 +150,27 @@ Every earlier confirmation of the tokenomics UI was against mocks or a local `an
 ⚠️ `VESTED SO FAR` (428.58K, computed client-side from wall-clock) runs slightly ahead of `CLAIMED` (427.88K, indexed).
 That is the intended behaviour, and the reason there is deliberately no `devVestedSoFar` field: a subgraph only writes when an event fires, so any stored figure would be silently stale between trades.
 
+## ✅ Acceptance test - creator fee earnings (#39)
+
+Run 2026-08-06 against `CLAIM` (LP NFT `2`, pool `0x62Ce15666FA30B0592eb76cE3a211Ef6bD44Fb4f`), the only launch with a locked position.
+Fees had to be manufactured first: the position had earned nothing since graduation.
+
+| Step | Result |
+| --- | --- |
+| Swap 0.02 ETH → `CLAIM` through our `SwapRouter` | ✅ tx `0x0c37b074…d85b2` - accrues fees on the WETH side |
+| Swap the `CLAIM` back → WETH | ✅ tx `0x6b673fc9…3ec2` - accrues fees on the token side, so both assets are exercised |
+| `LPLock.collect(2)` simulated before collecting | ✅ gross `149999999999999` WETH and `29123357521082565294538` CLAIM |
+| ⚠️ **Card BEFORE any collection** | ✅ "Waiting to be collected 0.000104 ETH / 20.39K CLAIM" **and** "Nothing has been collected yet". This is the state the whole card exists for: the indexer honestly reports zero collections while the creator is genuinely owed money |
+| `LPLock.collect(2)`, sent by the DEPLOYER not the creator | ✅ tx `0xf6c53db1…436c6`; creator's `CLAIM` balance `427,876.54 → 448,262.89`, exactly `+20,386.35` |
+| Indexed split sums to the gross | ✅ `creator0 + treasury0 = 149999999999999` and `creator1 + treasury1 = 29123357521082565294538`, both exact - the floor rounding leaves the remainder with the treasury |
+| ⚠️ **`sentBy` is not the creator** | ✅ `sentBy 0x8ec5…a80c` (deployer), `creator 0xe4d1…e10c`. The card says "sent by", never "collected by": `FeesCollected` carries no `msg.sender` |
+| Card AFTER collecting | ✅ "Waiting 0 ETH / 0 CLAIM" (a genuine zero) and "Collected so far 0.000104 ETH / 20.39K CLAIM … Treasury received 8.74K CLAIM and 0.000045 ETH" |
+| ⚠️ **No wallet connected throughout** | ✅ every figure above rendered with the wallet disconnected. The first build did NOT: `useSimulateContract` simulates as the connected account and threw `ConnectorNotConnectedError`, so the accrued panel was dark for every visitor who had not connected. It reads through `usePublicClient().simulateContract` now |
+| 🔴 **graph-node STOPPED** | ✅ "Waiting to be collected" still reads the chain; "Collected so far" degrades to "Not indexed yet. The position and its history exist on-chain either way." The first build failed this too - it took the position's `tokenId` from the indexed `Lock.id`, so an outage disabled the chain read as well and the panel hung on "Reading the position…". `GraduationManager.tokenIdOf` supplies it now |
+
+⚠️ **`CLAIM` is `token1` in its own pool** (`token0` is WETH `0x7943e237…52Fa`).
+The non-obvious branch is the live one, so any code that assumed the launch token is `token0` would have been wrong on the only position that exists.
+
 ---
 
 # 📜 HISTORICAL - build #24 deployment (superseded by #38)

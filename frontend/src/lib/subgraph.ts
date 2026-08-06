@@ -86,6 +86,19 @@ export interface CurvePositionRow {
  * is no permanent flag on-chain. Branch on it before comparing `lockUntil` to any clock, or a
  * permanent lock renders as expiring in the year 584942417355. `lib/lock.ts` does this for you.
  */
+/**
+ * One `LPLock.collect` call.
+ *
+ * ⚠️ `sentBy` is the transaction's SENDER, not the caller. `FeesCollected` carries no `msg.sender`,
+ * so the mapping records `transaction.from`, which differs whenever a contract sits in between.
+ * Label it as the sender wherever it is rendered.
+ */
+export interface FeeCollectionRow {
+  id: string
+  sentBy: string
+  collectedAtTimestamp: string
+}
+
 export interface LockRow {
   id: string
   pool: string
@@ -98,6 +111,30 @@ export interface LockRow {
   reclaimedEth: string | null
   reclaimedTokensBurned: string | null
   reclaimedAtTimestamp: string | null
+  /**
+   * How many times fees have been COLLECTED from this position (#39).
+   *
+   * ⚠️ This is what distinguishes "nothing has been collected" from "nothing has been earned", and
+   * the lifetime totals below cannot do it alone. `collect` is permissionless, so zero collections
+   * on a position with a year of real trading is an ordinary state, not an anomaly. What has accrued
+   * but not been collected is a CHAIN read: see `hooks/useClaimableFees.ts`.
+   */
+  collectionCount: number
+  /**
+   * Lifetime fees paid out to the creator, in the POOL's token0/token1 ordering.
+   *
+   * ⚠️ **NOT "launch token" and "WETH".** V3 sorts a pair by address, so which side the launch token
+   * is on differs per launch, and the mapping deliberately does not resolve it: the `token0()` call
+   * that would deadlocks the subgraph against our pruning RPC. Attribute these with
+   * `usePoolTokenOrder` before showing them to anyone.
+   */
+  creatorFees0: string
+  creatorFees1: string
+  /** Lifetime fees paid out to the treasury - the other side of the split. Same ordering. */
+  treasuryFees0: string
+  treasuryFees1: string
+  /** The most recent collection only. Empty until one happens. */
+  collections: FeeCollectionRow[]
 }
 
 export interface GraduationRow {
@@ -214,6 +251,16 @@ const TOKEN_LOCK_FIELDS = gql`
       reclaimedEth
       reclaimedTokensBurned
       reclaimedAtTimestamp
+      collectionCount
+      creatorFees0
+      creatorFees1
+      treasuryFees0
+      treasuryFees1
+      collections(first: 1, orderBy: collectedAtTimestamp, orderDirection: desc) {
+        id
+        sentBy
+        collectedAtTimestamp
+      }
     }
   }
 `

@@ -3,7 +3,12 @@ import { Address } from "@graphprotocol/graph-ts";
 import { LaunchCreated } from "../generated/LaunchpadFactory/LaunchpadFactory";
 import { handleLaunchCreated, handleLaunchConfig } from "../src/factory";
 import { handleClaimed } from "../src/dev-vesting";
-import { handleLockRegistered, handleLockExtended, handleReclaimed } from "../src/lp-lock";
+import {
+  handleLockRegistered,
+  handleLockExtended,
+  handleFeesCollected,
+  handleReclaimed,
+} from "../src/lp-lock";
 import {
   TOKEN,
   CURVE,
@@ -16,6 +21,7 @@ import {
   claimedEvent,
   lockRegisteredEvent,
   lockExtendedEvent,
+  feesCollectedEvent,
   reclaimedEvent,
   DEV_ALLOCATION,
   VESTING_DURATION,
@@ -220,5 +226,170 @@ describe("LPLock (#33) - lock records", () => {
     handleLockRegistered(lockRegisteredEvent(bi("99"), zero, POOL, 2, bi("31536000"), CREATOR_FEE_BPS, 4000, 1));
 
     assert.entityCount("Lock", 0);
+  });
+});
+
+// ⚠️ Module scope, not inside the describe: AssemblyScript has no closures, so a fixture declared in
+// the describe callback cannot be reached from the tests.
+let TREASURY = Address.fromString("0x7777777777777777777777777777777777777777");
+let STRANGER = Address.fromString("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+let ZERO_ADDRESS = Address.fromString("0x0000000000000000000000000000000000000000");
+
+/// The shared registered lock.
+function register(): void {
+  handleLockRegistered(
+    lockRegisteredEvent(bi(LOCK_TOKEN_ID), TOKEN, POOL, 1, bi("31536000"), CREATOR_FEE_BPS, 4000, 1)
+  );
+}
+
+/// The FeeCollection id for the fixtures below: matchstick's mock tx hash ++ the log index.
+let COLLECTION_ID = "0xa16081f360e3847006db660bae1c6d1b2e17ec2a-3";
+
+describe("LPLock (#39) - creator fee earnings", () => {
+  beforeEach(() => {
+    clearStore();
+    handleLaunchCreated(launch());
+    handleLaunchConfig(defaultLaunchConfigEvent());
+  });
+
+  test("a lock starts with no collections and zeroed lifetime totals", () => {
+    register();
+
+    // ⚠️ These zeros mean "nothing has been COLLECTED", never "nothing has been earned". `collect`
+    // is permissionless and may never have been called. collectionCount is what tells the two apart,
+    // which is why it is stored rather than derived from the totals being zero.
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "collectionCount", "0");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees0", "0");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees1", "0");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees0", "0");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees1", "0");
+    assert.entityCount("FeeCollection", 0);
+  });
+
+  test("a collection records both sides of the split and rolls it into the lifetime totals", () => {
+    register();
+    handleFeesCollected(
+      feesCollectedEvent(
+        bi(LOCK_TOKEN_ID),
+        TREASURY,
+        CREATOR,
+        bi("300"), // treasuryAmount0 - the launch token, because TOKEN is token0 here
+        bi("30"), // treasuryAmount1 - WETH
+        bi("700"), // creatorAmount0
+        bi("70"), // creatorAmount1
+        STRANGER,
+        5000,
+        3
+      )
+    );
+
+    assert.entityCount("FeeCollection", 1);
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "collectionCount", "1");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees0", "700");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees1", "70");
+    // The treasury's 30% is indexed too: a percentage whose other side is invisible invites the
+    // reader to check it against the wrong denominator.
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees0", "300");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees1", "30");
+  });
+
+  test("⚠️ amounts are stored VERBATIM in the pool's ordering, never resolved to assets here", () => {
+    // The mapping used to call `token0()` on the pool to decide which amount was the launch token.
+    // That DEADLOCKED the subgraph against the real chain: our RPC prunes state, so the historical
+    // eth_call returned "missing trie node" and graph-node retried it forever while still reporting
+    // `healthy` with no fatalError. The ordering is now the client's job, at the chain head.
+    //
+    // This test pins the absence of that interpretation. `creatorAmount0` must land in
+    // `creatorFees0` whatever the pool's ordering happens to be, because the mapping does not know
+    // it and must not guess.
+    register();
+
+    handleFeesCollected(
+      feesCollectedEvent(
+        bi(LOCK_TOKEN_ID),
+        TREASURY,
+        CREATOR,
+        bi("30"), // treasuryAmount0
+        bi("300"), // treasuryAmount1
+        bi("70"), // creatorAmount0
+        bi("700"), // creatorAmount1
+        STRANGER,
+        5000,
+        3
+      )
+    );
+
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees0", "70");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees1", "700");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees0", "30");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees1", "300");
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "creator0", "70");
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "creator1", "700");
+  });
+
+  test("⚠️ collections ACCUMULATE: each event is that collection, not the running total", () => {
+    // Assignment instead of addition would leave a creator's lifetime earnings showing only the most
+    // recent collection, which understates them without ever looking wrong.
+    register();
+    handleFeesCollected(
+      feesCollectedEvent(bi(LOCK_TOKEN_ID), TREASURY, CREATOR, bi("300"), bi("30"), bi("700"), bi("70"), STRANGER, 5000, 3)
+    );
+    // ⚠️ A DIFFERENT log index. Matchstick gives every mock event the same transaction hash, so two
+    // collections sharing a log index would collide on the `<tx>-<logIndex>` id and the second would
+    // overwrite the first - which is exactly what a real second collection in the same transaction
+    // must not do.
+    handleFeesCollected(
+      feesCollectedEvent(bi(LOCK_TOKEN_ID), TREASURY, CREATOR, bi("150"), bi("15"), bi("350"), bi("35"), STRANGER, 6000, 4)
+    );
+
+    assert.entityCount("FeeCollection", 2);
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "collectionCount", "2");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees0", "1050");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees1", "105");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees0", "450");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees1", "45");
+  });
+
+  test("⚠️ the sender is transaction.from, and is NOT the creator", () => {
+    // collect is permissionless: anyone may trigger one, and the money still reaches only the
+    // treasury and the creator. A test where the sender IS the creator could not see the mapping
+    // reading the wrong field, so this one deliberately sends from a stranger.
+    register();
+    handleFeesCollected(
+      feesCollectedEvent(bi(LOCK_TOKEN_ID), TREASURY, CREATOR, bi("300"), bi("30"), bi("700"), bi("70"), STRANGER, 5000, 3)
+    );
+
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "sentBy", STRANGER.toHexString());
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "creator", CREATOR.toHexString());
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "lock", LOCK_TOKEN_ID);
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "token", tokenId);
+  });
+
+  test("⚠️ a collection with no creator side leaves creator NULL rather than the zero address", () => {
+    // LPLock emits address(0) when creatorFeeBps is 0 or the launch has no creator, and pays 100% to
+    // the treasury. Storing the zero address would render as a real account that earned nothing.
+    register();
+    handleFeesCollected(
+      feesCollectedEvent(bi(LOCK_TOKEN_ID), TREASURY, ZERO_ADDRESS, bi("1000"), bi("100"), bi("0"), bi("0"), STRANGER, 5000, 3)
+    );
+
+    assert.fieldEquals("FeeCollection", COLLECTION_ID, "treasury0", "1000");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "creatorFees0", "0");
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "treasuryFees0", "1000");
+    // Null is stored as absent, which `fieldEquals` cannot assert against, so the check is that the
+    // entity exists and the creator totals stayed at zero rather than crediting the zero address.
+    assert.entityCount("FeeCollection", 1);
+  });
+
+  test("⚠️ a collection for a third-party position creates nothing", () => {
+    // Third-party locks have no launch token, so handleLockRegistered never made a Lock for them.
+    // The missing Lock is the filter - a null load here is a third-party collection, not an error.
+    register();
+    handleFeesCollected(
+      feesCollectedEvent(bi("4242"), TREASURY, ZERO_ADDRESS, bi("1000"), bi("100"), bi("0"), bi("0"), STRANGER, 5000, 3)
+    );
+
+    assert.entityCount("FeeCollection", 0);
+    assert.fieldEquals("Lock", LOCK_TOKEN_ID, "collectionCount", "0");
   });
 });

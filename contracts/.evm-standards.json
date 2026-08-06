@@ -1,0 +1,10 @@
+{
+  "profile": "robinhood-4663",
+  "framework": "foundry",
+  "attestations": {},
+  "waivers": {},
+  "evidence": {},
+  "exclude_paths": [
+    "src/vendor/"
+  ]
+}

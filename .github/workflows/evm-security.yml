@@ -1,0 +1,245 @@
+name: EVM security
+
+# The point of this workflow is that it FAILS. A security workflow that only ever
+# reports is a dashboard, and dashboards do not stop deployments.
+#
+# Jobs are ordered cheapest-first so that a formatting mistake does not wait behind a
+# twenty-minute fuzzing campaign, but nothing is `continue-on-error` except the two
+# scheduled deep-fuzz jobs, which run on a cadence rather than gating a pull request.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Nightly deep campaigns. Coverage that a per-commit run cannot afford.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Check formatting
+        run: forge fmt --check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Solhint
+        run: |
+          npm install --no-save solhint
+          npx solhint --config lib/evm-security-standards/tooling/.solhint.json \
+            --max-warnings 0 'src/**/*.sol'
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      # deny_warnings in foundry.toml makes this fail on any compiler warning.
+      - name: Build
+        run: forge build --sizes
+
+  test:
+    name: Tests and invariants
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Unit and fuzz tests
+        run: forge test -vvv
+
+      - name: Invariants
+        id: invariants
+        run: forge test --match-test "invariant_" -vvv
+
+      - name: Coverage
+        run: forge coverage --report summary --report lcov
+        continue-on-error: true
+
+      - name: Record evidence
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path(".evm-standards.json")
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          cfg.setdefault("evidence", {})["forge-invariant"] = {
+              "clean": True,
+              "summary": "forge invariant suite passed in CI",
+          }
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-forge
+          path: contracts/.evm-standards.json
+
+  slither:
+    name: Slither
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - uses: crytic/slither-action@v0.4.0
+        id: slither
+        with:
+          slither-config: contracts/lib/evm-security-standards/tooling/slither.config.json
+          fail-on: medium
+
+      - name: Record evidence
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path(".evm-standards.json")
+          cfg = json.loads(p.read_text()) if p.exists() else {}
+          cfg.setdefault("evidence", {})["slither"] = {
+              "clean": True,
+              "summary": "no findings at medium or above",
+          }
+          p.write_text(json.dumps(cfg, indent=2) + "\n")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-slither
+          path: contracts/.evm-standards.json
+
+  gate:
+    name: Pre-deployment gate
+    runs-on: ubuntu-latest
+    needs: [test, slither]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      # Merge the evidence both upstream jobs recorded. The gate reads results rather
+      # than re-running the tools, so it stays fast enough to run locally too.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: evidence-*
+          path: evidence
+          merge-multiple: false
+
+      - name: Merge evidence
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          base = pathlib.Path(".evm-standards.json")
+          cfg = json.loads(base.read_text()) if base.exists() else {}
+          cfg.setdefault("evidence", {})
+          for f in pathlib.Path("evidence").rglob(".evm-standards.json"):
+              part = json.loads(f.read_text())
+              cfg["evidence"].update(part.get("evidence", {}))
+          base.write_text(json.dumps(cfg, indent=2) + "\n")
+          print(json.dumps(cfg.get("evidence", {}), indent=2))
+          PY
+
+      - name: Run gate
+        run: python3 lib/evm-security-standards/gate/check.py --project .
+
+      - name: Gate report
+        if: always()
+        run: |
+          python3 lib/evm-security-standards/gate/check.py --project . --json \
+            > gate-report.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-report
+          path: contracts/gate-report.json
+
+  # --------------------------------------------------------------------------
+  # Deep campaigns. Scheduled, not per-commit.
+  # --------------------------------------------------------------------------
+
+  medusa:
+    name: Medusa (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      # Restore the corpus so nightly runs compound instead of starting cold.
+      # This is the setting that makes a fuzzing programme worth having.
+      - uses: actions/cache@v4
+        with:
+          path: contracts/medusa-corpus
+          key: medusa-corpus-${{ github.sha }}
+          restore-keys: medusa-corpus-
+
+      - name: Install Medusa
+        run: |
+          curl -sSL -o medusa.tar.gz \
+            https://github.com/crytic/medusa/releases/latest/download/medusa-linux-x64.tar.gz
+          tar -xzf medusa.tar.gz && sudo mv medusa /usr/local/bin/
+
+      - name: Run Medusa
+        run: medusa fuzz --config lib/evm-security-standards/tooling/medusa.json
+
+  echidna:
+    name: Echidna (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - uses: actions/cache@v4
+        with:
+          path: contracts/echidna-corpus
+          key: echidna-corpus-${{ github.sha }}
+          restore-keys: echidna-corpus-
+
+      - uses: crytic/echidna-action@v2
+        with:
+          files: .
+          contract: ${{ vars.ECHIDNA_CONTRACT }}
+          config: lib/evm-security-standards/tooling/echidna.yaml

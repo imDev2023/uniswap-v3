@@ -24,20 +24,30 @@ import {BondingCurve} from "../src/BondingCurve.sol";
 ///      progress meter. It also leaves multiple holders and both trade directions on some curves so
 ///      the holders table and the trades feed have something truthful to render.
 ///
-///      Two entrypoints:
-///        run()   - create the launch table and buy each curve up to its target progress.
-///        churn() - trade on the already-seeded live curves, to refresh "recent trades" while
-///                  iterating on the feed. Safe to run repeatedly.
+///      Three entrypoints:
+///        run()      - create the launch table and buy each curve up to its target progress.
+///        showcase() - the carved / permanently-locked / carved-and-graduated launches, which are
+///                     the only ones that exercise the tokenomics panels rather than their empty
+///                     states. Needs SHOWCASE_PK. Meant to run at a different calibration to run().
+///        churn()    - trade on the already-seeded live curves, to refresh "recent trades" while
+///                     iterating on the feed. Safe to run repeatedly.
 ///
 /// ⚠️ TESTNET ONLY. Hard-reverts on mainnet 4663: this spends real ETH across seven keys and
 ///    creates permanent, unremovable launches on a factory we own. There is no undo, and
 ///    `metadataURI` has no setter by design, so a stray mainnet run would be public forever.
 ///
-/// Usage (from contracts/, with .env providing PRIVATE_KEY and TEST_PK_1..6):
+/// Usage (from contracts/, with .env providing PRIVATE_KEY and TEST_PK_1..6, and LAUNCHPAD set):
 ///   forge script script/SeedTestnet.s.sol:SeedTestnet --sig 'run()' \
+///     --rpc-url robinhood_testnet --broadcast --slow
+///   SHOWCASE_PK=0x<throwaway> forge script script/SeedTestnet.s.sol:SeedTestnet --sig 'showcase()' \
 ///     --rpc-url robinhood_testnet --broadcast --slow
 ///   forge script script/SeedTestnet.s.sol:SeedTestnet --sig 'churn()' \
 ///     --rpc-url robinhood_testnet --broadcast --slow
+///
+/// ⚠️ Fund the wallets generously FIRST. `forge script` simulates the whole script before
+/// broadcasting anything, so one under-funded wallet fails the entire run at simulation time with
+/// `OutOfFunds` and writes nothing at all. That is a safe failure, not a half-built board, but it
+/// costs a full re-run.
 ///
 /// `--slow` matters: it waits for each tx to land before sending the next. Without it, nonce-ordered
 /// submission on a 0.3 s-block chain can have a buy arrive before the creation it depends on.
@@ -52,6 +62,8 @@ contract SeedTestnet is Script {
         uint256 targetBps; // progress to buy the curve up to; BPS == graduate
         uint8 buyers; // how many distinct wallets split the climb (>=1)
         bool sellAfter; // have the last buyer dump part of their bag
+        uint16 devAllocationBps; // creator's carve out of CURVE_SUPPLY, 0..maxDevAllocationBps (#34)
+        bool permanentLock; // lock the graduation LP forever instead of defaultLockDuration (#33)
     }
 
     LaunchpadFactory internal launchpad;
@@ -93,32 +105,116 @@ contract SeedTestnet is Script {
         // Empty metadataURI is the honest common case for v1 (bring-your-own-URI), so it dominates.
         // The two ipfs:// URIs below are well-formed but do NOT resolve - that is deliberate, and is
         // the state the fallback avatar has to survive.
-        plans[0] = Plan("Robinhood Doge", "RDOGE", "", 9_600, 3, false);
-        plans[1] = Plan("Octo Cat", "OCAT", "ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsei6af7kunjlzhu", 8_600, 2, true);
-        plans[2] = Plan("Green Candle", "CANDLE", "", 7_200, 3, false);
-        plans[3] = Plan("Diamond Hands", "DIAMOND", "", 5_800, 2, false);
-        plans[4] = Plan("Moon Boots", "BOOTS", "ipfs://bafkreie7q2cx4kmrqxqhb7yzqxvfhbxvqz2wqmzqxqzqxqzqxqzqxqzqxq", 4_500, 1, false);
-        plans[5] = Plan("Liquid Courage", "COURAGE", "", 3_100, 2, true);
-        plans[6] = Plan("Tentacle", "TENT", "", 1_900, 1, false);
-        plans[7] = Plan("Paper Hands", "PAPER", "", 1_000, 2, false);
-        plans[8] = Plan("Rug Proof", "RUGPRF", "", 300, 1, false);
+        plans[0] = Plan("Robinhood Doge", "RDOGE", "", 9_600, 3, false, 0, false);
+        plans[1] = Plan(
+            "Octo Cat",
+            "OCAT",
+            "ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsei6af7kunjlzhu",
+            8_600,
+            2,
+            true,
+            0,
+            false
+        );
+        plans[2] = Plan("Green Candle", "CANDLE", "", 7_200, 3, false, 0, false);
+        plans[3] = Plan("Diamond Hands", "DIAMOND", "", 5_800, 2, false, 0, false);
+        plans[4] = Plan(
+            "Moon Boots",
+            "BOOTS",
+            "ipfs://bafkreie7q2cx4kmrqxqhb7yzqxvfhbxvqz2wqmzqxqzqxqzqxqzqxqzqxq",
+            4_500,
+            1,
+            false,
+            0,
+            false
+        );
+        plans[5] = Plan("Liquid Courage", "COURAGE", "", 3_100, 2, true, 0, false);
+        plans[6] = Plan("Tentacle", "TENT", "", 1_900, 1, false, 0, false);
+        plans[7] = Plan("Paper Hands", "PAPER", "", 1_000, 2, false, 0, false);
+        plans[8] = Plan("Rug Proof", "RUGPRF", "", 300, 1, false, 0, false);
         // Graduates on the crossing buy, giving the "just graduated" feed a second entry.
-        plans[9] = Plan("Full Send", "SEND", "", BPS, 2, false);
+        plans[9] = Plan("Full Send", "SEND", "", BPS, 2, false, 0, false);
         // Never traded: 0% meter, opening price from LaunchCreated, no holders, no trades.
-        plans[10] = Plan("Silent Launch", "QUIET", "", 0, 0, false);
+        plans[10] = Plan("Silent Launch", "QUIET", "", 0, 0, false, 0, false);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // showcase() - the launches that exercise the tokenomics UI
+    // -----------------------------------------------------------------------------------------
+
+    /// @notice Creates the launches that `run()`'s board deliberately cannot: carved, permanently
+    ///         locked, and carved-and-graduated.
+    ///
+    /// @dev ⚠️ Why this is separate from `run()`. Every panel #33-#37 built - the lock card, the
+    ///      vesting card, the creator-concentration figure - renders its EMPTY state against a
+    ///      zero-carve, default-lock launch, and an empty state is indistinguishable from a broken
+    ///      one. A board made entirely of `run()`'s launches leaves the whole tokenomics UI
+    ///      unexercised against real indexed data, which is #38's actual acceptance test.
+    ///
+    ///      It is also a separate entrypoint because it is meant to run at a DIFFERENT calibration.
+    ///      `setCurveParams` is future-only, so one board can carry both: seed the density board at
+    ///      the cheap 0.1 ETH target, then re-calibrate to 1 ETH and run this, so the launches that
+    ///      matter graduate at a scale near the 10 ETH mainnet target. Rebuilding the whole board at
+    ///      1 ETH would cost ~3.6 ETH, which the testnet wallets do not hold.
+    ///
+    ///      ⚠️ Creator is `SHOWCASE_PK`, deliberately NOT one of the `TEST_PK_*` keys and NOT the
+    ///      deployer. The acceptance test has to import the creator's key into a real MetaMask to
+    ///      see the claim button, and no key that lives in `contracts/.env` may ever be typed into a
+    ///      browser session. Generate a throwaway, fund it, use it here, and it is the only key that
+    ///      is exposed.
+    function showcase() public {
+        uint256 creatorKey = vm.envUint("SHOWCASE_PK");
+        address creator = vm.addr(creatorKey);
+        console.log("showcase creator", creator);
+
+        Plan[3] memory plans = _showcasePlans();
+        for (uint256 i = 0; i < plans.length; i++) {
+            _seedOneAs(plans[i], creatorKey, i);
+        }
+    }
+
+    /// @dev Each of the three exists for one UI state that nothing else on the board reaches.
+    function _showcasePlans() internal pure returns (Plan[3] memory plans) {
+        // The maximum carve, ungraduated: the vesting card's "not started" branch, and a
+        // concentration figure that must read 5% of the launch's OWN curve allocation rather than
+        // 0% (which is what the whole board read before #37).
+        plans[0] = Plan("Vesting Dev", "VEST", "", 3_500, 2, false, 500, false);
+        // Permanent lock: the lock card must say permanent and never offer a reclaim countdown.
+        // Carved as well, so the two panels are proven independent of each other.
+        plans[1] = Plan("Locked Forever", "FOREVER", "", 2_000, 1, false, 300, true);
+        // ⚠️ The one that matters most. Carved AND graduated, so the vesting schedule is actually
+        // RUNNING: this is the only launch on which the claim button, the released-vs-granted split
+        // and the `graduatedAt`-over-RPC path (#37's review finding 1) can be seen at all. That path
+        // has never run against a deployed contract, because DevVesting has never been deployed.
+        plans[2] = Plan("Claim Me", "CLAIM", "", BPS, 2, false, 400, false);
     }
 
     function _seedOne(Plan memory p, uint256 i) internal {
-        uint256 creatorKey = testKeys[i % testKeys.length];
+        _seedOneAs(p, testKeys[i % testKeys.length], i);
+    }
 
+    /// @param keyOffset Where in `testKeys` this launch's BUYERS start. In `run()` it is the plan's
+    ///        index, which is what spreads holders across wallets; in `showcase()` it is just an
+    ///        offset, since the creator comes from `SHOWCASE_PK` rather than from `testKeys`. It is
+    ///        deliberately not called `i`: it stopped being an index the moment `showcase()` began
+    ///        passing one that indexes nothing.
+    function _seedOneAs(Plan memory p, uint256 creatorKey, uint256 keyOffset) internal {
         uint256 fee = launchpad.creationFee();
 
         // start/stopBroadcast rather than a bare broadcast: forge forbids view calls after a
         // one-shot `broadcast`, and this script has to read curve state between every transaction.
         vm.startBroadcast(creatorKey);
-        // Seeds a zero dev allocation: the board's job is to exercise the curve, and a pre-mine
-        // would make every seeded launch's calibration differ from the 0% reference (#34).
-        address token = launchpad.createLaunch{value: fee}(LaunchParams(p.name, p.symbol, p.metadataURI, false, 0));
+        // ⚠️ `p.permanentLock` and `p.devAllocationBps` are plan fields, NOT the literal `false, 0`
+        // this call used to pass. That literal is the same defect #37 found hardcoded in the create
+        // form, where it silently gave every launch made through the UI no carve and no permanent
+        // lock. Left here it would have been just as effective at hiding the tokenomics UI, only
+        // from the acceptance test instead of from creators. `run()`'s board still passes zero for
+        // both - see `_plans()` - because its job is the density problem and a carve would make
+        // every one of its calibrations differ from the 0% reference. `showcase()` is where the
+        // non-zero values live.
+        address token = launchpad.createLaunch{value: fee}(
+            LaunchParams(p.name, p.symbol, p.metadataURI, p.permanentLock, p.devAllocationBps)
+        );
         vm.stopBroadcast();
 
         BondingCurve curve = BondingCurve(launchpad.curveOf(token));
@@ -130,12 +226,12 @@ contract SeedTestnet is Script {
         // several holders and several trades rather than one whale print.
         for (uint8 b = 0; b < p.buyers; b++) {
             uint256 stepBps = (p.targetBps * (b + 1)) / p.buyers;
-            uint256 buyerKey = testKeys[(i + b + 1) % testKeys.length];
+            uint256 buyerKey = testKeys[(keyOffset + b + 1) % testKeys.length];
             _buyToProgress(curve, stepBps, buyerKey, p.targetBps == BPS && b + 1 == p.buyers);
         }
 
         if (p.sellAfter) {
-            uint256 sellerKey = testKeys[(i + p.buyers) % testKeys.length];
+            uint256 sellerKey = testKeys[(keyOffset + p.buyers) % testKeys.length];
             _sellPortion(curve, IERC20(token), sellerKey, 3_000); // dump 30% of the bag
         }
     }

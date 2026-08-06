@@ -73,14 +73,15 @@ Re-extract and re-run `codegen` whenever a contract's events change.
 
 ## Deploy (self-hosted graph-node)
 
-**Status:** `robinhood-testnet` in `networks.json` is **filled in** from the live 46630 deploy
-(`LaunchpadFactory` `0xE98B99AD…2232`, `GraduationManager` `0xE44a178E…85a5`, `startBlock`
-`93090715` — see `../docs/deployments-testnet.md`). `graph build --network robinhood-testnet`
-compiles clean against it. `robinhood` (mainnet 4663) is still a placeholder pending that deploy.
+**Status:** `robinhood-testnet` in `networks.json` carries **all four** addresses from the #38 deploy
+(`LaunchpadFactory` `0xF1A9c1e7…c6F5`, `GraduationManager` `0x4C0429f0…48C3`, `LPLock`
+`0x3589e6aA…A8CE`, `DevVesting` `0x7727aC11…36c0`), all at `startBlock` **97379693** - the factory's
+constructor creates the other three, so they share one block. See `../docs/deployments-testnet.md`.
+`robinhood` (mainnet 4663) is still a placeholder pending that deploy.
 
-**The indexer is up and synced.** `docker/docker-compose.yml` runs the stack and the subgraph is
-deployed to it as `octopus/octopus`, indexing 46630 from `startBlock` 93090715. See
-[Run the indexer](#run-the-indexer) below.
+🔴 **All four entries must be non-zero.** `DevVesting` sat at `0x0` from #36 until #38 because the
+contract had never been deployed, and a zero-address data source does **not** error - it indexes
+nothing, so the vesting panel reads empty and looks exactly like "this launch has no carve".
 
 > ⚠️ `graph build --network <net>` **rewrites `subgraph.yaml` in place** — it stamps the addresses
 > and network name from `networks.json` into the tracked manifest and strips its comments. Treat
@@ -289,7 +290,7 @@ were actually run.
 
 ```bash
 # chain side
-cast call 0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7 "launchCount()(uint256)" \
+cast call 0xF1A9c1e70b6aEB48b85eE77518557c057283c6F5 "launchCount()(uint256)" \
   --rpc-url https://rpc.testnet.chain.robinhood.com
 
 # subgraph side - these two numbers must be equal

@@ -19,20 +19,20 @@
   },
   "robinhood-testnet": {
     "LaunchpadFactory": {
-      "address": "0x632FD8713356aCc4ec9BdC6b378c05707bc9D1E7",
-      "startBlock": 94091260
+      "address": "0xF1A9c1e70b6aEB48b85eE77518557c057283c6F5",
+      "startBlock": 97379693
     },
     "GraduationManager": {
-      "address": "0x3e28d8838951C9F1ad229a5506584616E46D5E14",
-      "startBlock": 94091260
+      "address": "0x4C0429f0881fA9B08DA314551de351087e8d48C3",
+      "startBlock": 97379693
     },
     "DevVesting": {
-      "address": "0x0000000000000000000000000000000000000000",
-      "startBlock": 94091260
+      "address": "0x7727aC11099006651E67A2B7FBb5472Ea73d36c0",
+      "startBlock": 97379693
     },
     "LPLock": {
-      "address": "0x8FBAa12EEF6BB15C7dD33cCaAB62dbb9e3BeC0e1",
-      "startBlock": 94091260
+      "address": "0x3589e6aA59Ef396B63B3C2bAEe28E92a5498A8CE",
+      "startBlock": 97379693
     }
   }
 }

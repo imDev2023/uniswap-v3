@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {LaunchToken} from "./LaunchToken.sol";
 import {BondingCurve, CurveConfig} from "./BondingCurve.sol";
@@ -66,7 +67,7 @@ struct LaunchLockConfig {
 ///      Build 07 (#18): ownership is `Ownable2Step`, so control is handed to a Safe multisig
 ///      via a two-step transfer+accept (a mistyped owner can never brick the launchpad), and the
 ///      curve defaults become owner-tunable guarded params that likewise bind only FUTURE launches.
-contract LaunchpadFactory is Ownable2Step {
+contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     /// @notice Split of the fixed 1B supply: 80% sold on the curve, 20% reserved to seed
@@ -521,7 +522,18 @@ contract LaunchpadFactory is Ownable2Step {
     ///        or mistyped URI is permanent. Passing an empty string is allowed and simply means
     ///        "no metadata"; clients should fall back to a default avatar.
     /// @return token The newly deployed LaunchToken.
-    function createLaunch(LaunchParams calldata p) external payable returns (address token) {
+    /// @dev `nonReentrant` is belt-and-braces, added in #38 because it was the last redeploy of the
+    ///      tokenomics program and therefore the last moment it was free. CEI already holds - both
+    ///      `.call`s are the final statements, after every write - and the worst a re-entrant caller
+    ///      could do was create a second launch, which they could do with a second transaction
+    ///      anyway. It is here because the guard is what a reader checks for when they see a `.call`
+    ///      refund, and "the ordering makes it safe" is a claim that has to be re-verified every time
+    ///      the function is edited, whereas the modifier does not.
+    ///
+    ///      ⚠️ It also moved the packed owner-param group from storage slot 12 to 13: `_status` is a
+    ///      base-contract variable, and Solidity lays base storage out first. See
+    ///      `test_OwnerParams_SharePackedStorageSlot`.
+    function createLaunch(LaunchParams calldata p) external payable nonReentrant returns (address token) {
         uint256 fee = creationFee;
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);
         // The dev allocation is bounds-checked inside `_solveCalibration`, deliberately NOT duplicated

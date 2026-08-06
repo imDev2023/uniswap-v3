@@ -1,7 +1,162 @@
-# Deployment — Robinhood Chain **testnet** (46630)
+# Deployment - Robinhood Chain **testnet** (46630)
 
 Broadcast of [`contracts/script/DeployLaunchpad.s.sol`](../contracts/script/DeployLaunchpad.s.sol)
 per the runbook in [`docs/deploy.md`](./deploy.md). Addresses are public; this file is committed.
+
+---
+
+# 🟢 CURRENT - build #38, 2026-08-06
+
+The tokenomics redeploy.
+**Everything below the "historical" divider is the superseded #24 deployment**, and is kept only for the validation records that still stand for the behaviour they exercised.
+
+| Field | Value |
+| --- | --- |
+| Chain | Robinhood Chain Testnet, chainId **46630** |
+| RPC | `https://rpc.testnet.chain.robinhood.com` |
+| Explorer | https://explorer.testnet.chain.robinhood.com |
+| Deployer EOA | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
+| `SAFE` / owner | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` - the deployer EOA, decided 2026-08-05. The real multisig is a **mainnet** item |
+| Treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
+| Deploy blocks | **97379690** (first tx) - 97379693 (last) |
+| Subgraph `startBlock` | **97379693** - all four launchpad contracts are created in that one block |
+| Gas spent | ~0.00055 ETH for the whole pipeline |
+| Build | **#38** - redeployed for the tokenomics program (#33-#37): conditional LP lock, per-launch curve allocation, vesting from graduation, and the `nonReentrant` guard on `createLaunch` |
+
+## Addresses
+
+| Contract | Address | Verified |
+| --- | --- | --- |
+| `LaunchpadFactory` | `0xF1A9c1e70b6aEB48b85eE77518557c057283c6F5` | ✅ solc 0.8.24, optimizer 200 |
+| `GraduationManager` | `0x4C0429f0881fA9B08DA314551de351087e8d48C3` | ✅ solc 0.8.24, optimizer 200 |
+| `LPLock` | `0x3589e6aA59Ef396B63B3C2bAEe28E92a5498A8CE` | ✅ solc 0.8.24, optimizer 200 |
+| **`DevVesting`** | `0x7727aC11099006651E67A2B7FBb5472Ea73d36c0` | ✅ solc 0.8.24, optimizer 200 - **first deployment ever** (#35 added it; it had never existed on chain) |
+| `UniswapV3Factory` (ours) | `0x13a27fFB6A32721673DC449F606dC56926A61208` | ⬜ upstream artifact, see note |
+| `SwapRouter` (ours) | `0xd258cca099f357F0b3488f20f7B4bf14A7727673` | ⬜ upstream artifact, see note |
+| `NonfungiblePositionManager` (ours) | `0x49c4376c99a23DA36ec0018C6c417E73Ee4D167a` | ⬜ upstream artifact, see note |
+| `QuoterV2` (ours) | `0xad315bece754ed5D0D4E87Bf6A70E45231607afC` | ⬜ upstream artifact, see note |
+| `WETH9` (canonical, pre-existing) | `0x7943e237c7F95DA44E0301572D358911207852Fa` | n/a |
+
+The three `LaunchpadFactory`-created contracts verified on the **first attempt** with explicit `--constructor-args`, including `DevVesting`.
+Confirmed independently via `/api/v2/addresses/<addr>` reading `is_verified: true`, not just from the CLI's own success message.
+
+⚠️ The V3 stack is deployed byte-for-byte from the audited upstream artifacts via `vm.getCode` ([ADR-0001](./adr/0001-unmodified-uniswap-v3-from-audited-artifacts.md)), so there is no in-repo Solidity for `forge verify-contract` to compile.
+Still a Stage-4 item, unchanged by this deploy.
+
+## Transactions
+
+| Step | Tx |
+| --- | --- |
+| Deploy `UniswapV3Factory` | `0x56d66e5602e59ca30d940f904bbc1c394d47594e4eb32ba5117909c878b14759` |
+| Deploy `SwapRouter` | `0x2a9d73bcf1c8478d1469d784dfb45963aecd823243cfca20ec95775c30d2c2d4` |
+| Deploy `NonfungiblePositionManager` | `0xa84902e510128a49aa982965359eb1267da7f3d52f0963c04ffe2e5c6d76837a` |
+| Deploy `LaunchpadFactory` (+ `LPLock`, `GraduationManager`, `DevVesting`) | `0x377743e656455934386e4d0c5c98809f3369dc5288ff4b7b967fcd0b503e7d5b` |
+| `v3Factory.setOwner(launchpad)` | `0x10866c3f1df5b7a6636bc4828897dd6d5485b4dd69016ed897067a1ae29bc810` |
+| `launchpad.transferOwnership(SAFE)` | `0x76254e65f7f763dbfd7a210e4d437a6b850bdc6bd27695aa96dd1547449027b8` |
+| `launchpad.acceptOwnership()` | `0x4fae3034d5a11e85ddc8585c538f21ad14dccf7135668ad0b25e1b32ba8bc386` |
+| `setCurveParams` → 0.1 ETH target | `0x8c2b7cf7a1fae7588fd848ae8aa07204cd51e0019e9ede8d1ca39fbeae8c3e31` |
+| `setCurveParams` → 1 ETH target | `0xbc443be33fcd91c24e7e48795bed95c1ec2c72e0da2771bea7d0f1bd4d77cbad` |
+| Deploy `QuoterV2` (separate script) | `0x05f02a2417af79648a531b3ce5ab6b9f8d4dd4169a01b4366f10ebed80b239a0` |
+
+All receipts `status = 0x1`.
+
+## Post-deploy state (verified via `cast`)
+
+```
+launchpad.owner()               = 0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C   # == SAFE ✅
+launchpad.pendingOwner()        = 0x0000000000000000000000000000000000000000   # handoff complete ✅
+launchpad.graduationManager()   = 0x4C0429f0881fA9B08DA314551de351087e8d48C3
+launchpad.lpLock()              = 0x3589e6aA59Ef396B63B3C2bAEe28E92a5498A8CE
+launchpad.devVesting()          = 0x7727aC11099006651E67A2B7FBb5472Ea73d36c0
+v3Factory.owner()               = 0xF1A9c1e70b6aEB48b85eE77518557c057283c6F5   # == launchpad ✅
+```
+
+⚠️ **The tokenomics defaults needed NO setter calls** - a fresh deploy already lands on the spec:
+
+```
+maxDevAllocationBps() = 500        # 5%
+defaultLockDuration() = 31536000   # 365 days
+vestingDuration()     = 2592000    # 30 days
+creatorFeeBps()       = 7000       # 70%
+```
+
+So `setLockParams` and `setMaxDevAllocationBps` are **not** part of a deploy, contrary to what was planned for this ticket.
+Only `setCurveParams` is, because the code default is the 10 ETH mainnet target.
+
+## ⚙️ Curve calibration - this board carries TWO
+
+`setCurveParams` is future-only, so launches created either side of a retune legitimately differ.
+That is used deliberately here: the density board was seeded at the cheap target, and only the launches that exercise the tokenomics UI at the realistic one.
+Rebuilding the whole board at 1 ETH would have cost ~3.6 ETH against 2.69 ETH of testnet funds.
+
+| Launches | Target | `virtualEthReserve` | Anti-snipe |
+| --- | --- | --- | --- |
+| `RDOGE` … `QUIET` (the 11 board launches) | **0.1 ETH** | `33333333333333333` | off (threshold 0) |
+| `VEST`, `FOREVER`, `CLAIM` (the showcase) | **1 ETH** | `333333333333333333` | off (threshold 0) |
+
+Anti-snipe is off deliberately: at these targets the production 8M-per-wallet cap would let one wallet contribute a fraction of a percent, so a solo graduation would need hundreds of wallets.
+The cap itself is proven on the superseded deployment's `SMOKE` and `SNIPE` launches, below.
+
+⚠️ **A carved launch does not land on the target to the wei.**
+`SEND` (0% carve) raised exactly `100000000000000000`; `CLAIM` (4% carve) raised `999999999999999997`, three wei short of 1 ETH.
+Re-solving `V_eth = target * G/(C - G)` for a 768M allocation does not divide evenly, and the `ceilDiv` does not recover the whole truncation.
+It is immaterial at 3e-18 relative, and pool seeding is exactly 200M tokens either way, but it means "the raise equals the target exactly" is a 0%-carve property rather than a general one.
+First observed on a live chain here, and recorded in [`docs/tokenomics.md`](./tokenomics.md#amendments-made-during-implementation).
+
+## Launch table (as of 2026-08-06, after `run()` + `showcase()`)
+
+| Symbol | Token | Progress | Graduated | Dev carve | Lock |
+| --- | --- | --- | --- | --- | --- |
+| `RDOGE` | `0xd4ad8deb5f297d27bb3b756214fd68a8616feda7` | 96% | | - | 1 year |
+| `OCAT` | `0x6c11fd6a8abe3c32e0bc706d0d7525ebbf5b059e` | 73% | | - | 1 year |
+| `CANDLE` | `0x3591d434eb94bab01992ebbe8cb12da4c17e1064` | 72% | | - | 1 year |
+| `DIAMOND` | `0xe2ef5c876620bd1c2be081947464ad81ec0e0a2b` | 58% | | - | 1 year |
+| `BOOTS` | `0x1d9364a7cc162eba3fe370c985f2c3a847a8c4bf` | 45% | | - | 1 year |
+| `COURAGE` | `0xae3c96ec06a81bb792b84ad4f704062c4eff1e0c` | 26% | | - | 1 year |
+| `TENT` | `0x4968a09db9228404df96f9a82a02cd4a8a770dc7` | 19% | | - | 1 year |
+| `PAPER` | `0x97c1fa0c47d17e137042c395b92499ab9af4a0d1` | 10% | | - | 1 year |
+| `RUGPRF` | `0xedf313ee117af82812634cc433930e1f7e0b1754` | 3% | | - | 1 year |
+| `SEND` | `0x6ca9b0d7872da22ebb637433a8d698404b2da085` | 100% | ✅ pool `0x60fE9610F443a5704AE1417E228689EcE14c40Eb`, LP NFT 1 | - | 1 year |
+| `QUIET` | `0x5f2070a692adae6fe5a7c912475c2351e142b641` | 0% | | - | 1 year - untraded, the `priceX18 = 0` regression guard |
+| **`VEST`** | `0x0f46d5b61ee9d6b579a36f9247890b4c224a74e0` | 35% | | **40M (5%)** | 1 year |
+| **`FOREVER`** | `0x38f0e2fda7d581872125dfa7e90900d633a751fa` | 20% | | **24M (3%)** | **permanent** |
+| **`CLAIM`** | `0xd2f1423078970746127978a8935e92c423073398` | 100% | ✅ pool `0x62Ce15666FA30B0592eb76cE3a211Ef6bD44Fb4f`, LP NFT 2 | **32M (4%)** | 1 year |
+
+The three showcase launches were created by a **throwaway** key (`0xe4d1c06131881F2A49b71826d86Dad38A27Ae10C`), deliberately not one of the `TEST_PK_*` keys and not the deployer.
+The acceptance test imports the creator's key into a real MetaMask, and no key from `contracts/.env` may ever be typed into a browser session.
+
+⚠️ `RDOGE` reuses a ticker from two earlier deployments at a different address. Unrelated launches.
+
+## ✅ Acceptance test - the app against live indexed data
+
+The point of #38.
+Every earlier confirmation of the tokenomics UI was against mocks or a local `anvil --fork-url` deploy, because `DevVesting` had never been deployed.
+
+| Check | Result |
+| --- | --- |
+| Create form reads bounds from the new factory | ✅ "max 5.00%", "Default: 1 year from graduation", 70% |
+| Creator fee names its denominator | ✅ "70% of the locked position's fees" - never "of pool fees" |
+| Carved launch's progress denominator | ✅ `VEST` reads "266M / 760M", the carved allocation, not 800M |
+| Concentration derived per launch | ✅ `VEST` 5.3% (40M/760M), `FOREVER` 3.1%, `CLAIM` 4.2% - not 5.0% against the 800M constant |
+| Ungraduated carve → schedule not started | ✅ "Nothing has vested and nothing is releasing yet" |
+| Permanent lock renders as permanent | ✅ `FOREVER`: "TERM Permanent … can never be withdrawn or reclaimed" |
+| Graduated launch's positions | ✅ "Final. The curve closed at graduation" |
+| Lock card states the **term** | ✅ "TERM 1 year" and "UNLOCKS IN 12 months" on `CLAIM`, never "forever" (ADR-0005) |
+| Lock card names the **blocker** | ✅ "Lock has not expired" (`reclaimBlocker` = 4 = `NotExpired`, matching the chain) |
+| Graduated + carved → schedule running | ✅ "Releasing linearly since graduation", 1.3% vested |
+| 🔴 **graph-node STOPPED, graduated launch** | ✅ schedule still runs and the creator's claim button is still there - `graduatedAt` over RPC. Indexed-only panels degrade with a named outage ("the indexer is unreachable"), never an empty panel |
+| 🔴 **A real claim, end to end** | ✅ 427,876.54 CLAIM released to the creator through MetaMask; `DevVesting` indexed its **first ever** `Claimed` event and `devClaimed` now diverges from `devAllocation`, which is the state the two-number concentration display was built for |
+
+⚠️ `VESTED SO FAR` (428.58K, computed client-side from wall-clock) runs slightly ahead of `CLAIMED` (427.88K, indexed).
+That is the intended behaviour, and the reason there is deliberately no `devVestedSoFar` field: a subgraph only writes when an event fires, so any stored figure would be silently stale between trades.
+
+---
+
+# 📜 HISTORICAL - build #24 deployment (superseded by #38)
+
+Everything below describes the **superseded** `0x632FD871...D1E7` deployment.
+Its addresses are dead, its subgraph `startBlock` is dead, and its launch table is unreachable from the current factory.
+It is kept because the validation records still stand for the behaviour they exercised: the anti-snipe cap under six competing wallets, `LPLock.collect` to treasury, and the curve-params future-only proof were all demonstrated on chain there and are not re-run every redeploy.
 
 | Field | Value |
 | --- | --- |

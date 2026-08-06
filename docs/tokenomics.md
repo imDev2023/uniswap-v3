@@ -9,9 +9,9 @@ Every decision is recorded under [Settled decisions](#settled-decisions).
 Builds #33 (LP lock records), #34 (curve carve) and #35 (dev vesting) have since been implemented against it; #36-#38 have not.
 Where implementation forced a change to this document, it is recorded under [Amendments made during implementation](#amendments-made-during-implementation) rather than edited away.
 
-⚠️ **The deployed contracts no longer match this document.**
-The settled decisions require contract changes, so the sections below describe the *intended* system.
-Where the two differ it is called out explicitly.
+✅ **As of #38 (2026-08-06) the contracts deployed on testnet 46630 DO match this document.**
+Mainnet 4663 has never been deployed, so for mainnet the sections below still describe the *intended* system.
+Addresses and the acceptance record are in [`docs/deployments-testnet.md`](./deployments-testnet.md).
 
 ⚠️ **The contract freeze is over**, as a direct consequence of these decisions.
 It was always justified as "do not redo frontend work against a shifting data shape", and the data shape is now shifting on purpose.
@@ -27,7 +27,7 @@ It was always justified as "do not redo frontend work against a shifting data sh
 | Protocol / treasury allocation | **0** | 0% |
 
 Source: `LaunchpadFactory.CURVE_SUPPLY` / `GRADUATION_RESERVE`.
-⚠️ Deployed today: curve supply is a fixed 800,000,000 and there is no dev allocation.
+✅ Deployed on testnet since #38: the curve supply is per-launch (800,000,000 less the creator's carve) and the dev allocation exists. `VEST` carries the maximum 5% carve on a 760,000,000 curve.
 
 ⚠️ **"Only 800M is tradable" is a misreading that comes up.**
 All 1B trades.
@@ -110,6 +110,8 @@ The counter-intuitive result is that **repeating-decimal targets are the exact o
 Both chosen targets land exactly: **1 ETH testnet** and **10 ETH mainnet**.
 Rounder-looking targets such as 1.5, 3, 9 or 12 come out one wei over.
 Full table in `docs/deployments-testnet.md`.
+
+⚠️ **"Lands exactly" is a ZERO-CARVE property.** Measured on live testnet in #38: `SEND` at a 0% carve raised exactly `1e17` on the 0.1 ETH target, while `CLAIM` at a 4% carve raised `999999999999999997` on the 1 ETH target, three wei short. Re-solving `V_eth` for a carved `C` divides an already-truncated value again, and the `ceilDiv` does not always recover it. See amendment 10.
 
 ## The dev allocation
 
@@ -512,6 +514,7 @@ Everything below is an amendment made by the implementer, listed so it can be ac
 | 7 | **#35:** the vesting duration is now specified: 30 days default, bounded `[30 days, 4 years]` | This document settled that vesting is linear and owner-tunable but never named a number, and the contract needs one. Chosen by the user 2026-08-04. | In scope, and a user decision |
 | 8 | **#35:** the dev allocation moved from the factory to `DevVesting` at `createLaunch`, and ⚠️ **this introduces a FOURTH deployed contract** - the "all three contracts need re-verifying" line under the redeploy note is now "all four" | #34 parked it in the factory with no withdrawal path; #35 has to give it one. Moving it out is what keeps the factory free of any token-moving function, rather than adding a vault-only withdrawal to the contract that owns the V3 factory. ⚠️ The fourth contract is the part that changes **#38's** scope: `DevVesting` is deployed by the factory's constructor like `LPLock` and `GraduationManager`, so it needs its own Blockscout verification and its own row in `docs/deployments-testnet.md`. | In scope, and a user decision |
 | 9 | **#35:** `GraduationManager.graduated` became `graduatedAt`, a `uint64` timestamp | Nothing on-chain dated a graduation, and the vesting start has to come from somewhere. Zero still means "has not graduated", so it reads exactly as the bool did. | In scope |
+| 10 | **#38:** "both chosen targets land exactly" is qualified as a **zero-carve** property | Measured on live testnet, not reasoned: `SEND` (0% carve) raised exactly `1e17`; `CLAIM` (4% carve) raised `999999999999999997`, three wei under 1 ETH. The per-launch rescale divides an already-truncated `V_eth` again and the `ceilDiv` does not always recover it - the same mechanism as amendment 1, but showing up in the realised RAISE rather than in the stored parameter, and at 4% rather than 3%. So "it happens at 3% and nowhere else in 0-5%" is true of the `virtualEthReserve` value and NOT of the raise. Immaterial at 3e-18 relative, and pool seeding is exactly 200M tokens either way. | Documented, no code change. First carved launch ever to graduate on a live chain |
 
 ⚠️ **Amendment 4 has a known tension that is NOT resolved.**
 The unreachability argument justifies rescaling `antiSnipeThreshold`.

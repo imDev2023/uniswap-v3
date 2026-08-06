@@ -15,7 +15,10 @@ interface ILaunchpad {
     /// @dev Lock terms frozen into this launch at `createLaunch`. Read at graduation, but chosen (and
     ///      immutable) from creation, so a trader buying the curve can read the exact terms the LP will
     ///      graduate under, and a later owner retune cannot change them under an in-flight launch.
-    function lockConfigOf(address token) external view returns (uint64 lockDuration, uint16 creatorFeeBps, bool permanent);
+    function lockConfigOf(address token)
+        external
+        view
+        returns (uint64 lockDuration, uint16 creatorFeeBps, bool permanent);
 }
 
 interface ILPLock {
@@ -85,8 +88,7 @@ contract GraduationManager is ReentrancyGuard {
 
     constructor(address launchpad_, address positionManager_, address weth9_, address lpLock_) {
         require(
-            launchpad_ != address(0) && positionManager_ != address(0) && weth9_ != address(0)
-                && lpLock_ != address(0),
+            launchpad_ != address(0) && positionManager_ != address(0) && weth9_ != address(0) && lpLock_ != address(0),
             "GraduationManager: zero addr"
         );
         launchpad = launchpad_;
@@ -115,9 +117,8 @@ contract GraduationManager is ReentrancyGuard {
         IWETH9(weth9).deposit{value: wethAmount}();
 
         // V3 requires token0 < token1; order the seeded amounts to match.
-        (address token0, address token1, uint256 amount0, uint256 amount1) = token < weth9
-            ? (token, weth9, tokenAmount, wethAmount)
-            : (weth9, token, wethAmount, tokenAmount);
+        (address token0, address token1, uint256 amount0, uint256 amount1) =
+            token < weth9 ? (token, weth9, tokenAmount, wethAmount) : (weth9, token, wethAmount, tokenAmount);
 
         // Initialize at the exact ratio of the seeded amounts => pool price == curve final price.
         // sqrtPriceX96 = sqrt(amount1/amount0) * 2**96; mulDiv avoids the 2**192 intermediate overflow.

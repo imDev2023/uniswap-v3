@@ -243,10 +243,7 @@ contract DevVestingTest is Test, V3Deployer, CurveDriver {
         for (uint256 pct = 1; pct < 100; ++pct) {
             vm.warp(start + (uint256(window) * pct) / 100);
             assertApproxEqAbs(
-                vesting.vestedAmount(token),
-                (MAX_DEV_TOKENS * pct) / 100,
-                1e18,
-                "vested tracks elapsed time linearly"
+                vesting.vestedAmount(token), (MAX_DEV_TOKENS * pct) / 100, 1e18, "vested tracks elapsed time linearly"
             );
         }
     }

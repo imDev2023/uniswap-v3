@@ -452,13 +452,8 @@ contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
 
     /// @dev Wraps `_solveCalibration` into the full `CurveConfig` a curve is constructed from. Split
     ///      out of `createLaunch` for the same stack reason `_emitLaunchCreated` exists.
-    function _curveConfigFor(address token, uint16 devAllocationBps_)
-        private
-        view
-        returns (CurveConfig memory cfg)
-    {
-        (uint256 curveAllocation, uint256 virtualEth, uint256 virtualToken) =
-            _solveCalibration(devAllocationBps_);
+    function _curveConfigFor(address token, uint16 devAllocationBps_) private view returns (CurveConfig memory cfg) {
+        (uint256 curveAllocation, uint256 virtualEth, uint256 virtualToken) = _solveCalibration(devAllocationBps_);
 
         // The anti-snipe params are shares of CURVE_SUPPLY; rescale them onto this launch's own `C`
         // so "1% of the curve" and "15% of the curve" stay true. The floor cannot reach zero for any
@@ -499,7 +494,12 @@ contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
     function _emitLaunchConfig(address token, uint256 curveAllocation) private {
         LaunchLockConfig memory lock = lockConfigOf[token];
         emit LaunchConfig(
-            token, CURVE_SUPPLY - curveAllocation, vestingDuration, lock.lockDuration, lock.creatorFeeBps, lock.permanent
+            token,
+            CURVE_SUPPLY - curveAllocation,
+            vestingDuration,
+            lock.lockDuration,
+            lock.creatorFeeBps,
+            lock.permanent
         );
     }
 
@@ -546,9 +546,7 @@ contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
         // Freeze this launch's lock terms now, so they are readable and binding from the moment the
         // curve opens rather than resolved at graduation under whatever the defaults are by then.
         lockConfigOf[token] = LaunchLockConfig({
-            lockDuration: defaultLockDuration,
-            creatorFeeBps: creatorFeeBps,
-            permanent: p.permanentLock
+            lockDuration: defaultLockDuration, creatorFeeBps: creatorFeeBps, permanent: p.permanentLock
         });
 
         // Read the owner-tunable params into ONE memory struct, then use that same struct both to
@@ -641,7 +639,9 @@ contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
         uint256 maxBuyPerWallet_,
         uint256 antiSnipeThreshold_
     ) external onlyOwner {
-        if (virtualEthReserve_ == 0 || virtualEthReserve_ > MAX_VIRTUAL_ETH_RESERVE) revert InvalidCurveParams();
+        if (virtualEthReserve_ == 0 || virtualEthReserve_ > MAX_VIRTUAL_ETH_RESERVE) {
+            revert InvalidCurveParams();
+        }
         if (tradeFeeBps_ > MAX_TRADE_FEE_BPS) revert InvalidCurveParams();
         if (maxBuyPerWallet_ == 0) revert InvalidCurveParams();
         // ⚠️ Strictly less than, not `<=`. A threshold equal to the curve supply is UNREACHABLE:

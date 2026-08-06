@@ -120,14 +120,8 @@ contract CalibrationTest is Test, V3Deployer, CurveDriver {
             1038422535211267605633802816,
             1031428571428571428571428571
         ];
-        uint256[6] memory curveAlloc = [
-            uint256(800_000_000e18),
-            792_000_000e18,
-            784_000_000e18,
-            776_000_000e18,
-            768_000_000e18,
-            760_000_000e18
-        ];
+        uint256[6] memory curveAlloc =
+            [uint256(800_000_000e18), 792_000_000e18, 784_000_000e18, 776_000_000e18, 768_000_000e18, 760_000_000e18];
 
         for (uint256 i = 0; i < bps.length; i++) {
             (, uint256 C, uint256 e, uint256 t) = factory.curveCalibrationFor(bps[i]);
@@ -161,8 +155,7 @@ contract CalibrationTest is Test, V3Deployer, CurveDriver {
             (, BondingCurve curve) = _launch(bps);
             uint256 raised = _calibratedRaise(curve);
             // G x gradPrice, where gradPrice = finalEthReserve / finalTokenReserve.
-            uint256 reserveValue =
-                (factory.GRADUATION_RESERVE() * curve.finalEthReserve()) / curve.finalTokenReserve();
+            uint256 reserveValue = (factory.GRADUATION_RESERVE() * curve.finalEthReserve()) / curve.finalTokenReserve();
             assertApproxEqAbs(reserveValue, raised, 100, "G x gradPrice == raise");
         }
     }

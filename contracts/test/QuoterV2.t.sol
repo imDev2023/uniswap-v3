@@ -164,8 +164,9 @@ contract QuoterV2ForkTest is Test, V3Deployer {
         IERC20(tokenIn).approve(SWAP_ROUTER, amountIn);
 
         uint256 before = IERC20(tokenOut).balanceOf(trader);
-        ISwapRouter(SWAP_ROUTER).exactInputSingle(
-            ISwapRouter.ExactInputSingleParams({
+        ISwapRouter(SWAP_ROUTER)
+            .exactInputSingle(
+                ISwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
                 fee: Constants.POOL_FEE_TIER,
@@ -175,7 +176,7 @@ contract QuoterV2ForkTest is Test, V3Deployer {
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
-        );
+            );
         received = IERC20(tokenOut).balanceOf(trader) - before;
     }
 }

@@ -62,10 +62,7 @@ contract LaunchMetadataTest is Test {
     ///      decoding the *log* rather than reading contract state: it is exactly what an indexer or
     ///      a plain `eth_getLogs` consumer sees, so a test that passes here proves the data is
     ///      genuinely reachable without any `eth_call`.
-    function _createAndDecode(string memory uri)
-        internal
-        returns (address token, address curve, LaunchData memory p)
-    {
+    function _createAndDecode(string memory uri) internal returns (address token, address curve, LaunchData memory p) {
         vm.recordLogs();
         _create(uri);
         Vm.Log[] memory logs = vm.getRecordedLogs();
@@ -106,12 +103,8 @@ contract LaunchMetadataTest is Test {
     function test_MetadataURI_HasNoSetter() public {
         address token = _create(URI);
 
-        string[4] memory candidates = [
-            "setMetadataURI(string)",
-            "updateMetadataURI(string)",
-            "setTokenURI(string)",
-            "setURI(string)"
-        ];
+        string[4] memory candidates =
+            ["setMetadataURI(string)", "updateMetadataURI(string)", "setTokenURI(string)", "setURI(string)"];
         for (uint256 i = 0; i < candidates.length; i++) {
             (bool ok,) = token.call(abi.encodeWithSignature(candidates[i], "ipfs://malicious"));
             assertFalse(ok, candidates[i]);
@@ -163,8 +156,7 @@ contract LaunchMetadataTest is Test {
 
     /// Tokens from different factories must each name their own, which is the entire point.
     function test_Token_LaunchpadIsPerFactory() public {
-        LaunchpadFactory second =
-            new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory, weth9);
+        LaunchpadFactory second = new LaunchpadFactory(owner, treasury, FEE, positionManager, v3Factory, weth9);
         vm.deal(creator, 10 ether);
 
         address a = _create(URI);

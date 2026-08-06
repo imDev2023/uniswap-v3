@@ -211,13 +211,9 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
     /// @dev Called by the GraduationManager in the same transaction as the mint. The NFT arrives via a
     ///      bare NPM mint, which tells this contract nothing at all, so registration is the only way it
     ///      ever learns the tokenId, the launch token, the pool or the terms.
-    function registerLock(
-        uint256 tokenId,
-        address launchToken,
-        address pool,
-        uint64 lockUntil,
-        uint16 creatorFeeBps
-    ) external {
+    function registerLock(uint256 tokenId, address launchToken, address pool, uint64 lockUntil, uint16 creatorFeeBps)
+        external
+    {
         if (msg.sender != ILaunchpadLockView(launchpad).graduationManager()) revert NotGraduationManager();
         if (launchToken == address(0) || pool == address(0)) revert ZeroAddress();
         if (creatorFeeBps > MAX_CREATOR_FEE_BPS) revert InvalidCreatorFee();
@@ -278,10 +274,7 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
         // the treasury via the recipient parameter.
         (amount0, amount1) = positionManager.collect(
             INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
+                tokenId: tokenId, recipient: address(this), amount0Max: type(uint128).max, amount1Max: type(uint128).max
             })
         );
 
@@ -305,9 +298,7 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
         emit FeesCollected(tokenId, treasury, creator, amount0 - creator0, amount1 - creator1, creator0, creator1);
     }
 
-    function _payOut(address token, address treasury, address creator, uint256 toTreasury, uint256 toCreator)
-        private
-    {
+    function _payOut(address token, address treasury, address creator, uint256 toTreasury, uint256 toCreator) private {
         if (toTreasury > 0) IERC20(token).safeTransfer(treasury, toTreasury);
         if (toCreator > 0) IERC20(token).safeTransfer(creator, toCreator);
     }
@@ -365,10 +356,7 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
         // this never depends on this contract's balance (which a donation could otherwise inflate).
         (uint256 amount0, uint256 amount1) = positionManager.collect(
             INonfungiblePositionManager.CollectParams({
-                tokenId: tokenId,
-                recipient: address(this),
-                amount0Max: type(uint128).max,
-                amount1Max: type(uint128).max
+                tokenId: tokenId, recipient: address(this), amount0Max: type(uint128).max, amount1Max: type(uint128).max
             })
         );
 

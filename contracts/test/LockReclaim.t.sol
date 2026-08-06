@@ -9,8 +9,12 @@ import {BondingCurve} from "../src/BondingCurve.sol";
 import {GraduationManager} from "../src/periphery/GraduationManager.sol";
 import {LPLock, LockOrigin, LockRecord} from "../src/periphery/LPLock.sol";
 import {ForkConfig} from "./ForkConfig.sol";
-import {IUniswapV3Factory, IUniswapV3Pool, INonfungiblePositionManager, IWETH9} from
-    "../src/interfaces/IUniswapV3Minimal.sol";
+import {
+    IUniswapV3Factory,
+    IUniswapV3Pool,
+    INonfungiblePositionManager,
+    IWETH9
+} from "../src/interfaces/IUniswapV3Minimal.sol";
 import {Constants} from "../src/Constants.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -80,15 +84,19 @@ contract LockReclaimTest is Test, V3Deployer, CurveDriver {
         vm.startPrank(trader);
         IWETH9(Constants.WETH9).deposit{value: 20 ether}();
         IERC20(Constants.WETH9).approve(router, type(uint256).max);
-        uint256 out = ISwapRouter2(router).exactInputSingle(
-            ISwapRouter2.ExactInputSingleParams(
-                Constants.WETH9, token, FEE_TIER, trader, block.timestamp, 15 ether, 0, 0
-            )
-        );
+        uint256 out = ISwapRouter2(router)
+            .exactInputSingle(
+                ISwapRouter2.ExactInputSingleParams(
+                    Constants.WETH9, token, FEE_TIER, trader, block.timestamp, 15 ether, 0, 0
+                )
+            );
         IERC20(token).approve(router, type(uint256).max);
-        ISwapRouter2(router).exactInputSingle(
-            ISwapRouter2.ExactInputSingleParams(token, Constants.WETH9, FEE_TIER, trader, block.timestamp, out, 0, 0)
-        );
+        ISwapRouter2(router)
+            .exactInputSingle(
+                ISwapRouter2.ExactInputSingleParams(
+                    token, Constants.WETH9, FEE_TIER, trader, block.timestamp, out, 0, 0
+                )
+            );
         vm.stopPrank();
     }
 
@@ -233,9 +241,7 @@ contract LockReclaimTest is Test, V3Deployer, CurveDriver {
         assertGt(ethAmount, 0, "WETH recovered");
         assertGt(tokensBurned, 0, "tokens recovered");
         assertEq(IERC20(token).balanceOf(lock.DEAD()) - deadBefore, tokensBurned, "launch tokens burned to DEAD");
-        assertEq(
-            IERC20(Constants.WETH9).balanceOf(treasury) - treasuryWethBefore, ethAmount, "WETH routed to treasury"
-        );
+        assertEq(IERC20(Constants.WETH9).balanceOf(treasury) - treasuryWethBefore, ethAmount, "WETH routed to treasury");
         assertEq(IERC20(token).balanceOf(stranger), 0, "caller receives nothing");
         assertEq(IERC20(Constants.WETH9).balanceOf(stranger), 0, "caller receives nothing");
         assertTrue(lock.lockOf(tokenId).reclaimed, "marked reclaimed");

@@ -27,8 +27,9 @@ contract LaunchConfigTest is Test, V3Deployer {
     uint256 internal constant CREATION_FEE = 0.01 ether;
 
     // keccak256 of each signature, which is what `Vm.Log.topics[0]` carries.
-    bytes32 internal constant LAUNCH_CREATED_SIG =
-        keccak256("LaunchCreated(address,address,address,string,string,string,uint256,uint256,uint256,uint16,uint256,uint256)");
+    bytes32 internal constant LAUNCH_CREATED_SIG = keccak256(
+        "LaunchCreated(address,address,address,string,string,string,uint256,uint256,uint256,uint16,uint256,uint256)"
+    );
     bytes32 internal constant LAUNCH_CONFIG_SIG = keccak256("LaunchConfig(address,uint256,uint64,uint64,uint16,bool)");
     bytes32 internal constant GRANT_REGISTERED_SIG = keccak256("GrantRegistered(address,address,uint256,uint64)");
 
@@ -41,11 +42,7 @@ contract LaunchConfigTest is Test, V3Deployer {
         vm.deal(creator, 100 ether);
     }
 
-    function _params(string memory symbol, uint16 devBps, bool permanent)
-        internal
-        pure
-        returns (LaunchParams memory)
-    {
+    function _params(string memory symbol, uint16 devBps, bool permanent) internal pure returns (LaunchParams memory) {
         return LaunchParams("Config", symbol, "ipfs://QmConfig", permanent, devBps);
     }
 
@@ -62,11 +59,7 @@ contract LaunchConfigTest is Test, V3Deployer {
     /// @dev The same lookup for callers that REQUIRE the log. Indexing with `_indexOf`'s sentinel
     ///      would panic with an array out-of-bounds, which says nothing about what actually went
     ///      wrong; this fails with the name of the missing event instead.
-    function _requireLog(Vm.Log[] memory logs, bytes32 sig, string memory what)
-        internal
-        pure
-        returns (Vm.Log memory)
-    {
+    function _requireLog(Vm.Log[] memory logs, bytes32 sig, string memory what) internal pure returns (Vm.Log memory) {
         uint256 i = _indexOf(logs, sig);
         require(i != type(uint256).max, string.concat("expected a ", what, " log, found none"));
         return logs[i];
@@ -131,12 +124,17 @@ contract LaunchConfigTest is Test, V3Deployer {
         address token = factory.createLaunch{value: CREATION_FEE}(_params("CARVE", 500, false));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (uint256 devAllocation, uint64 vestingDuration, uint64 lockDuration, uint16 creatorFeeBps, bool permanent) =
-            abi.decode(_requireLog(logs, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool));
+        (uint256 devAllocation, uint64 vestingDuration, uint64 lockDuration, uint16 creatorFeeBps, bool permanent) = abi.decode(
+            _requireLog(logs, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool)
+        );
 
         assertEq(devAllocation, factory.devAllocationOf(token), "event agrees with the factory's record");
         assertEq(devAllocation, vesting.grantOf(token).total, "event agrees with the registered grant");
-        assertEq(devAllocation, factory.CURVE_SUPPLY() * 500 / 10_000, "and with 5% of the curve supply, read from the contract not a copy");
+        assertEq(
+            devAllocation,
+            factory.CURVE_SUPPLY() * 500 / 10_000,
+            "and with 5% of the curve supply, read from the contract not a copy"
+        );
 
         assertEq(vestingDuration, factory.vestingDuration(), "vesting duration is this launch's frozen value");
         assertEq(lockDuration, factory.defaultLockDuration(), "lock duration is this launch's frozen value");
@@ -168,8 +166,9 @@ contract LaunchConfigTest is Test, V3Deployer {
         factory.createLaunch{value: CREATION_FEE}(_params("PERMA", 0, true));
         Vm.Log[] memory logs = vm.getRecordedLogs();
 
-        (, , uint64 lockDuration, , bool permanent) =
-            abi.decode(_requireLog(logs, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool));
+        (,, uint64 lockDuration,, bool permanent) = abi.decode(
+            _requireLog(logs, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool)
+        );
 
         assertTrue(permanent, "the permanent flag is carried");
         assertEq(lockDuration, factory.defaultLockDuration(), "and the duration is emitted, not zeroed");
@@ -187,8 +186,9 @@ contract LaunchConfigTest is Test, V3Deployer {
         // ⚠️ `getRecordedLogs` CONSUMES the buffer: a second call returns an empty array, so it has
         // to be captured into a local exactly once per recording.
         Vm.Log[] memory before_ = vm.getRecordedLogs();
-        (, uint64 vestingBefore, uint64 lockBefore, uint16 feeBefore,) =
-            abi.decode(_requireLog(before_, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool));
+        (, uint64 vestingBefore, uint64 lockBefore, uint16 feeBefore,) = abi.decode(
+            _requireLog(before_, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool)
+        );
 
         vm.startPrank(owner);
         factory.setLockParams(lockBefore + 90 days, feeBefore == 7000 ? 6000 : 7000);
@@ -199,8 +199,9 @@ contract LaunchConfigTest is Test, V3Deployer {
         vm.prank(creator);
         factory.createLaunch{value: CREATION_FEE}(_params("AFTER", 0, false));
         Vm.Log[] memory after_ = vm.getRecordedLogs();
-        (, uint64 vestingAfter, uint64 lockAfter, uint16 feeAfter,) =
-            abi.decode(_requireLog(after_, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool));
+        (, uint64 vestingAfter, uint64 lockAfter, uint16 feeAfter,) = abi.decode(
+            _requireLog(after_, LAUNCH_CONFIG_SIG, "LaunchConfig").data, (uint256, uint64, uint64, uint16, bool)
+        );
 
         assertEq(lockAfter, lockBefore + 90 days, "the new launch carries the retuned lock duration");
         assertEq(vestingAfter, vestingBefore + 30 days, "and the retuned vesting duration");

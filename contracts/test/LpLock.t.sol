@@ -82,8 +82,9 @@ contract LpLockTest is Test, V3Deployer, CurveDriver {
 
     function _swap(address tokenIn, address tokenOut, uint256 amountIn) internal returns (uint256 out) {
         IERC20(tokenIn).approve(router, amountIn);
-        out = ISwapRouter(router).exactInputSingle(
-            ISwapRouter.ExactInputSingleParams({
+        out = ISwapRouter(router)
+            .exactInputSingle(
+                ISwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
                 fee: FEE_TIER,
@@ -93,7 +94,7 @@ contract LpLockTest is Test, V3Deployer, CurveDriver {
                 amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             })
-        );
+            );
     }
 
     function test_PositionLockedForever_AndFeesRouteToTreasury() public {
@@ -110,15 +111,12 @@ contract LpLockTest is Test, V3Deployer, CurveDriver {
         // actual authorization message, which a selector miss cannot produce.
         vm.prank(attacker);
         vm.expectRevert(bytes("Not approved"));
-        INonfungiblePositionManager(positionManager).decreaseLiquidity(
-            INonfungiblePositionManager.DecreaseLiquidityParams({
-                tokenId: tokenId,
-                liquidity: 1,
-                amount0Min: 0,
-                amount1Min: 0,
-                deadline: block.timestamp
+        INonfungiblePositionManager(positionManager)
+            .decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                tokenId: tokenId, liquidity: 1, amount0Min: 0, amount1Min: 0, deadline: block.timestamp
             })
-        );
+            );
 
         vm.prank(attacker);
         vm.expectRevert();

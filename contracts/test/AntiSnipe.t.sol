@@ -151,7 +151,8 @@ contract AntiSnipeTest is CurveDriver {
     ///         the very first buyer on a factory-created curve can't grab more than the cap.
     function test_Factory_FirstBuyRespectsCap() public {
         LaunchpadFactory f = new LaunchpadFactory(address(this), treasury, 0, positionManager, v3Factory, weth9);
-        BondingCurve c = BondingCurve(f.curveOf(f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false, 0))));
+        BondingCurve c =
+            BondingCurve(f.curveOf(f.createLaunch(LaunchParams("X", "X", "ipfs://QmTestMetadata", false, 0))));
 
         vm.deal(buyerA, 100 ether);
         // A 1 ETH first buy would pull well over the 8M-token cap while the window is active.

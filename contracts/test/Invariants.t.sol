@@ -146,9 +146,7 @@ contract InvariantsTest is Test, V3Deployer, CurveDriver {
         vm.prank(b);
         curve.buy{value: ethIn}(0);
 
-        assertEq(
-            curve.tokensSold(), alloc - IERC20(token).balanceOf(address(curve)), "tokensSold == tokens that left"
-        );
+        assertEq(curve.tokensSold(), alloc - IERC20(token).balanceOf(address(curve)), "tokensSold == tokens that left");
         assertLe(curve.tokensSold(), alloc, "never oversells the allocation");
     }
 

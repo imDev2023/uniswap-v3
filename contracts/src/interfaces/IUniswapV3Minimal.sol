@@ -49,7 +49,12 @@ interface IUniswapV3Pool {
     function observations(uint256 index)
         external
         view
-        returns (uint32 blockTimestamp, int56 tickCumulative, uint160 secondsPerLiquidityCumulativeX128, bool initialized);
+        returns (
+            uint32 blockTimestamp,
+            int56 tickCumulative,
+            uint160 secondsPerLiquidityCumulativeX128,
+            bool initialized
+        );
 
     /// @notice Withdraws accrued protocol fees to `recipient`. Callable only by the factory owner.
     function collectProtocol(address recipient, uint128 amount0Requested, uint128 amount1Requested)

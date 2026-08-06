@@ -103,9 +103,7 @@ contract LaunchpadFactoryTest is Test {
 
     function test_RevertOnUnderpay() public {
         vm.prank(creator);
-        vm.expectRevert(
-            abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE)
-        );
+        vm.expectRevert(abi.encodeWithSelector(LaunchpadFactory.InsufficientCreationFee.selector, FEE - 1, FEE));
         factory.createLaunch{value: FEE - 1}(LaunchParams("X", "X", URI, false, 0));
     }
 

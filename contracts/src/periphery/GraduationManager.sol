@@ -130,6 +130,10 @@ contract GraduationManager is ReentrancyGuard {
         IERC20(token0).forceApprove(address(positionManager), amount0);
         IERC20(token1).forceApprove(address(positionManager), amount1);
 
+        // `unused-return`: `mint` also returns the liquidity and the two amounts actually consumed.
+        // Only the tokenId is recorded, because the position itself is the record from here on and the
+        // consumed amounts are already pinned by the calibration.
+        // slither-disable-next-line unused-return
         (uint256 tokenId,,,) = positionManager.mint(
             INonfungiblePositionManager.MintParams({
                 token0: token0,

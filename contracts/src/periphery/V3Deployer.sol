@@ -10,6 +10,10 @@ import {Vm} from "forge-std/Vm.sol";
 ///      contracts that land on-chain are byte-for-byte the audited Uniswap release
 ///      (decision #4: own DEX on unmodified V3). Inherit this contract to reuse it.
 contract V3Deployer {
+    // `vm` is forge-std's own name for the cheatcode address and every Foundry file spells it this
+    // way. Renaming it to VM to satisfy a style rule would make this the one file that reads
+    // differently from the rest of the suite.
+    // solhint-disable-next-line const-name-snakecase
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     string internal constant FACTORY_ARTIFACT =
@@ -22,6 +26,11 @@ contract V3Deployer {
         "node_modules/@uniswap/v3-periphery/artifacts/contracts/lens/QuoterV2.sol/QuoterV2.json";
 
     function _create(bytes memory bytecode) private returns (address addr) {
+        // Deliberate, and the whole reason this contract exists: raw `CREATE` over bytecode read from
+        // Uniswap's official precompiled artifacts is what deploys the AUDITED release byte for byte
+        // (ADR-0001), instead of recompiling v3-core's Solidity 0.7.6 alongside our 0.8.x. There is no
+        // high-level equivalent - `new C(...)` requires the source.
+        // solhint-disable-next-line no-inline-assembly
         assembly {
             addr := create(0, add(bytecode, 0x20), mload(bytecode))
         }

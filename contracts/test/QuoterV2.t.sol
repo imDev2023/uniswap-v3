@@ -187,6 +187,14 @@ library FullMathLite {
         unchecked {
             // a is already a product of two uint160s (<= 2^320) in our caller, so do it in two steps
             // against the 2^192 denominator rather than risking a single overflowing multiply.
+            //
+            // ⚠️ Suppressed because the lint has the shape right and the intent backwards. Dividing
+            // first is normally precision loss; here it is the standard full-precision decomposition,
+            // and the `(a % denominator) * b / denominator` term is exactly the remainder the first
+            // division dropped being added back. Multiplying first is what this cannot do: `a * b`
+            // overflows 256 bits for the inputs the caller passes. Nothing is lost beyond the single
+            // truncation the final division makes anyway.
+            // forge-lint: disable-next-line(divide-before-multiply)
             return (a / denominator) * b + ((a % denominator) * b) / denominator;
         }
     }

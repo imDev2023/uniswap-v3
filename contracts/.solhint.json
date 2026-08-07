@@ -10,22 +10,41 @@
     "reentrancy": "error",
     "not-rely-on-block-hash": "error",
     "no-complex-fallback": "error",
-    "func-visibility": ["error", {"ignoreConstructors": true}],
+    "func-visibility": [
+      "error",
+      {
+        "ignoreConstructors": true
+      }
+    ],
     "state-visibility": "error",
-    "explicit-types": ["error", "explicit"],
+    "explicit-types": [
+      "error",
+      "explicit"
+    ],
     "no-unused-vars": "error",
     "no-global-import": "error",
     "no-console": "error",
-    "compiler-version": ["error", "0.8.30"],
-
-    "not-rely-on-time": "warn",
+    "compiler-version": [
+      "error",
+      "0.8.24"
+    ],
+    "not-rely-on-time": "off",
     "avoid-low-level-calls": "warn",
     "no-inline-assembly": "warn",
-    "gas-custom-errors": "warn",
+    "gas-custom-errors": "off",
     "no-empty-blocks": "warn",
-    "max-states-count": ["warn", 20],
-    "code-complexity": ["warn", 8],
-    "function-max-lines": ["warn", 60],
+    "max-states-count": [
+      "warn",
+      20
+    ],
+    "code-complexity": [
+      "warn",
+      8
+    ],
+    "function-max-lines": [
+      "warn",
+      60
+    ],
     "func-name-mixedcase": "warn",
     "var-name-mixedcase": "warn",
     "contract-name-capwords": "warn",

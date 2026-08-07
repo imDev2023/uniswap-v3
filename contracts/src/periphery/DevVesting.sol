@@ -179,6 +179,11 @@ contract DevVesting is ReentrancyGuard {
         if (g.total == 0) revert UnknownGrant();
 
         amount = claimable(token);
+        // `incorrect-equality`: the detector flags `== 0` in a function that also reads
+        // `block.timestamp`. This equality is not a time comparison - it is "nothing has accrued since
+        // the last claim", where zero is the exact and only value that means it. A `<=` here would be
+        // identical, since `claimable` cannot be negative.
+        // slither-disable-next-line incorrect-equality
         if (amount == 0) revert NothingToClaim();
 
         // Safe: `amount` is `claimable` == `vested - claimed`, and `vestedAmount` returns at most

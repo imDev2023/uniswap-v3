@@ -533,6 +533,12 @@ contract LaunchpadFactory is Ownable2Step, ReentrancyGuard {
     ///      ⚠️ It also moved the packed owner-param group from storage slot 12 to 13: `_status` is a
     ///      base-contract variable, and Solidity lays base storage out first. See
     ///      `test_OwnerParams_SharePackedStorageSlot`.
+    // `arbitrary-send-eth`: the two sends are the creation fee to `treasury` (owner-settable, never
+    // caller-settable) and the overpayment refund to `msg.sender`, which is the only address it could
+    // correctly go to. Neither destination is chosen by an argument. `FeeTransferFailed` and
+    // `RefundFailed` are both exercised by a contract that rejects ETH in `SecurityHardening.t.sol`;
+    // an EOA cannot reach either branch.
+    // slither-disable-next-line arbitrary-send-eth
     function createLaunch(LaunchParams calldata p) external payable nonReentrant returns (address token) {
         uint256 fee = creationFee;
         if (msg.value < fee) revert InsufficientCreationFee(msg.value, fee);

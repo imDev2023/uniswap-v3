@@ -107,6 +107,92 @@ Note the sampling: the dev-allocation property draws from the 501 legal values o
 
 ⚠️ **Regression testing before release** (SlowMist) is satisfied by four suites run on every ticket: `forge test`, `frontend npm test`, `subgraph npm test`, and `tsc -b` + `vite build`.
 
+## The `evm-security` gate (#40)
+
+The [`evm-security-standards`](../contracts/lib/evm-security-standards/) submodule ships a pre-deployment gate.
+It went in at 8 blocking failures, which was the honest starting position: nothing waived, no evidence recorded, no invariant suite.
+It now reads **`pass 20, fail 0, waived 0`**.
+
+Run it with `cd contracts && python3 lib/evm-security-standards/gate/check.py --project .` and do not trust this table without doing so.
+
+| Item | Closed by |
+| --- | --- |
+| `ac-invariants-exist` | `AccessControlProperties` in `test/invariant/OctopusInvariants.t.sol`, 14 privileged calls covering both the "no role at all" and the "wrong role" case |
+| `cf-conservation-tested` | `ConservationProperties`, 7 ledgers: ETH backing and unsold allocation per curve, the curve's exact reserve bookkeeping, and the vesting vault per launch token |
+| `cf-solvency-tested` | `SolvencyProperties` over the vesting vault |
+| `arith-rounding-tested` | `RoundingDirectionProperties`, run against a ZERO-FEE curve because a 1% fee per leg hides a rounding-direction bug entirely |
+| `chain-erc8056-simulated` | `test/invariant/Erc8056Exposure.t.sol` - see below |
+| `q-no-warnings` | `deny = "warnings"` in `foundry.toml`, plus two justified `forge-lint` suppressions |
+| `q-slither-clean` | 14 findings at medium-or-above (3 high, 11 medium) triaged inline at each site; 15 low/informational results remain visible |
+| `v-invariants-in-ci` | 6 invariants, recorded in `contracts/.evm-standards.json` |
+
+**No waivers.** `waived 0` is a deliberate property of this position, the same way `fail 8` was of the starting one.
+
+⚠️ **`q-slither-clean` and `v-invariants-in-ci` are the two items the gate does NOT verify itself.**
+`check_tool_ran_clean` reads a record from `contracts/.evm-standards.json` and never runs the tool, deliberately, so the gate stays fast enough to run locally.
+That means a green gate on those two is only ever as honest as the last person to write the record.
+#40 briefly recorded `"clean": true` for Slither while Slither actually exited 255 - see the note on `disable-next-line` below.
+Re-run both tools rather than trusting the record.
+
+⚠️ **40 items remain unanswered.** They are attestations needing a human decision, not code, and they are **not blocking yet** - the gate lists them every run. Nothing here should be read as "the checklist is complete".
+
+### ERC-8056: the one item where the template did not fit
+
+Chain 4663's profile calls the ERC-8056 multiplier the highest-risk integration detail on the chain, because at launch every multiplier is exactly `1e18`, so pricing code that double-applies it is indistinguishable from correct code until a corporate action lands - and then a 10:1 split makes every position through that path wrong tenfold, instantly, on a scheduled date.
+
+**Octopus reads no price at all.** No oracle, no feed, no REST consumer, no pricing module in `src/`.
+Launch tokens are factory-minted so they are never a wrapper over an equity, and the quote asset is fixed to WETH at construction.
+
+The mixin's `tokenPriceUsd`/`sharePriceUsd` adapters therefore have nothing real to bind to.
+Binding them to mocks would assert something about the mocks, so they **revert**, and the property is restated as the one that is actually true and actually falsifiable: a real ERC-8056 token is deployed, its multiplier is moved through a scheduled 10:1 split, a 2-for-1, a reverse split, a dividend drift and a fuzzed range, and every figure Octopus reports is asserted unchanged.
+That is backed structurally by a runtime-bytecode scan proving no contract carries the selector of `uiMultiplier()`, `newUIMultiplier()`, `effectiveAt()` or `latestRoundData()` - with a companion test proving the scanner can find a selector that IS present.
+
+### Recorded suppressions
+
+Every **code-level** suppression is inline at the site with its reason, never in a triage database.
+A suppression a reviewer cannot see next to the code is one nobody re-examines.
+
+⚠️ Three Solhint rules are turned off in `contracts/.solhint.json` instead, and that is a genuine
+exception to the rule above rather than an application of it.
+Each is systemic rather than site-specific - a chain fact, a pinned compiler, or a style choice made
+across every constructor - so 15 identical inline comments would say less than one config line and a
+row in this table. They are listed below so the exception is visible where the principle is stated.
+
+⚠️ **`slither-disable-next-line` means the LITERAL next line.** `BondingCurve.buy` carries two
+suppressions from two different tools, and #40 shipped both as `-next-line` for several hours: the
+Solhint comment block landed between Slither's directive and the function, Slither's suppression
+applied to a comment, the High-impact `reentrancy-eth` finding came back, and the evidence recorded in
+`.evm-standards.json` said `clean` about a run that exits 255.
+The Slither one is now a `disable-start`/`disable-end` block. Two suppressions on one declaration need
+a block, not a race for the adjacent line.
+
+| Tool | Rule | Sites | Reason |
+| --- | --- | --- | --- |
+| forge lint | `block-timestamp` | `LPLock.reclaimBlocker` | On an Orbit chain `block.number` is an L1 estimate and explicitly not a clock, so the lint's implied alternative does not exist. The guard is a 1-year lock plus 180 days of inactivity; a few seconds of sequencer skew reaches neither |
+| forge lint | `divide-before-multiply` | `QuoterV2.t.sol` `FullMathLite` | The standard full-precision decomposition. Multiplying first overflows 256 bits for the inputs the caller passes |
+| Slither | `arbitrary-send-eth` | `BondingCurve._graduate`, `LaunchpadFactory.createLaunch` | Destinations are an immutable, the owner-set treasury, and `msg.sender`'s own refund. None is an argument |
+| Slither | `reentrancy-eth` | `BondingCurve.buy` | `nonReentrant`, and `_graduate` sets `graduated` before its external call. Kept visible because the ordering it points at is exactly what must not be rearranged |
+| Slither | `incorrect-equality` | `DevVesting.claim` | `amount == 0` is "nothing has accrued", not a timestamp comparison |
+| Slither | `uninitialized-local` | `BondingCurve.buy` `refund` | ⚠️ Suppressed rather than fixed **because the fix moves deployed bytecode** - see below. The same explicit-zero change in `LPLock.collect` was byte-identical and WAS applied |
+| Slither | `unused-return` | 6 sites | Destructures of multi-value V3 getters. The `decreaseLiquidity` one is deliberate: what is swept is whatever `collect` returns next, which includes the fee half |
+| Solhint | `compiler-version` | config | The shared baseline requires `^0.8.30`; this repo pins `0.8.24` on purpose (`evm_version = paris`, PUSH0-free for Orbit) |
+| Solhint | `not-rely-on-time` | config, off | 8 sites, and unsatisfiable on this chain for the same reason as the forge-lint rule above |
+| Solhint | `gas-custom-errors` | config, off | 6 constructor-time `require`s. Converting them is a bytecode change and out of a tooling ticket's scope |
+| Solhint | `no-inline-assembly`, `const-name-snakecase`, `code-complexity`, `function-max-lines` | 3 sites | Raw `CREATE` over Uniswap's audited artifacts (ADR-0001), forge-std's own `vm` spelling, and `BondingCurve.buy`, which cannot be split without risking the stack overflow that `_emitLaunchCreated` already exists to avoid |
+
+### ⚠️ A comment in `BondingCurve.sol` moves `LaunchpadFactory`'s deployed bytecode
+
+Measured in #40, not assumed.
+`LaunchpadFactory` embeds `BondingCurve`'s **creation code**, which carries `BondingCurve`'s own metadata hash, and Solidity hashes the source into that.
+So a comment-only edit to `BondingCurve.sol` changes the factory's runtime bytecode while leaving the curve's unchanged.
+
+Verified by byte-diffing the factory's runtime before and after #40: **7 differing regions, all inside the trailing 96 bytes of a 19,423-byte runtime**, i.e. the two embedded metadata hashes. Every executable byte is identical.
+
+Consequences, both real:
+
+- Re-verifying the **currently deployed** testnet contracts on Blockscout needs the source as of `0bfa951`, not this tree. The deployment itself is unaffected; addresses and receipts are in [`deployments-testnet.md`](deployments-testnet.md).
+- An explicit-zero initialisation is **not** reliably bytecode-neutral. It was in `LPLock.collect` and was not in `BondingCurve.buy`. Measure per site rather than assuming a rule about the optimizer.
+
 ## Gas optimisation (WTF)
 
 Applied, with measurements where they were taken in #35a:

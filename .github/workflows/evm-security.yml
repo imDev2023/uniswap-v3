@@ -41,11 +41,16 @@ jobs:
         with:
           node-version: "20"
 
+      # ⚠️ The REPO's config, not the submodule's shared baseline. The two started identical and
+      # can no longer be: the baseline requires solc ^0.8.30 while this repo pins 0.8.24 on purpose
+      # (evm_version paris, PUSH0-free for Orbit), which failed every source file with a
+      # compiler-version error. `not-rely-on-time` is also off here, because chain 4663's profile
+      # says block.number is NOT a clock, so block.timestamp is the only one available and the rule
+      # cannot be satisfied. Reasons are recorded in docs/security-checklist.md.
       - name: Solhint
         run: |
           npm install --no-save solhint
-          npx solhint --config lib/evm-security-standards/tooling/.solhint.json \
-            --max-warnings 0 'src/**/*.sol'
+          npx solhint --config .solhint.json --max-warnings 0 'src/**/*.sol'
 
   build:
     name: Build
@@ -70,9 +75,23 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
 
+      # ⚠️ Every fork test is PINNED to an ARCHIVE endpoint (contracts/test/ForkConfig.sol) and fails
+      # LOUDLY without these, which is the intended behaviour - a fork test silently falling back to a
+      # pruning endpoint is how flakiness got in. They live in contracts/.env locally and must be
+      # added as repository secrets before this job can pass. Until they are, this step is the one
+      # thing standing between this workflow and green.
       - name: Unit and fuzz tests
+        env:
+          RPC_MAINNET_ARCHIVE_URL: ${{ secrets.RPC_MAINNET_ARCHIVE_URL }}
+          RPC_TESTNET_ARCHIVE_URL: ${{ secrets.RPC_TESTNET_ARCHIVE_URL }}
         run: forge test -vvv
 
+      # ⚠️ Deliberately needs NO secrets. The invariant campaign is the one suite here that does not
+      # fork: Foundry gives each `invariant_` function its own campaign, each re-runs `setUp` against
+      # the fork, and every uncached address the fuzzer touches is an RPC call - the archive endpoint
+      # returned HTTP 429 and all five campaigns died in setup with `runs: 0`. It stands up a local
+      # WETH9 instead (test/mocks/MockWETH9.sol) and still deploys the real audited V3 bytecode. So
+      # this step gates every commit even on a fork without access to the secrets above.
       - name: Invariants
         id: invariants
         run: forge test --match-test "invariant_" -vvv
@@ -114,7 +133,9 @@ jobs:
       - uses: crytic/slither-action@v0.4.0
         id: slither
         with:
-          slither-config: contracts/lib/evm-security-standards/tooling/slither.config.json
+          # The repo's own copy, for the same reason the Solhint step uses the repo's: a project's
+          # triage decisions belong to the project, not to the shared baseline it started from.
+          slither-config: contracts/slither.config.json
           fail-on: medium
 
       - name: Record evidence

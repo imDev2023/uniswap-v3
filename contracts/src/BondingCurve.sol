@@ -164,6 +164,29 @@ contract BondingCurve is ReentrancyGuard {
 
     /// @notice Buy tokens from the curve with ETH. `minTokensOut` bounds slippage. A buy that
     ///         completes the 800M allocation triggers atomic graduation and refunds ETH overflow.
+    // ⚠️ `reentrancy-eth` is reported here and is a false positive with a real shape behind it.
+    // Slither sees state written after `.call`s: `_graduate()` runs last and sets `graduated`. Three
+    // things make it unreachable. `buy` is `nonReentrant`, so a re-entrant call reverts at the
+    // modifier. `_graduate` sets `graduated = true` BEFORE its own external call, so even a path that
+    // bypassed the guard finds the curve already closed. And every reserve write above happens before
+    // any transfer. The finding is kept visible rather than silenced globally because the ordering it
+    // points at is exactly what must not be rearranged. Verified by mutation in `SameBlockRaces.t.sol`.
+    //
+    // ⚠️ `disable-START`, not `disable-next-line`, and the difference is not cosmetic. A
+    // `-next-line` directive applies to the LITERAL next line, and the solhint suppression below has
+    // to occupy that slot for its own rule. #40 shipped both as `-next-line` for several hours: the
+    // solhint comment block landed between slither's directive and the function, slither's
+    // suppression silently applied to a comment, the High-impact finding came back, and the evidence
+    // recorded in `.evm-standards.json` said "clean" about a run that exits 255. Found by review, not
+    // by the run that recorded it. Two suppressions on one declaration need a block, not a race for
+    // the adjacent line.
+    // slither-disable-start reentrancy-eth
+    // ⚠️ Over the line length and complexity limits on purpose, and splitting it is not free. `buy`
+    // carries the crossing-buy branch, the anti-snipe window and the graduation hand-off, and every
+    // one of those reads state the others write. `LaunchpadFactory._emitLaunchCreated` exists solely
+    // because inlining it overflowed the EVM's 16-slot reachable stack; carving helpers out of this
+    // function invites the same failure, and `viaIR` was rejected as too disruptive.
+    // solhint-disable-next-line code-complexity, function-max-lines
     function buy(uint256 minTokensOut) external payable nonReentrant returns (uint256 tokensOut) {
         if (graduated) revert AlreadyGraduated();
         if (msg.value == 0) revert ZeroAmount();
@@ -177,6 +200,15 @@ contract BondingCurve is ReentrancyGuard {
         (uint256 previewTokens,,,) = _previewBuy(msg.value);
 
         uint256 fee;
+        // ⚠️ `uninitialized-local`: the zero default is the answer on the ordinary path, since only
+        // the crossing branch below ever produces a refund. Left implicit rather than written as
+        // `= 0` for one reason worth recording: an explicit zero here CHANGES THE BYTECODE. Measured
+        // in #40 - the optimizer does not elide the store, and `BondingCurve`'s runtime code moved,
+        // taking `LaunchpadFactory`'s with it because the factory embeds the curve's creation code.
+        // The same explicit-zero change in `LPLock.collect` was byte-identical, so this is not a
+        // general rule about the compiler; it has to be measured per site. #40 is a tooling ticket
+        // and does not move deployed bytecode.
+        // slither-disable-next-line uninitialized-local
         uint256 refund;
         bool crossing = previewTokens >= remaining;
 
@@ -235,6 +267,8 @@ contract BondingCurve is ReentrancyGuard {
         if (crossing) _graduate();
     }
 
+    // slither-disable-end reentrancy-eth
+
     /// @notice Sell tokens back to the curve for ETH. Caller must approve first. `minEthOut` bounds slippage.
     function sell(uint256 tokenAmount, uint256 minEthOut) external nonReentrant returns (uint256 ethOut) {
         if (graduated) revert AlreadyGraduated();
@@ -266,6 +300,10 @@ contract BondingCurve is ReentrancyGuard {
     ///      balance, so ETH force-fed via selfdestruct can't inflate the seed and break price
     ///      continuity; any such surplus is simply left stranded in the curve. `graduated` is set
     ///      before the external call as a belt-and-suspenders re-entrancy guard (buy() is nonReentrant).
+    // `arbitrary-send-eth`: the destination is `graduationManager`, an immutable set in the
+    // constructor from the factory's own immutable. It is not a parameter, not owner-settable and not
+    // reachable by any caller, so there is no "arbitrary" recipient to control.
+    // slither-disable-next-line arbitrary-send-eth
     function _graduate() private {
         graduated = true;
         uint256 raised = finalEthReserve - virtualEthReserve;

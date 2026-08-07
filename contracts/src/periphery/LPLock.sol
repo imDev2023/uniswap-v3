@@ -166,7 +166,11 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
     ///      Note mints and burns also write an observation, so a dust liquidity change counts as
     ///      activity. That is an accepted definition of "the pool is still responsive".
     function secondsSincePoolActivity(address pool) public view returns (uint32) {
+        // `unused-return` x2: both are destructures of multi-value V3 getters where only the named
+        // fields matter. Reading the rest would cost stack slots and say nothing.
+        // slither-disable-next-line unused-return
         (,, uint16 observationIndex,,,,) = IUniswapV3Pool(pool).slot0();
+        // slither-disable-next-line unused-return
         (uint32 lastTs,,, bool initialized) = IUniswapV3Pool(pool).observations(observationIndex);
         // An uninitialized observation means we cannot date the pool's last activity, so it reads as
         // maximally recent. Failing CLOSED here is deliberate: the alternative would let an unreadable
@@ -187,6 +191,15 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
         if (r.origin != LockOrigin.Launch) return ReclaimBlocker.NotALaunchPosition;
         if (r.reclaimed) return ReclaimBlocker.AlreadyReclaimedBlocker;
         if (r.lockUntil == PERMANENT) return ReclaimBlocker.PermanentLock;
+        // ⚠️ Suppressed deliberately, and the reason is chain-specific rather than general. On an
+        // Arbitrum Orbit chain `block.number` is an L1 estimate and is explicitly NOT a clock
+        // (`lib/evm-security-standards/profiles/robinhood-4663.md` §1), so `block.timestamp` is the
+        // only clock available - the lint's implied alternative does not exist here. The manipulation
+        // it warns about is also not a threat at this scale: the guard is a one-year lock followed by
+        // 180 days of pool inactivity, and a sequencer able to skew the clock by a few seconds cannot
+        // reach either boundary. `secondsSincePoolActivity` above deliberately fails closed for the
+        // same guard, which is where the real risk sits.
+        // forge-lint: disable-next-line(block-timestamp)
         if (block.timestamp <= r.lockUntil) return ReclaimBlocker.NotExpired;
         if (secondsSincePoolActivity(r.pool) < inactivityPeriod) return ReclaimBlocker.PoolActive;
         return ReclaimBlocker.NoBlocker;
@@ -278,9 +291,14 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
             })
         );
 
-        address creator;
-        uint256 creator0;
-        uint256 creator1;
+        // ⚠️ Explicitly zero rather than defaulted, because the zero values are the LOAD-BEARING
+        // case: they are what "this position has no creator share" means, and they are what a
+        // third-party lock and a `creatorFeeBps` of zero both fall through to. `FeeCollection.creator`
+        // in the subgraph reads this zero address as null for the same reason. A defaulted zero and a
+        // forgotten assignment look identical here, on the split that decides where money goes.
+        address creator = address(0);
+        uint256 creator0 = 0;
+        uint256 creator1 = 0;
         if (r.origin == LockOrigin.Launch && r.creatorFeeBps > 0) {
             creator = _creatorOf(r.launchToken);
             if (creator != address(0)) {
@@ -291,6 +309,8 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
 
         // The position's own tokens, read from the NPM rather than the record, so this still works for
         // any position type. Rounding on the split favours the treasury by construction (floor).
+        // `unused-return`: only the pair is needed. NPM's `positions` returns twelve fields.
+        // slither-disable-next-line unused-return
         (,, address token0, address token1,,,,,,,,) = positionManager.positions(tokenId);
         _payOut(token0, treasury, creator, amount0 - creator0, creator0);
         _payOut(token1, treasury, creator, amount1 - creator1, creator1);
@@ -337,8 +357,16 @@ contract LPLock is IERC721Receiver, ReentrancyGuard {
         LockRecord storage r = _locks[tokenId];
         r.reclaimed = true; // effects before interactions; also makes reclaim single-shot
 
+        // `unused-return`: only `liquidity` is needed from the twelve fields.
+        // slither-disable-next-line unused-return
         (,,,,,,, uint128 liquidity,,,,) = positionManager.positions(tokenId);
         if (liquidity > 0) {
+            // ⚠️ `unused-return`: `decreaseLiquidity` returns the amounts it moved into the position's
+            // owed balance, and ignoring them is deliberate rather than lax. What is actually swept is
+            // whatever `collect` returns immediately below - principal AND any uncollected fees - and
+            // that is the figure the burn and the treasury transfer use. Trusting the earlier return
+            // instead would silently drop the fee half.
+            // slither-disable-next-line unused-return
             positionManager.decreaseLiquidity(
                 INonfungiblePositionManager.DecreaseLiquidityParams({
                     tokenId: tokenId,

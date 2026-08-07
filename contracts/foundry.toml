@@ -15,6 +15,49 @@ optimizer = true
 optimizer_runs = 200
 # Allow vm.getCode to read the official Uniswap V3 precompiled artifacts.
 fs_permissions = [{ access = "read", path = "./node_modules" }]
+# Build fails on any warning, compiler or lint (#40, gate item `q-no-warnings`). Compiler warnings
+# are the cheapest findings there are and the ones a team learns to scroll past, so the only way they
+# stay at zero is if a non-zero count stops the build. `deny = "warnings"` is forge 1.7's spelling of
+# what used to be `deny_warnings = true`; the gate accepts either.
+#
+# ⚠️ This is what makes an inline `// forge-lint: disable-next-line(<id>)` load-bearing rather than
+# decorative. Two exist, both in this repo, both carrying the reason next to them: LPLock's
+# block.timestamp comparison and QuoterV2.t.sol's full-precision mulDiv. Deleting either comment
+# breaks the build, which is the point - a suppression should be as visible as the warning was.
+deny = "warnings"
+
+# ⚠️ Pinned rather than left to forge's defaults, because the whole repo was reformatted in #40 after
+# forge 1.7.1 wrapped 14 untouched files differently from whatever formatted them, and CI now runs
+# `forge fmt --check`. These ARE forge 1.7.1's defaults; writing them down is what stops the next
+# formatter release doing the same thing again.
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
+
+# The local campaign. Deliberately modest: `forge test` runs on every change and a campaign that
+# takes minutes is a campaign people stop running. CI runs the deep version below.
+[profile.default.invariant]
+runs = 64
+depth = 64
+# ⚠️ Keep this false. `fail_on_revert = true` turns every input the system legitimately rejects into a
+# test failure, and the usual fix is to loosen the handler until nothing interesting is explored.
+# `OctopusHandler` asserts on its own call counts instead, which is the check that actually catches an
+# empty campaign.
+fail_on_revert = false
+shrink_run_limit = 5000
+
+# ⚠️ `.github/workflows/evm-security.yml` sets FOUNDRY_PROFILE=ci and this section did not exist, so
+# every CI job silently ran the default depth while the workflow's name implied a deep campaign.
+[profile.ci.fuzz]
+runs = 1024
+
+[profile.ci.invariant]
+runs = 256
+depth = 128
+fail_on_revert = false
+shrink_run_limit = 20000
 
 [rpc_endpoints]
 # The chains' documented public endpoints. Fine for broadcasting and for reading the head, but they

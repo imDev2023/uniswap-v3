@@ -3,7 +3,20 @@
   "framework": "foundry",
   "attestations": {},
   "waivers": {},
-  "evidence": {},
+  "evidence": {
+    "slither": {
+      "clean": true,
+      "summary": "exit 0 under fail_on: medium. 15 results, all below the bar: 9 low, 6 informational, none suppressed. The 14 that were medium-or-above on 2026-08-06 (3 high, 11 medium) are triaged INLINE at each site in src/ with the reason - never in a triage database, so a reviewer sees the suppression next to the code it excuses. Reproduce with: cd contracts && slither . --config-file slither.config.json",
+      "recorded": "2026-08-07",
+      "recorded_by": "#40, local run. WARNING: this file is the gate's only source for this item - check_tool_ran_clean reads the record and never runs the tool. #40 briefly recorded 'clean' here while slither actually exited 255, because a comment inserted between a slither-disable-next-line directive and its function silenced the directive instead of the finding. Re-run the command above rather than trusting this entry."
+    },
+    "forge-invariant": {
+      "clean": true,
+      "summary": "7 invariants pass, 0 fail. Six in OctopusInvariantsTest (conservation, solvency, accessControl, roundingDirection, privilegedCallsSucceedForTheRightCaller, extendProbeTargetsARealLock) at 64 runs x 64 depth = 4,096 calls each, plus multiplierConventionsAgree in Erc8056ExposureTest. Each property has been SEEN RED against a deliberately broken state (the test_*Fires* block), and campaign coverage is asserted separately by test_handlerExercisesEveryPath because afterInvariant can only speak for one run. Reproduce with: cd contracts && forge test --match-test invariant_",
+      "recorded": "2026-08-07",
+      "recorded_by": "#40, local run. Needs no RPC secrets: the campaign deliberately does not fork."
+    }
+  },
   "exclude_paths": [
     "src/vendor/"
   ]

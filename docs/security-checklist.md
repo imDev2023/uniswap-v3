@@ -63,6 +63,69 @@ The AMM itself is unmodified Uniswap V3 deployed byte-for-byte from audited arti
 | Every privileged change is future-only | ✅ Every curve, lock and vesting parameter is frozen per launch at `createLaunch`, so no in-flight launch changes under a trader. Two exceptions, both documented: `setPoolProtocolFee` and `setInactivityPeriod` |
 | Retroactive levers minimised | ⚠️ Two remain. `setInactivityPeriod` is **monotonic (lengthen-only)** so it can only move in a creator's favour. `setPoolProtocolFee` is genuinely retroactive on a live pool and is the residual risk we accept |
 
+## Actors, roles and privileges
+
+The complete enumeration, written for #41's `arch-actors` attestation.
+There are **six actors** and **one role**.
+Only the first is a role in the access-control sense; the other five are authorised by **identity** - a stored address, checked with a bare `msg.sender` comparison.
+
+`LaunchpadFactory` is the only contract that holds a role of its own: a single owner, via `Ownable2Step`.
+The other three contracts hold none - each derives authority by reading `launchpad.owner()` live, which is why there is no second owner to rotate and no way for the two to drift apart.
+**Treasury is a destination, not a caller**: no code path authorises anything on the strength of `msg.sender == treasury`.
+
+| Actor | Who it is | Can call | Explicitly cannot |
+| --- | --- | --- | --- |
+| **Owner** | `Ownable2Step` on `LaunchpadFactory`. ⚠️ On testnet this is still the deployer EOA - see [the open attestations](#the-40-attestations-41) | `setCreationFee`, `setTreasury`, `setCurveParams`, `setLockParams`, `setMaxDevAllocationBps`, `setVestingDuration`, `setProtocolFee`, `setPoolProtocolFee`; `LPLock.setInactivityPeriod` (monotonic); `transferOwnership` / `renounceOwnership` | Touch locked LP principal, a vesting grant, a curve's reserves, or any user's tokens. Change any term of a launch that already exists, with the two exceptions below |
+| **Launch creator** | `creatorOf[token]`, frozen at `createLaunch` | `LPLock.extend` (monotonic, own launch only); `DevVesting.claim` is *for* them but is permissionless, since the destination is stored rather than passed | Shorten a lock. Mint, or reach any token beyond their own vested carve. Exempt themselves from the anti-snipe cap (`test_Cap_CreatorHasNoExemption`) |
+| **GraduationManager** | A contract `CREATE`d in the factory's constructor | `LPLock.registerLock`, `LaunchpadFactory.applyProtocolFee` | Anything else. Both callees check `msg.sender` against the factory's own record of it |
+| **BondingCurve** | One per launch, `CREATE`d by `createLaunch` | `GraduationManager.graduate` **only**, and only for its own token - `GraduationManager.sol:104` checks `msg.sender == launchpad.curveOf(token)` | Anything else. ⚠️ Listed because this is the single call that moves **100% of a launch's raise**; a curve that could call it for another launch's token would be the whole exploit |
+| **LaunchpadFactory** | The factory itself, calling into its own constructor-created contracts | `DevVesting.registerGrant` **only** (`DevVesting.sol:148` checks `msg.sender == launchpad`) | Anything else. It is not privileged on `LPLock`: `registerLock` is GraduationManager's, not the factory's |
+| **Anyone** | Unauthenticated | `createLaunch`, `buy`, `sell`, `LPLock.collect`, `LPLock.reclaim`, `LaunchpadFactory.collectProtocolFees`, `DevVesting.claim` | Redirect any of it. Every permissionless function has **fixed destinations**: `collect` pays only treasury and the launch creator, `reclaim` burns and pays only treasury, `claim` pays only the stored creator, `collectProtocolFees` pays only treasury. None takes a recipient parameter |
+
+**No address holds unrelated roles.**
+The owner and the treasury are separate configurable addresses and nothing requires them to be the same; `GraduationManager`'s authority is a single call each into two contracts; a creator's authority never extends past their own launch.
+
+⚠️ **The two retroactive exceptions**, repeated here because this table is where someone will look for them: `setPoolProtocolFee` changes a live pool's economics with no delay, and `setInactivityPeriod` is read live at reclaim time rather than frozen per position. Both are in [Deliberate omissions](#deliberate-omissions).
+
+### Reentrancy and CEI: the exact scope
+
+🔴 **`cf-nonreentrant` and `cf-cei` are UNANSWERED, not attested.**
+Both were attested during #41 with a scope narrower than the item's wording, and the #41 review removed them.
+The gate asks for `nonReentrant` "on **every** external state-mutating entry point" and CEI "in **every function without exception**"; neither is literally true here, and an attestation cannot say so - any non-empty string prints `PASS`.
+The scope below is what is actually true, and it is recorded here precisely because the gate has no state that can hold it.
+
+`nonReentrant` (OpenZeppelin v5, `uint256 _status`) is on these 7 entry points:
+
+`BondingCurve.buy`, `BondingCurve.sell`, `GraduationManager.graduate`, `LaunchpadFactory.createLaunch`, `LPLock.collect`, `LPLock.reclaim`, `DevVesting.claim`.
+
+It is **not** on the other 17 external state-mutating entry points, enumerated below by grep over `src/` rather than from memory:
+
+| Contract | Functions | Caller | Outbound call? |
+| --- | --- | --- | --- |
+| `LaunchpadFactory` | `setCreationFee`, `setTreasury`, `setCurveParams`, `setLockParams`, `setMaxDevAllocationBps`, `setVestingDuration`, `setProtocolFee` | owner | no |
+| `LaunchpadFactory` (inherited) | `transferOwnership`, `acceptOwnership`, `renounceOwnership` | owner / pending owner | no |
+| `LPLock` | `registerLock` | `GraduationManager` only | no |
+| `LPLock` | `extend` | launch creator only | no |
+| `LPLock` | `setInactivityPeriod` | owner only | no |
+| `DevVesting` | `registerGrant` | factory only | no |
+| ⚠️ `LaunchpadFactory` | `setPoolProtocolFee` | owner | **yes** - `setFeeProtocol` on a caller-supplied pool |
+| ⚠️ `LaunchpadFactory` | `applyProtocolFee` | `GraduationManager` only | **yes** - `setFeeProtocol` on a caller-supplied pool |
+| 🔴 `LaunchpadFactory` | `collectProtocolFees` | **permissionless** | **yes** - `collectProtocol`, which **moves value** |
+
+⚠️ **The last three rows are why `cf-nonreentrant` could not honestly be attested**, and the other 14 functions are why it looked as though it could.
+Those 14 are all single-caller access-controlled and write only their own storage with no outbound call of any kind.
+The final three each call `IUniswapV3Pool` - a contract this protocol does not author - at an address the caller supplies, and `collectProtocolFees` has no access control at all.
+None of the three writes storage of its own, so there is nothing for a re-entrant call to corrupt, and `collectProtocol`'s destination is the stored `treasury` rather than a parameter; the V3 pool is also behind its own `lock` modifier.
+That is an argument for why the omission is *safe*, not an argument that the item's claim is *true* - which is exactly the distinction the gate cannot record.
+
+⚠️ **The one CEI exception is `BondingCurve.sell`**, which pulls the seller's tokens with `safeTransferFrom` *before* writing reserves.
+It is unavoidable - the amount received is what the effects are computed from - and the callee is `LaunchToken`, a factory-minted OpenZeppelin ERC-20 with no transfer hooks, behind `nonReentrant`.
+Every other function writes all state before any outbound transfer, and the ordering is mutation-tested in `SameBlockRaces.t.sol`.
+
+⚠️ Adding `nonReentrant` is **not** a free change: #38 put it on `createLaunch`, which meant inheriting `ReentrancyGuard`, whose `_status` occupies a full slot laid out *before* every variable declared in `LaunchpadFactory`.
+The packed owner-param group moved from slot 12 to 13.
+Re-read `forge inspect <C> storageLayout` after any edit to an inheritance list.
+
 ## Testing and quality assurance
 
 SlowMist requires **>95% unit test coverage, 100% on core code**. Measured with `forge coverage --ir-minimum`, `contracts/src/` only:
@@ -73,11 +136,14 @@ SlowMist requires **>95% unit test coverage, 100% on core code**. Measured with 
 | `GraduationManager` | 100% | 100% | **100%** | 100% |
 | `LaunchToken` | 100% | 100% | **100%** | 100% |
 | `LPLock` | 97.80% | 99.19% | **100%** | 92.31% |
-| `LaunchpadFactory` | 98.08% | 98.35% | 95.65% | 100% |
+| `LaunchpadFactory` | 98.15% | 98.39% | 95.65% | 100% |
 | `BondingCurve` | 98.99% | 96.40% | **56.00%** | 100% |
 
 ⚠️ **`BondingCurve`'s branch figure is the one number here that does not meet the bar, and it is reported rather than explained away.**
-Every remaining uncovered branch is enumerated below with the reason. Three are a coverage-tool limitation, two are deliberately unreachable safety nets, and three are genuinely uncovered:
+Every remaining uncovered branch is enumerated below with the reason.
+Five are a coverage-tool limitation (three constructor `require`s that a rolled-back `CREATE` leaves no trace of, plus both `if (crossing)` sites, whose two sides are each exercised across the suite).
+Two are deliberately unreachable safety nets.
+**Exactly one is genuinely uncovered**, `BondingCurve.sol:192`, and it is the only one `v-coverage` is waiting on:
 
 | Line | Branch | Why uncovered |
 | --- | --- | --- |
@@ -134,7 +200,7 @@ That means a green gate on those two is only ever as honest as the last person t
 #40 briefly recorded `"clean": true` for Slither while Slither actually exited 255 - see the note on `disable-next-line` below.
 Re-run both tools rather than trusting the record.
 
-⚠️ **40 items remain unanswered.** They are attestations needing a human decision, not code, and they are **not blocking yet** - the gate lists them every run. Nothing here should be read as "the checklist is complete".
+⚠️ **28 of the 40 attestations were answered in #41; 12 remain open.** See [The 40 attestations](#the-40-attestations-41) below. They are **not blocking yet** - the gate lists them every run. Nothing here should be read as "the checklist is complete".
 
 ### ERC-8056: the one item where the template did not fit
 
@@ -192,6 +258,50 @@ Consequences, both real:
 
 - Re-verifying the **currently deployed** testnet contracts on Blockscout needs the source as of `0bfa951`, not this tree. The deployment itself is unaffected; addresses and receipts are in [`deployments-testnet.md`](deployments-testnet.md).
 - An explicit-zero initialisation is **not** reliably bytecode-neutral. It was in `LPLock.collect` and was not in `BondingCurve.buy`. Measure per site rather than assuming a rule about the optimizer.
+
+## The 40 attestations (#41)
+
+The gate's other 40 items are **attestations**: claims made in the project's name that the tool records but never verifies.
+#41 answered 25 of them and deliberately left 15 open.
+The gate now reads **`pass 45, fail 0, unanswered 15, waived 0`**.
+
+⚠️ **Read this before adding one.** `check.py:547` gives each item exactly three states, and **any non-empty string under `attestations` prints `PASS`** - the text is never inspected, only truncated to 100 characters for display.
+There is no "no, and here is why" state.
+So writing the honest negative answer for an item we do not satisfy turns it **green forever**, which is strictly worse than leaving it unanswered: the gate stops listing it and nobody looks again.
+The only honest non-green record is a `waiver`, and `waived 0` is a deliberate property of this position.
+
+The rule #41 adopted, and the one to keep: **attest only when the item's literal claim is true of this codebase, or when the item is vacuous** - and say which, in the attestation text itself.
+Nine of the 25 are vacuous (no oracle, no signature scheme, no proxy, no loops, no multicall) and each says so and cites how the absence was *proven* rather than assumed.
+
+⚠️ **#41 broke its own rule three times, and its code review caught it.**
+`cf-nonreentrant`, `cf-cei` and `ops-postdeploy` were each answered with a string that *opens by conceding the item is not met* - "⚠️ SCOPED, not universal", "Yes, with ONE stated exception", "⚠️ A RUNBOOK, NOT A SCRIPT".
+Each of those printed `PASS`.
+They are the same class as `arch-circuit-breaker`, which #41 had already left unanswered for exactly this reason, and they are now unanswered too.
+The lesson is that the rule is hardest to follow on the items you are *closest* to satisfying: a 95%-true claim feels attestable in a way a 0%-true claim never does, and the gate renders both identically.
+
+### The 15 still open, and what each is waiting on
+
+| Item | Why it is open | What would close it |
+| --- | --- | --- |
+| `arch-multisig` | Testnet owner is the deployer EOA | A real Safe. **Mainnet item** (settled decision 12) - a lead-time item on the user's clock |
+| `arch-value-cap` | No cap has been decided, and mainnet has never been deployed | A decision on the initial-period cap, before the first mainnet deploy |
+| `arch-circuit-breaker` | ❌ **Declined, not missing.** There is no pause and there will not be one - see [Deliberate omissions](#deliberate-omissions) | Nothing. Attesting it would claim a breaker exists. Left unanswered *because* the decision was made, which is the honest encoding of a decline in a schema with no "declined" state |
+| `cf-nonreentrant` | ⚠️ **True of 7 entry points, not of "every" one.** Three unguarded functions call `IUniswapV3Pool` at a caller-supplied address and one of them, `collectProtocolFees`, is permissionless and moves value - see [the exact scope](#reentrancy-and-cei-the-exact-scope) | Either a guard on those three, or acceptance that the item's literal claim will never be true here. The safety argument is written out; it is not the same as the claim |
+| `cf-cei` | ⚠️ **True of every function except one.** `BondingCurve.sell:277` pulls the seller's tokens before writing reserves, because the amount received is what the effects are computed from | Nothing available. The exception is structural, and the item admits no exceptions. Documented at the site and mutation-tested in `SameBlockRaces.t.sol` |
+| `cf-pull-over-push` | ⚠️ **Genuinely not satisfied.** Value is pushed in three of four places: `BondingCurve._sendEth` for the trade fee, the crossing-buy refund and sell proceeds; `LPLock._payOut` and `reclaim` push ERC-20s to treasury and creator. Only `DevVesting.claim` is pull. The sharpest consequence: a treasury that rejects ETH would revert **every buy and sell on every curve** | A decision. Either accept it (the pushed destinations are all protocol-controlled or the caller itself) or add a withdrawal ledger. Not a documentation gap |
+| `oracle-slippage` | ⚠️ **Partially, and the gap is deadlines.** `buy(minTokensOut)` and `sell(_, minEthOut)` both have real user-supplied bounds, pinned by `SlippageBuy`/`SlippageSell`. But **no function anywhere takes a deadline** - `GraduationManager.sol:149` and `LPLock.sol:379` both pass `deadline: block.timestamp`, which is the canonical no-op, and both pass `amount0Min: 0, amount1Min: 0` | A decision on deadlines for `buy`/`sell`. The two zero-slippage mints are separately justified at their sites (graduation is calibrated; reclaim burns rather than sells) but the deadlines are not |
+| `q-dead-code` | One unused declaration: `Constants.USDG`. **Measured, not assumed**: deleting it changes `GraduationManager`'s deployed bytecode and `LaunchpadFactory`'s with it (`LPLock` and `DevVesting` are untouched - they do not import `Constants`), by the metadata-hash mechanism above | Removing it, in a ticket that is *allowed* to move deployed bytecode. #41 is not one, and neither was #40 |
+| `v-coverage` | `BondingCurve` branch coverage is **56%** - reported in full under [Testing and quality assurance](#testing-and-quality-assurance) with every uncovered branch enumerated. Lines are 98-100% everywhere; branches are not | Covering the crossing-buy clamp at `BondingCurve.sol:192`, the one genuinely-uncovered branch. The rest are tool limitations or unreachable safety nets |
+| `v-audit` | No external audit yet | The audit. **It comes last**, after the project is complete and self-tested |
+| `v-bounty` | No bug bounty | Blocked behind hosting, which is blocked on key protection |
+| `ops-postdeploy` | ⚠️ **A runbook, not a script.** `docs/deploy.md` steps 4-7 are the post-deployment verification and were executed end to end on 2026-08-06 (#38), with the step-3 calibration values pinned against the contract by `test/Calibration.t.sol`. But the item asks for a *script*, and nothing runs these checks unattended | Automating steps 4-7. Same gap as `ops-monitoring`, and blocked behind nothing but the work |
+| `ops-runbook` | No incident-response runbook and no drill. `docs/deploy.md` is a *deploy* runbook and `subgraph/README.md` has reorg-deadlock recovery, but neither is incident response for the contracts | Writing one. ⚠️ Constrained by there being no pause: the honest runbook is mostly communication, since a live exploit cannot be contained on-chain |
+| `ops-monitoring` | `scripts/indexer-health.mjs` exists and **nothing runs it** | Wiring it to something that alerts. Stage 4 |
+| `ops-contact` | No published security contact | A published address, which needs hosting or at least a repository `SECURITY.md` |
+
+Four of these - `cf-pull-over-push`, `oracle-slippage`, `q-dead-code` and `v-coverage` - were **not** on the list of expected gaps when #41 started.
+They came out of reading the source against each item rather than against the plan.
+`oracle-slippage` in particular sits in the oracle section and would have been swept up with "we read no price oracle"; it is not about oracles.
 
 ## Gas optimisation (WTF)
 

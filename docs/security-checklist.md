@@ -371,8 +371,9 @@ The open items that SlowMist calls out and we have **not** done:
 
 - ⚠️ **RPC key protection: closed in the code, still open at the host.** See [RPC key protection](#rpc-key-protection) below for what now holds and what does not.
 - **No monitoring is wired.** `scripts/indexer-health.mjs` exists; nothing runs it.
-- **No frontend hosting, so no HSTS, CSP, SRI or security headers** are configured yet.
-  All of SlowMist's frontend-hardening section is unaddressed and will be when hosting is chosen.
+- **No frontend hosting deployed, so no HSTS, CSP, SRI or security headers** are configured yet.
+  All of SlowMist's frontend-hardening section is unaddressed.
+  The host was **chosen** on 2026-08-10 - **Cloudflare Pages** - but nothing has been built, so this line stays open until a `_headers` file exists and is served.
 - **No incident-response process, no drills, no published contact.**
 
 ⚠️ These are genuine gaps, not deferrals-in-name-only.
@@ -409,8 +410,11 @@ That is a per-visitor recurring cost, invisible from our side, and it survives r
   It is open to anyone who can reach the site, so the exposure moves from "the key can be spent anywhere" to "our origin can be used as an RPC".
   Only the second is fixable after the fact, which is why it is the better position, not a solved problem.
 - **Production still has no `/rpc`.** Vite serves that path in `dev` and in `preview`; a deployed static host does not.
-  Until hosting is chosen and the path is served, a production build must either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
+  The host was chosen on 2026-08-10 (**Cloudflare Pages**, whose Pages Functions can serve the path), but nothing is built, so this remains true today.
+  Until the path is actually served, a production build must either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
   That flag downgrades the build failure to a warning and never silences it, because a provider-side allowlist is something this build cannot verify.
+  ⚠️ Note the split the deployment has to get right: `VITE_RPC_PROXY_PATH` is inlined at **build** time and so belongs in the build environment, while `RPC_UPSTREAM_URL` is read by whatever answers the path at **run** time and must not be a build variable.
+  `frontend/.env.example` documents both halves.
 - **A domain allowlist is Referer-based** and a non-browser client can set any Referer it likes.
   It reduces casual abuse. It is not authentication.
 

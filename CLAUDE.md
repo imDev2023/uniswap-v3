@@ -33,7 +33,8 @@ Architecture decisions are GitHub issue [#1](https://github.com/imDev2023/uniswa
 
 One ticket per branch, `build/<NN>-<slug>`, branched from `main`.
 Implement plus tests at the fork-test seam, keep the suite green, run `/code-review` (two axes) against `main`, apply findings, merge.
-Builds #12-#40 are merged; **#41 is done but uncommitted and unreviewed**. #26-#29 and #33-#41 were scoped in-session and have no issues of their own.
+Builds #12-#40 are merged; **#41 is committed and reviewed on `build/41-attestations` (`dbae97b`), not yet merged**. #26-#29 and #33-#41 were scoped in-session and have no issues of their own.
+⚠️ **The GitHub tracker does not record any of this.** Issues #12-#21 are ten finished builds still open and labelled `ready-for-agent`, and the map (#1) is a completed *planning* artifact from 2026-07-17 that links to the wrong repo and states three decisions this project has since reversed. Do not read either as current. `.session-prompts/` is the real handoff record.
 
 ## Current state
 
@@ -41,14 +42,14 @@ Builds #12-#40 are merged; **#41 is done but uncommitted and unreviewed**. #26-#
 
 ✅ **#39 and #40 are MERGED** into `main` at `f1ea598` (2026-08-08, fast-forward, linear history). #40's gate work - the table, every recorded suppression, the ERC-8056 reasoning - is in [`docs/security-checklist.md`](docs/security-checklist.md#the-evm-security-gate-40).
 🔴 **NOTHING HAS EVER BEEN PUSHED and CI HAS NEVER RUN.** `origin/main` is `aaf5ed0`, ~10 commits behind local `main`, and `.github/workflows/evm-security.yml` does not exist on GitHub at all - the only workflows there are `forge-std`'s own vendored ones. So there is no red X and there cannot be one until a first push. ⚠️ At that moment the `test` job needs `RPC_MAINNET_ARCHIVE_URL` and `RPC_TESTNET_ARCHIVE_URL` as **repository secrets**, because `contracts/.env` is gitignored and a runner never sees it. Every other job (lint, build, invariants, slither, gate) needs no secrets.
-✅ **#41 answered 25 of the gate's 40 attestations** on 2026-08-09 and was reviewed the same day, leaving it at **`pass 45, fail 0, unanswered 15, waived 0`**. Contracts untouched - the ticket is `contracts/.evm-standards.json` plus [`docs/security-checklist.md`](docs/security-checklist.md#the-40-attestations-41), which gained an actor/privilege matrix, the exact `nonReentrant`/CEI scope, and a table of the 15 still open. ⚠️ **Uncommitted.** The review deleted three attestations that answered the item's literal claim in the negative and therefore printed `PASS` anyway (`cf-nonreentrant`, `cf-cei`, `ops-postdeploy`), and corrected eight counts that did not survive re-derivation from the source - the enumerations in `cf-nonreentrant`, `cf-readonly-reentrancy`, `arith-safecast`, `arith-mul-before-div`, `q-events`, `v-fork-tests` and `arch-actors` were all wrong. Seven of the 15 open items were **not** expected gaps: the three above plus `cf-pull-over-push`, `oracle-slippage` (no function anywhere takes a deadline), `q-dead-code` and `v-coverage`. Reasons and what would close each are in the doc; the mechanic that makes this dangerous is under Traps.
+✅ **#41 answered 25 of the gate's 40 attestations and was reviewed the same day** (2026-08-09), committed on `build/41-attestations` at `dbae97b` and **not merged**. Gate reads `pass 45, fail 0, unanswered 15, waived 0` - verify it rather than trusting this line. No Solidity changed. The review deleted three attestations that conceded the item in their own opening words while still printing `PASS`, and corrected eight enumerations that failed re-derivation from source. What is open, why, and what would close each: [`docs/security-checklist.md`](docs/security-checklist.md#the-40-attestations-41). Why a green attestation is dangerous at all is under Traps.
 🔴 **Contracts are NOT frozen** (ended 2026-08-02, deliberately). They match [`docs/tokenomics.md`](docs/tokenomics.md) on testnet; mainnet 4663 has never been deployed.
 ⚠️ **`frontend/.env.local` is gitignored** and now points at the new deployment. Those addresses exist on this machine only - a fresh clone has to re-derive them from `docs/deployments-testnet.md`.
 ⚠️ **This board carries TWO calibrations on purpose**, because `setCurveParams` is future-only. Never read a launch's calibration off the factory's current values.
 ⚠️ **The tokenomics defaults need NO setter calls at deploy** - a fresh factory already reads 5% max carve, 365-day lock, 30-day vesting, 7000 bps. Only `setCurveParams` is a deploy step, because the code default is the 10 ETH mainnet target.
 
 **Suites** (verify, do not trust): `forge test` (210, measured 2026-08-09), `cd subgraph && npm test` (36), `cd frontend && npm test` (439) plus `tsc -b` and `vite build`.
-Plus, since #40: `cd contracts && python3 lib/evm-security-standards/gate/check.py --project .`, `forge fmt --check`, and `npx solhint --config .solhint.json --max-warnings 0 'src/**/*.sol'` - all three now clean and all three run in CI.
+Plus, since #40: `cd contracts && python3 lib/evm-security-standards/gate/check.py --project .`, `forge fmt --check`, and `npx solhint --config .solhint.json --max-warnings 0 'src/**/*.sol'` - all three clean locally on 2026-08-09. ⚠️ They are *configured* in the workflow, which has **never executed** - see the push line above. Also re-run Slither by hand (`slither . --config-file slither.config.json`, exit 0 / 15 results on 2026-08-09): the gate reads a stored record and never runs the tool.
 
 
 ---
@@ -93,7 +94,7 @@ Full reasoning is in [`docs/tokenomics.md`](docs/tokenomics.md#settled-decisions
 
 ~9 tickets, estimates and confidence in [`docs/de-risking-probe.md`](docs/de-risking-probe.md). Nothing is blocked on the redeploy any more.
 
-⬅️ **Next: nothing is queued.** #41 is done (uncommitted, pending review). The critical path is still Stage 4's **key protection**, which blocks every public deploy and therefore blocks hosting, which in turn blocks SlowMist's frontend hardening. Stage 3's mobile-wallet gap is the largest user-facing hole.
+⬅️ **Next: merge #41, then choose.** #41 is reviewed and committed; the two live candidates are issue [#22](https://github.com/imDev2023/uniswap-v3/issues/22) (guard or accept the three unguarded protocol-fee functions - the first `contracts/src` change since the testnet deploy) and Stage 4's **key protection**, which is still the critical path: it blocks every public deploy, which blocks hosting, which blocks SlowMist's frontend hardening. Stage 3's mobile-wallet gap is the largest user-facing hole.
 
 **Stage 3 (frontend), still open:** **no search, no pagination, no address lookup** past `BOARD_PAGE_SIZE = 50`; ⚠️ **injected-only wallets, so mobile cannot connect at all**, and no picker, so two extensions means whichever wagmi lists first.
 ✅ Closed by #37: the hardcoded `permanentLock: false` / `devAllocationBps: 0`, create-flow URI validation, the name `maxLength` mismatch, and the Curve Position relabel. Keep this line: a Stage-3 item that vanishes without one reads later as work nobody did.

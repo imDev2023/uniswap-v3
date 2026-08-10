@@ -9,7 +9,12 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    // vite.config.ts really is Node code: it reads process.env, parses URLs and logs. Declaring
+    // that is more honest than adding "DOM" to the lib list, which would claim a browser exists in
+    // the build process. tsconfig.app.json pins its own `types`, so nothing Node-shaped leaks into
+    // the application's type environment.
+    "types": ["node"]
   },
-  "include": ["vite.config.ts", "vitest.config.ts"]
+  "include": ["vite.config.ts", "vitest.config.ts", "build"]
 }

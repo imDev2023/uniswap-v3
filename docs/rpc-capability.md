@@ -290,6 +290,11 @@ That is far too slow to be a primary but adequate as a failover target, which is
 Note that both `VITE_RPC_URL` and `VITE_RPC_URL_2` ship inside the browser bundle and therefore cannot hold a secret.
 Any metered key needs domain allowlisting or a proxy.
 
+✅ **The proxy is the route that was built** (2026-08-10).
+The credential moved to `RPC_UPSTREAM_URL`, which has no `VITE_` prefix and so cannot be inlined, and the app calls `VITE_RPC_PROXY_PATH` on its own origin.
+`npm run build` now fails on a credential-shaped URL in the output.
+Details and the limits of what that buys: [`docs/security-checklist.md`](security-checklist.md#rpc-key-protection).
+
 ### Alchemy - measured 2026-08-01, and the account now exists
 
 An Alchemy key is present in `contracts/.env` as `ALCHEMY_API_KEY` / `ENDPOINT_URL`.
@@ -323,7 +328,8 @@ graph-node scans in 1000-block ranges, so **Alchemy's free tier cannot back the 
 | **Fork tests** (forge) | archive state at a pinned block | **Alchemy** - this removes the ~5,000-block ceiling |
 
 ✅ **Both halves of that split are now WIRED (build #32).**
-The frontend's `VITE_RPC_URL` points at the Alchemy testnet URL in `frontend/.env.local`, with the public endpoint arriving automatically as the last resort.
+The frontend reaches Alchemy through the same-origin proxy, with the public endpoint arriving automatically as the last resort.
+⚠️ As of 2026-08-10 the keyed URL lives in `RPC_UPSTREAM_URL`, **not** `VITE_RPC_URL` - a `VITE_` prefix publishes it (see [key protection](security-checklist.md#rpc-key-protection)).
 `frontend/.env.example` records the decision, since `.env.local` is gitignored and would otherwise leave a fresh clone reproducing the pre-#32 state.
 Every fork test is pinned and forks from `robinhood_archive` / `robinhood_testnet_archive` (`contracts/foundry.toml`, `contracts/test/ForkConfig.sol`).
 The indexer is untouched and stays on the public endpoint, for the reason in the table.
@@ -397,7 +403,7 @@ It is now conditional on what was measured: when no sampled depth is unreliable,
 ## How the frontend consumes two endpoints
 
 `frontend/src/lib/wagmi.ts` wires the resolved endpoint list into viem's `fallback` transport.
-`frontend/src/lib/rpcEndpoints.ts` owns the ordering as a pure function: `VITE_RPC_URL`, then `VITE_RPC_URL_2`, then the chain's documented public endpoint, deduplicated.
+`frontend/src/lib/rpcEndpoints.ts` owns the ordering as a pure function: the same-origin proxy, then `VITE_RPC_URL`, then `VITE_RPC_URL_2`, then the chain's documented public endpoint, deduplicated.
 
 The public endpoint is always appended as a last resort.
 It is rate limited and Robinhood states it is unsuitable for production, but RPC is the one dependency with no degraded mode, and a throttled app beats a dead one.

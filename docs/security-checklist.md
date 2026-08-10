@@ -293,7 +293,7 @@ The lesson is that the rule is hardest to follow on the items you are *closest* 
 | `q-dead-code` | One unused declaration: `Constants.USDG`. **Measured, not assumed**: deleting it changes `GraduationManager`'s deployed bytecode and `LaunchpadFactory`'s with it (`LPLock` and `DevVesting` are untouched - they do not import `Constants`), by the metadata-hash mechanism above | Removing it, in a ticket that is *allowed* to move deployed bytecode. #41 is not one, and neither was #40 |
 | `v-coverage` | `BondingCurve` branch coverage is **56%** - reported in full under [Testing and quality assurance](#testing-and-quality-assurance) with every uncovered branch enumerated. Lines are 98-100% everywhere; branches are not | Covering the crossing-buy clamp at `BondingCurve.sol:192`, the one genuinely-uncovered branch. The rest are tool limitations or unreachable safety nets |
 | `v-audit` | No external audit yet | The audit. **It comes last**, after the project is complete and self-tested |
-| `v-bounty` | No bug bounty | Blocked behind hosting, which is blocked on key protection |
+| `v-bounty` | No bug bounty | Blocked behind hosting. ⚠️ No longer blocked behind key protection, which closed in the code on 2026-08-10 - see [RPC key protection](#rpc-key-protection) |
 | `ops-postdeploy` | ⚠️ **A runbook, not a script.** `docs/deploy.md` steps 4-7 are the post-deployment verification and were executed end to end on 2026-08-06 (#38), with the step-3 calibration values pinned against the contract by `test/Calibration.t.sol`. But the item asks for a *script*, and nothing runs these checks unattended | Automating steps 4-7. Same gap as `ops-monitoring`, and blocked behind nothing but the work |
 | `ops-runbook` | No incident-response runbook and no drill. `docs/deploy.md` is a *deploy* runbook and `subgraph/README.md` has reorg-deadlock recovery, but neither is incident response for the contracts | Writing one. ⚠️ Constrained by there being no pause: the honest runbook is mostly communication, since a live exploit cannot be contained on-chain |
 | `ops-monitoring` | `scripts/indexer-health.mjs` exists and **nothing runs it** | Wiring it to something that alerts. Stage 4 |
@@ -369,7 +369,7 @@ Curve pricing is a closed-form function of the curve's own immutable reserves.
 Out of scope for the contracts, tracked in `CLAUDE.md`'s Stage 4 list.
 The open items that SlowMist calls out and we have **not** done:
 
-- 🔴 **The RPC key ships verbatim in the browser bundle.** Domain allowlisting or a proxy is required before any public deploy.
+- ⚠️ **RPC key protection: closed in the code, still open at the host.** See [RPC key protection](#rpc-key-protection) below for what now holds and what does not.
 - **No monitoring is wired.** `scripts/indexer-health.mjs` exists; nothing runs it.
 - **No frontend hosting, so no HSTS, CSP, SRI or security headers** are configured yet.
   All of SlowMist's frontend-hardening section is unaddressed and will be when hosting is chosen.
@@ -377,3 +377,46 @@ The open items that SlowMist calls out and we have **not** done:
 
 ⚠️ These are genuine gaps, not deferrals-in-name-only.
 They are listed here so the audit conversation covers the deployment surface and not only the bytecode.
+
+### RPC key protection
+
+Two separate leaks came from one cause, and both were measured on this repo's own build rather than reasoned about.
+
+**The cause.** Vite inlines every `VITE_*` value into the emitted JavaScript.
+`VITE_RPC_URL` therefore is not configuration, it is publication.
+A production build made on 2026-08-10 contained the Alchemy URL and its 32-character key as a plaintext literal in `dist/assets/index-*.js`.
+
+**Leak 1, the bundle.** Anyone opening the site could read the key and spend it anywhere.
+
+**Leak 2, the wallet, which is worse and was not the one being tracked.**
+wagmi's injected connector builds its `wallet_addEthereumChain` request as `rpcUrls = [chain.rpcUrls.default.http[0]]`, and that first entry was `VITE_RPC_URL`.
+So MetaMask did not merely *display* the key, which is what build #38 observed.
+It **stored** it as that visitor's endpoint for the network, after which the visitor's own wallet traffic ran through our key for as long as the network entry survived.
+That is a per-visitor recurring cost, invisible from our side, and it survives rotating the bundle.
+
+**What now holds, in code:**
+
+| Mechanism | Where | What it guarantees |
+| --- | --- | --- |
+| The credential lives in `RPC_UPSTREAM_URL`, with no `VITE_` prefix | `frontend/vite.config.ts` | Vite cannot inline it. The prefix is the whole boundary, so removing it is the fix. |
+| The app calls a same-origin path, `VITE_RPC_PROXY_PATH` | `frontend/src/config/chain.ts` | The browser learns an origin it was already talking to, and nothing else. An absolute URL is also accepted, for a proxy on a separate origin; that case is not same-origin and needs CORS headers on the proxy. |
+| The chain object offers the wallet the **public** endpoint only | `frontend/src/config/chain.ts`, `walletRpcUrlsFor` | Closes leak 2 outright, independent of hosting. Four tests in `chain.test.ts` fail if the two lists are ever unified again. |
+| The build **fails** on a credential-shaped URL in the output | `frontend/build/bundleCredentialGuard.ts` | The protection cannot be silently undone by a `.env.local` copied from another machine. It runs in `generateBundle`, so a leaking build writes no `dist` at all. |
+
+**What does not hold, and is honest to state:**
+
+- A proxy is **not** a boundary against use, only against theft.
+  It is open to anyone who can reach the site, so the exposure moves from "the key can be spent anywhere" to "our origin can be used as an RPC".
+  Only the second is fixable after the fact, which is why it is the better position, not a solved problem.
+- **Production still has no `/rpc`.** Vite serves that path in `dev` and in `preview`; a deployed static host does not.
+  Until hosting is chosen and the path is served, a production build must either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
+  That flag downgrades the build failure to a warning and never silences it, because a provider-side allowlist is something this build cannot verify.
+- **A domain allowlist is Referer-based** and a non-browser client can set any Referer it likes.
+  It reduces casual abuse. It is not authentication.
+
+**The detection rule** is shape-based rather than a list of providers, because a provider list is out of date the first time somebody tries a provider nobody added to it, and its failure mode is silence.
+A URL is credential-shaped when a path segment is at least 20 characters of mixed letters and digits, or a query parameter named like a credential carries a value at least 12 characters of the same shape.
+Measured against this project's real production output - a 792 kB emitted bundle plus `index.html`, transformed from 4,788 modules including viem and wagmi: zero false positives.
+⚠️ The corpus is what Rollup **emits**, not what it reads, because the guard runs in `generateBundle`.
+Anything tree-shaken away was never scanned and says nothing about the rule.
+`findCredentials` redacts at the point of detection, so a build error cannot publish the key it caught to a terminal or to CI logs.

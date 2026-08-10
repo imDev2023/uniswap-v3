@@ -45,8 +45,10 @@ Copy `.env.example` to `.env.local` and fill in after the contracts + subgraph a
 | Var | Meaning |
 | --- | --- |
 | `VITE_CHAIN_ID` | `4663` (mainnet) or `46630` (testnet, default) |
-| `VITE_RPC_URL` | Preferred JSON-RPC endpoint. Optional; the chain's public RPC is always the last resort |
-| `VITE_RPC_URL_2` | Optional independent SECOND provider, tried only when the first fails |
+| `RPC_UPSTREAM_URL` | ⚠️ **No `VITE_` prefix, deliberately.** The keyed endpoint. Read only by `vite.config.ts`, never inlined into the bundle |
+| `VITE_RPC_PROXY_PATH` | Same-origin path the app sends RPC to, e.g. `/rpc`. Vite serves it in `dev` and `preview`; in production the HOST serves it |
+| `VITE_RPC_URL` | Preferred DIRECT endpoint. Optional; the chain's public RPC is always the last resort. **Public by construction - never put a key here** |
+| `VITE_RPC_URL_2` | Optional independent SECOND direct provider, tried only when the first fails. Public, exactly like `VITE_RPC_URL` |
 | `VITE_QUOTER_ADDRESS` | The platform's own `QuoterV2`. Optional; without it the swap page falls back to a labelled `slot0` estimate |
 | `VITE_WETH9_ADDRESS` | Canonical WETH9. Optional; selected per `VITE_CHAIN_ID`, since mainnet and testnet WETH9 differ |
 | `VITE_FACTORY_ADDRESS` | `LaunchpadFactory` address (see `docs/deploy.md`) |
@@ -56,19 +58,39 @@ Copy `.env.example` to `.env.local` and fill in after the contracts + subgraph a
 
 ### RPC endpoints and failover
 
-The two RPC vars are tried in strict order: `VITE_RPC_URL`, then `VITE_RPC_URL_2`, then the chain's
-documented public endpoint, deduplicated.
+Endpoints are tried in strict preference order: the proxy, then `VITE_RPC_URL`, then
+`VITE_RPC_URL_2`, then the chain's documented public endpoint, deduplicated.
 They are wired into viem's `fallback` transport with ranking off, so a healthy first endpoint serves
 every request and the others exist only for failure (`src/lib/wagmi.ts`).
 
-Setting `VITE_RPC_URL_2` matters more than it looks.
+Setting a second endpoint matters more than it looks.
 The official endpoint is a pool of nodes with differing history retention, so a historical read can
 miss on one provider and succeed on another - see `docs/rpc-capability.md`.
 A single endpoint cannot recover from that, because the error it returns is not one viem retries.
 
-> ⚠️ **Both RPC vars ship inside the browser bundle and cannot hold a secret.**
-> Every `VITE_`-prefixed value is baked into the built JS and is public.
-> Use a domain-allowlisted key or a proxy for anything metered.
+### Keeping the key out of the bundle
+
+> ⚠️ **Every `VITE_`-prefixed value is baked into the built JS and is public.**
+> `VITE_RPC_URL` and `VITE_RPC_URL_2` are publication, not configuration, and cannot hold a secret.
+
+Put the keyed endpoint in `RPC_UPSTREAM_URL` and set `VITE_RPC_PROXY_PATH=/rpc`.
+The browser then talks to `/rpc` on its own origin, and the server attaches the key on the way out.
+`vite.config.ts` serves that path in `dev` and in `preview`; **a deployed static host does not**, so
+production needs the host to serve it (a rewrite, an edge function or a reverse proxy).
+
+`npm run build` **fails** if a credential-shaped URL reaches the output
+(`build/bundleCredentialGuard.ts`).
+If a key is domain-allowlisted at the provider and shipping it is a deliberate decision, set
+`ALLOW_BUNDLED_RPC_CREDENTIAL=1`, which downgrades the failure to a warning and never silences it.
+
+Two things this does **not** buy, worth stating plainly:
+a proxy is open to anyone who can reach the site, so it protects the key from theft and not the
+quota from use; and a domain allowlist is Referer-based, which a non-browser client can forge.
+
+The wallet is a separate audience and is never offered any of this.
+`chain.rpcUrls.default` carries the public endpoint only, because wagmi hands its first entry to
+`wallet_addEthereumChain`, and MetaMask *stores* what it receives as the user's own endpoint for the
+network - see `src/config/chain.ts`.
 
 Until `VITE_FACTORY_ADDRESS` is a real address the app runs in **preview mode**: a banner shows and
 trading/creation are disabled instead of firing doomed calls.

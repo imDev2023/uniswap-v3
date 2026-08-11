@@ -369,12 +369,28 @@ Curve pricing is a closed-form function of the curve's own immutable reserves.
 Out of scope for the contracts, tracked in `CLAUDE.md`'s Stage 4 list.
 The open items that SlowMist calls out and we have **not** done:
 
-- ⚠️ **RPC key protection: closed in the code, still open at the host.** See [RPC key protection](#rpc-key-protection) below for what now holds and what does not.
+- ⚠️ **RPC key protection: closed in the code, BUILT for the host, and not yet deployed.** See [RPC key protection](#rpc-key-protection) below for what now holds and what does not.
 - **No monitoring is wired.** `scripts/indexer-health.mjs` exists; nothing runs it.
-- **No frontend hosting deployed, so no HSTS, CSP, SRI or security headers** are configured yet.
-  All of SlowMist's frontend-hardening section is unaddressed.
-  The host was **chosen** on 2026-08-10 - **Cloudflare Pages** - but nothing has been built, so this line stays open until a `_headers` file exists and is served.
+- ⚠️ **Frontend hardening is BUILT AND VERIFIED LOCALLY, and NOTHING IS DEPLOYED** (#43, 2026-08-11).
+  Cloudflare Pages was chosen on 2026-08-10; #43 built `frontend/functions/rpc.ts` for `/rpc`, `frontend/wrangler.jsonc`, and a **generated** `dist/_headers`.
+  HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `X-XSS-Protection: 0` are all set, and were verified against the running app under `wrangler pages dev` with zero CSP violations in the console.
+  **SRI is deliberately NOT implemented** - reasoning below.
+  ⚠️ This line stays open until a real deployment serves them, because "verified under `wrangler pages dev`" is not "verified in production": that is miniflare, not Cloudflare's edge, and the account, domain and secret are not yet in place.
 - **No incident-response process, no drills, no published contact.**
+
+### Subresource Integrity: declined, with reasons
+
+SlowMist asks for SRI. We do not implement it, and this is the argument rather than an oversight.
+
+Vite emits exactly two external subresources - one JS chunk and one stylesheet - and on Cloudflare Pages both are **same-origin, content-hashed, and served by the same host as the HTML that references them**.
+SRI exists to protect a document from a subresource it does not control, the classic case being a third-party CDN.
+There is no such split here: anyone able to alter `/assets/index-*.js` can alter `index.html` and the `integrity` attributes in it in the same breath, so the attribute constrains nobody.
+Nor does it help against a compromised dependency, since the hash would be computed at build time from the already-compromised bundle and would verify perfectly.
+
+Against that, the failure mode is total and silent-until-fatal: any byte-level transformation between build and browser - an edge optimisation, a future Pages feature - blanks the entire app rather than degrading it.
+
+⚠️ **This decision is scoped to the current asset topology.** The moment any script is loaded from an origin the deployment does not control, SRI stops being decorative and this entry must be revisited.
+Recorded here rather than attested, per [#41's rule](#the-40-attestations-41): the honest answer is "no, and here is why", and an attestation cannot say no.
 
 ⚠️ These are genuine gaps, not deferrals-in-name-only.
 They are listed here so the audit conversation covers the deployment surface and not only the bytecode.
@@ -409,12 +425,22 @@ That is a per-visitor recurring cost, invisible from our side, and it survives r
 - A proxy is **not** a boundary against use, only against theft.
   It is open to anyone who can reach the site, so the exposure moves from "the key can be spent anywhere" to "our origin can be used as an RPC".
   Only the second is fixable after the fact, which is why it is the better position, not a solved problem.
-- **Production still has no `/rpc`.** Vite serves that path in `dev` and in `preview`; a deployed static host does not.
-  The host was chosen on 2026-08-10 (**Cloudflare Pages**, whose Pages Functions can serve the path), but nothing is built, so this remains true today.
-  Until the path is actually served, a production build must either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
+- **`/rpc` now exists in the repo and does not yet exist in production.** Vite serves that path in `dev` and in `preview`; a deployed static host does not.
+  #43 built `frontend/functions/rpc.ts`, a Cloudflare Pages Function, and verified it end to end under `wrangler pages dev`: a real `eth_chainId` through `/rpc` returned `0xb626`, which is 46630.
+  ⚠️ **Nothing is deployed**, so until a deployment exists a production build must still either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
   That flag downgrades the build failure to a warning and never silences it, because a provider-side allowlist is something this build cannot verify.
   ⚠️ Note the split the deployment has to get right: `VITE_RPC_PROXY_PATH` is inlined at **build** time and so belongs in the build environment, while `RPC_UPSTREAM_URL` is read by whatever answers the path at **run** time and must not be a build variable.
   `frontend/.env.example` documents both halves.
+  ⚠️ The forwarding rule lives in ONE place, `frontend/src/lib/rpcUpstream.ts`, because two servers implement it on unrelated plumbing (http-proxy and the Workers `fetch`) and a divergence would appear only in production.
+  The rule is that the incoming request path contributes **nothing** to the outgoing URL: the credential is a path segment at every managed provider, so a proxy that joins paths produces `/v2/<key>/rpc` and earns a 404.
+- ⚠️ **The dev proxy and the production Function are NOT equivalent, deliberately**, and the difference is worth stating because the dev one is the weaker.
+  They agree on the only thing that must not diverge - where the request goes - and nothing else.
+  `functions/rpc.ts` additionally refuses non-POST, caps the body at 1 MB, rebuilds the request headers from nothing rather than forwarding the caller's, and redacts upstream error bodies.
+  `vite.config.ts`'s `rpcProxy` does none of that: it is http-proxy bound to localhost, reachable only by whoever is running the dev server.
+  Consequence to keep in mind: a request shape that works in `dev` can be refused in production, so **exercise `/rpc` with `wrangler pages dev`, not `npm run preview`**, before believing a client works.
+- **An upstream ERROR body is a second, backwards route for the key**, and one nobody was tracking: a provider rejecting a credential quotes it back.
+  The Function buffers a non-2xx response and passes it through `redactCredentials` rather than streaming it, so a misconfigured upstream stays diagnosable without publishing the key to every visitor.
+  ⚠️ Bounded by the same shape-based rule as the build guard: it recognises credentials inside URLs, so a body quoting a bare key with no surrounding URL is not matched.
 - **A domain allowlist is Referer-based** and a non-browser client can set any Referer it likes.
   It reduces casual abuse. It is not authentication.
 

@@ -30,8 +30,22 @@ import { apiSecurityHeaders } from './securityHeaders'
 // attempted in application code, where it could only be a worse version of the same thing.
 //
 // No CORS headers are sent, on purpose. The route is same-origin with the app, so it needs none,
-// and adding them would invite every other site to spend the quota. A deployment that puts the
-// proxy on a SEPARATE origin (an absolute `VITE_RPC_PROXY_PATH`) has to add them deliberately.
+// and adding them would invite every other site to spend the quota.
+//
+// ⚠️ A SEPARATE-ORIGIN PROXY IS THEREFORE NOT SERVED BY THIS FUNCTION. `resolveProxyUrl` accepts an
+// absolute `VITE_RPC_PROXY_PATH`, so the CLIENT can be pointed at another origin, but this handler
+// answers such a deployment with 403 (`crossSite`) and would, even without that, send no
+// `Access-Control-Allow-Origin` for the browser to accept. Both halves have to be added
+// deliberately, together, by whoever wants that topology. Pinned by a test so it is a known
+// limitation rather than a surprise.
+//
+// ⚠️ ABSENT CORS IS NOT ABSENT ACCESS, and the deployed edge proved it. A cross-site page cannot
+// READ this route's response without `Access-Control-Allow-Origin` - measured against Cloudflare on
+// 2026-08-11, which adds one to static assets and leaves this Function clean - but a request whose
+// content-type is CORS-simple is never preflighted, so it still arrives, is still forwarded, and
+// still costs a metered upstream call. Verified in production: a `content-type: text/plain` POST
+// carrying `Origin: https://evil.example` returned 200 and a real `eth_chainId` result. Blind to the
+// caller, billed to us. `Sec-Fetch-Site` closes exactly that, and nothing wider - see `crossSite`.
 
 /** The runtime binding the proxy needs. Named for the variable, so a misconfiguration is greppable. */
 export interface RpcProxyEnv {
@@ -70,6 +84,35 @@ const rpcError = (status: number, message: string, extra: Record<string, string>
   })
 
 /**
+ * Whether this request is a browser fetch initiated by a page on somebody else's site.
+ *
+ * `Sec-Fetch-Site` is set by the user agent and is a forbidden header name, so a hostile page cannot
+ * forge it. It is preferred over `Origin` for a different reason than the obvious one: `Origin` is
+ * equally unforgeable and IS sent on every cross-origin POST, so it would work as a signal - but
+ * acting on it means comparing it to our own deployed origin, which this Function does not reliably
+ * know (it is behind Cloudflare, serves several hostnames, and gets `*.pages.dev` plus any custom
+ * domain). `Sec-Fetch-Site` states the RELATIONSHIP directly and needs no such comparison.
+ *
+ * ⚠️ Do not "simplify" this to an `Origin` check on the belief that a page can omit `Origin`. It
+ * cannot, and the measurement in the header comment above shows the browser sending it.
+ *
+ * ⚠️ `same-site` is ALLOWED, which is a real gap on a custom apex: a sibling subdomain is same-site
+ * and would pass. It costs nothing today because the deployment is `octopus-68a.pages.dev`, where
+ * every other `*.pages.dev` name is cross-site. Revisit this the moment a custom apex with other
+ * subdomains is chosen - the same decision that governs the HSTS `preload` directive.
+ *
+ * ⚠️ A MISSING header is deliberately ALLOWED, and that is the whole judgement here. Non-browser
+ * clients (curl, a wallet, a server) send nothing, and refusing them would break legitimate callers
+ * to stop an attacker who is not actually stopped: anyone willing to run a server can already call
+ * the public endpoint directly and gains nothing by routing through us. What this does close is the
+ * case that scales without the attacker paying for it - a page that spends OUR quota using OTHER
+ * people's browsers. Treat it as removing the free, drive-by version of the abuse, not as an
+ * authorization boundary; the platform-level cap in the header comment above is still the real one.
+ */
+const crossSite = (request: Request): boolean =>
+  request.headers.get('sec-fetch-site') === 'cross-site'
+
+/**
  * Forward one JSON-RPC request to the keyed upstream and return its answer.
  *
  * @param request The browser's request to the proxy path.
@@ -81,6 +124,12 @@ export async function handleRpc(request: Request, env: RpcProxyEnv): Promise<Res
   // explicit rather than incidental.
   if (request.method !== 'POST') {
     return rpcError(405, 'This endpoint accepts JSON-RPC over POST only.', { allow: 'POST' })
+  }
+
+  // Checked before the body is read and before the configuration is consulted, so a cross-site
+  // caller costs one header comparison and learns nothing about whether the route is configured.
+  if (crossSite(request)) {
+    return rpcError(403, 'This endpoint serves same-origin requests only.')
   }
 
   let target

@@ -159,6 +159,60 @@ describe('handleRpc', () => {
       expect(fetchMock).not.toHaveBeenCalled()
     })
 
+    // The gap this closes was MEASURED on the deployed edge, not theorised: absent CORS stops a
+    // cross-site page READING the answer, but a CORS-simple content-type is never preflighted, so
+    // the request still arrived and still cost an upstream call. `text/plain` is that exact shape.
+    it.each(['application/json', 'text/plain'])(
+      'refuses a cross-site browser request sending %s, without spending it upstream',
+      async (contentType) => {
+        const response = await handleRpc(
+          post(CALL, { 'sec-fetch-site': 'cross-site', 'content-type': contentType }),
+          ENV,
+        )
+        expect(response.status).toBe(403)
+        expect(fetchMock).not.toHaveBeenCalled()
+      },
+    )
+
+    // ⚠️ A KNOWN, DELIBERATE LIMITATION, pinned so nobody discovers it in production. `resolveProxyUrl`
+    // accepts an absolute VITE_RPC_PROXY_PATH, so the client can be aimed at a proxy on another
+    // origin - but this handler refuses that traffic, and sends no Access-Control-Allow-Origin for a
+    // browser to accept even if it did not. That topology needs both halves added deliberately.
+    it('does not serve a separate-origin proxy deployment, by design', async () => {
+      const response = await handleRpc(post(CALL, { 'sec-fetch-site': 'cross-site' }), ENV)
+      expect(response.status).toBe(403)
+      expect(response.headers.get('access-control-allow-origin')).toBeNull()
+    })
+
+    it.each([
+      ['same-origin', 'same-origin'],
+      ['same-site', 'same-site'],
+      ['a user-initiated navigation', 'none'],
+    ])('still serves %s requests', async (_label, value) => {
+      const response = await handleRpc(post(CALL, { 'sec-fetch-site': value }), ENV)
+      expect(response.status).toBe(200)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    // ⚠️ Deliberate, and the judgement most likely to be "tidied" later. curl, a wallet and a server
+    // send no Sec-Fetch-Site at all. Refusing them would break real callers to stop an attacker who
+    // is not stopped - anyone with a server can call the public endpoint directly. What the guard
+    // removes is the version that scales on OTHER people's browsers.
+    it('still serves a request that sends no Sec-Fetch-Site at all', async () => {
+      const response = await handleRpc(post(), ENV)
+      expect(response.status).toBe(200)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    // Pins the ORDER, which is the part a refactor loses silently. If the configuration were
+    // consulted first, an unconfigured deployment would answer a stranger 500 and name the missing
+    // secret - telling them the route exists and is half-built. 403 says only "not for you".
+    it('refuses a cross-site request before consulting the configuration', async () => {
+      const response = await handleRpc(post(CALL, { 'sec-fetch-site': 'cross-site' }), {})
+      expect(response.status).toBe(403)
+      await expect(response.text()).resolves.not.toContain('RPC_UPSTREAM_URL')
+    })
+
     it.each([
       ['unset', undefined],
       ['blank', ''],

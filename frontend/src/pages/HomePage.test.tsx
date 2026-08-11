@@ -42,6 +42,11 @@ vi.mock('wagmi', () => ({
   useConnect: () => ({ connect: vi.fn(), connectors: [], isPending: false }),
   useDisconnect: () => ({ disconnect: vi.fn() }),
   useSwitchChain: () => ({ switchChain: vi.fn() }),
+  // `useIndexerStatus` reads the indexed block's timestamp through the public client, under a query
+  // key of its own. It deliberately does NOT use `useBlock` for that: a `useBlock` call with no
+  // `blockNumber` shares the head query's key, and a disabled query still READS from cache, which
+  // shipped an `ok` indexer status while the subgraph was unreachable.
+  usePublicClient: () => ({ chain: { id: 46630 }, getBlock: vi.fn() }),
 }))
 
 vi.mock('../config/contracts', async (orig) => ({

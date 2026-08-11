@@ -97,8 +97,17 @@ If a key is domain-allowlisted at the provider and shipping it is a deliberate d
 `ALLOW_BUNDLED_RPC_CREDENTIAL=1`, which downgrades the failure to a warning and never silences it.
 
 Two things this does **not** buy, worth stating plainly:
-a proxy is open to anyone who can reach the site, so it protects the key from theft and not the
-quota from use; and a domain allowlist is Referer-based, which a non-browser client can forge.
+a proxy protects the key from theft and not the quota from use; and a domain allowlist is
+Referer-based, which a non-browser client can forge.
+
+⚠️ On the quota, one half of it *is* now closed and it is worth being exact about which. Absent CORS
+stops another site READING the answer, not the request ARRIVING and being billed - a CORS-simple
+`content-type: text/plain` POST is never preflighted, and against the deployed edge one carrying
+`Origin: https://evil.example` returned 200 with a real `eth_chainId`. `functions/rpc.ts` now refuses
+cross-site callers with 403, branching on `Sec-Fetch-Site` because page JavaScript cannot forge it. A
+**missing** header is allowed on purpose, so curl, wallets and servers still work; anyone willing to
+run a server can still spend the quota and gains nothing by routing through us. The real cap is still
+a platform rule, and is still not written.
 
 The wallet is a separate audience and is never offered any of this.
 `chain.rpcUrls.default` carries the public endpoint only, because wagmi hands its first entry to

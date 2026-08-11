@@ -46,6 +46,9 @@ vi.mock('wagmi', () => ({
   useDisconnect: () => ({ disconnect: vi.fn() }),
   useSwitchChain: () => ({ switchChain: vi.fn() }),
   useReadContract: () => ({ data: undefined }),
+  // See the note in HomePage.test.tsx: the indexed block's timestamp is read through the public
+  // client under its own query key, never through a keyless `useBlock`.
+  usePublicClient: () => ({ chain: { id: 46630 }, getBlock: vi.fn() }),
 }))
 
 vi.mock('../config/contracts', async (orig) => ({

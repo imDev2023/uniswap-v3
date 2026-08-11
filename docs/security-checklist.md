@@ -416,7 +416,8 @@ That is a per-visitor recurring cost, invisible from our side, and it survives r
 | Mechanism | Where | What it guarantees |
 | --- | --- | --- |
 | The credential lives in `RPC_UPSTREAM_URL`, with no `VITE_` prefix | `frontend/vite.config.ts` | Vite cannot inline it. The prefix is the whole boundary, so removing it is the fix. |
-| The app calls a same-origin path, `VITE_RPC_PROXY_PATH` | `frontend/src/config/chain.ts` | The browser learns an origin it was already talking to, and nothing else. An absolute URL is also accepted, for a proxy on a separate origin; that case is not same-origin and needs CORS headers on the proxy. |
+| The app calls a same-origin path, `VITE_RPC_PROXY_PATH` | `frontend/src/config/chain.ts` | The browser learns an origin it was already talking to, and nothing else. ⚠️ `resolveProxyUrl` also accepts an absolute URL, but the Pages Function does **not** serve that topology: it refuses cross-site callers with 403 and sends no `Access-Control-Allow-Origin` for a browser to accept. Both halves must be added deliberately by whoever wants a separate-origin proxy. Pinned by a test. |
+| Cross-site browser requests are refused | `frontend/src/lib/rpcProxyHandler.ts`, `crossSite` | Closes the drive-by half of quota abuse. Absent CORS stops another site READING the answer, not the request ARRIVING and being billed: a CORS-simple `content-type: text/plain` POST is never preflighted. Measured against the deployed edge on 2026-08-11, before the guard: `Origin: https://evil.example` returned 200 and a real `eth_chainId`. Branches on `Sec-Fetch-Site`, which page JavaScript cannot forge. A **missing** header is allowed on purpose, so curl, wallets and servers still work. ⚠️ `same-site` is allowed too, which is a real gap on a custom apex with sibling subdomains. |
 | The chain object offers the wallet the **public** endpoint only | `frontend/src/config/chain.ts`, `walletRpcUrlsFor` | Closes leak 2 outright, independent of hosting. Four tests in `chain.test.ts` fail if the two lists are ever unified again. |
 | The build **fails** on a credential-shaped URL in the output | `frontend/build/bundleCredentialGuard.ts` | The protection cannot be silently undone by a `.env.local` copied from another machine. It runs in `generateBundle`, so a leaking build writes no `dist` at all. |
 
@@ -425,9 +426,16 @@ That is a per-visitor recurring cost, invisible from our side, and it survives r
 - A proxy is **not** a boundary against use, only against theft.
   It is open to anyone who can reach the site, so the exposure moves from "the key can be spent anywhere" to "our origin can be used as an RPC".
   Only the second is fixable after the fact, which is why it is the better position, not a solved problem.
-- **`/rpc` now exists in the repo and does not yet exist in production.** Vite serves that path in `dev` and in `preview`; a deployed static host does not.
-  #43 built `frontend/functions/rpc.ts`, a Cloudflare Pages Function, and verified it end to end under `wrangler pages dev`: a real `eth_chainId` through `/rpc` returned `0xb626`, which is 46630.
-  ⚠️ **Nothing is deployed**, so until a deployment exists a production build must still either run on the public endpoint or accept a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
+  ⚠️ The **drive-by browser** half of that is now closed by the `Sec-Fetch-Site` refusal above, and only that half.
+  Anyone willing to run a server can still spend the quota, and gains nothing by routing through us rather than calling the public endpoint directly.
+  Capping USE remains a platform concern - a Cloudflare rate-limiting rule on the path - and is still not attempted in application code.
+- ✅ **`/rpc` EXISTS IN PRODUCTION as of 2026-08-11.** Vite serves that path in `dev` and in `preview`; a deployed static host does not, which is why the Pages Function exists.
+  #43 built `frontend/functions/rpc.ts` and verified it under `wrangler pages dev`; it was then deployed to Cloudflare Pages (project `octopus`, direct upload) and verified **on the real edge**: a real `eth_chainId` through `/rpc` returned `0xb626`, which is 46630, in 300 ms.
+  Three things only a deployment could settle, all measured that day:
+  Cloudflare's edge adds `Access-Control-Allow-Origin: *` to **static assets** and leaves the **Function** clean, so the deliberate no-CORS position survives production - this had been an open question and miniflare's behaviour turned out to generalise.
+  A preflight `OPTIONS /rpc` returns 405 with `allow: POST` and no CORS headers.
+  All eight security headers survive the edge on the app shell, and the loaded page reported zero CSP violations.
+  ⚠️ A production build may still fall back to a bundled, domain-allowlisted key via `ALLOW_BUNDLED_RPC_CREDENTIAL=1`.
   That flag downgrades the build failure to a warning and never silences it, because a provider-side allowlist is something this build cannot verify.
   ⚠️ Note the split the deployment has to get right: `VITE_RPC_PROXY_PATH` is inlined at **build** time and so belongs in the build environment, while `RPC_UPSTREAM_URL` is read by whatever answers the path at **run** time and must not be a build variable.
   `frontend/.env.example` documents both halves.

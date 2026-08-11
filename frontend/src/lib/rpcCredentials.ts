@@ -134,3 +134,19 @@ export function findCredentials(text: string): CredentialFinding[] {
   }
   return [...byRedacted.values()]
 }
+
+/**
+ * The same text with every credential-shaped URL replaced by its redacted form.
+ *
+ * Used by the RPC proxy on an upstream ERROR body before returning it to the browser. A provider
+ * that rejects a key can quote it back - "invalid api key ..." - and a proxy that streamed that
+ * response through would publish, to every visitor, precisely the credential it exists to hide.
+ * Passing the body on rather than swallowing it keeps a failing upstream diagnosable.
+ *
+ * ⚠️ Bounded by the same rule as the rest of this module: it recognises credentials INSIDE URLs.
+ * A body quoting a bare key with no surrounding URL is not matched, so this reduces the leak rather
+ * than closing it, and it is not a licence to return upstream errors unexamined.
+ */
+export function redactCredentials(text: string): string {
+  return text.replace(URL_PATTERN, (url) => classifyUrl(url)?.redacted ?? url)
+}

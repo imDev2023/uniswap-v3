@@ -1,0 +1,30 @@
+{
+  // Cloudflare Pages project configuration. Chosen 2026-08-10 over Netlify and Vercel on proxy
+  // request economics, and over a pure static host because one cannot serve `/rpc` at all.
+  //
+  // ⚠️ There is deliberately NO `account_id` here. Wrangler reads CLOUDFLARE_ACCOUNT_ID from the
+  // environment, which keeps an account identifier out of a repository that is intended to be
+  // public. See frontend/README.md for the deploy commands.
+  "name": "octopus",
+
+  // Vite's output. Pages serves this verbatim, which is why `functions/` must NOT live inside it.
+  "pages_build_output_dir": "dist",
+
+  // ⚠️ PINNED, and not to "today". Wrangler defaults the compatibility date to the current date,
+  // and the workerd binary shipped with wrangler 4.120.0 supports dates only up to 2026-08-08 - so
+  // the default made `wrangler pages dev` fail outright with "This Worker requires compatibility
+  // date ..., but the newest date supported by this server binary is ...". A pinned date is also
+  // the correct thing on its own terms: it is the runtime's behaviour contract, and it should
+  // change when somebody decides to change it, not because the clock moved.
+  //
+  // `functions/rpc.ts` uses only `fetch`, `Request`, `Response` and `Headers`, whose behaviour is
+  // stable across every date in range, so this can be advanced whenever there is a reason to.
+  "compatibility_date": "2026-08-01",
+
+  // No `compatibility_flags` and no `nodejs_compat`: the Function is pure Web-standard code, and a
+  // Node compatibility shim it does not use would only enlarge what runs at the edge.
+
+  // No `vars` block. RPC_UPSTREAM_URL is a SECRET and is set with
+  // `wrangler pages secret put RPC_UPSTREAM_URL`, never committed here - `vars` is plaintext
+  // configuration and this file is tracked in git.
+}

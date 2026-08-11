@@ -7,6 +7,8 @@ import type { TradeRow } from '../lib/subgraph'
 // are both "the component talks to the chart API at the wrong moment", which is invisible to a DOM
 // assertion and was originally found only by watching the running app.
 const setVisibleLogicalRange = vi.fn()
+/** The options `createChart` was called with, so the CSP-critical ones can be asserted. */
+const createChartOptions = vi.fn()
 const setData = vi.fn()
 const setMarkers = vi.fn()
 
@@ -19,7 +21,10 @@ vi.mock('lightweight-charts', () => {
     remove: vi.fn(),
   }
   return {
-    createChart: () => chart,
+    createChart: (_container: unknown, options: unknown) => {
+      createChartOptions(options)
+      return chart
+    },
     createSeriesMarkers: () => ({ setMarkers }),
     AreaSeries: 'Area',
     ColorType: { Solid: 'solid' },
@@ -208,5 +213,27 @@ describe('CurveChart range selector', () => {
     expect(getByText(/be the first to buy/i)).toBeInTheDocument()
     // Nothing to range over, and offering the control would imply data exists behind it.
     expect(queryByTitle('Last hour')).toBeNull()
+  })
+})
+
+// ⚠️ LOAD-BEARING FOR THE PRODUCTION CSP, which is why it is pinned here rather than left as a
+// styling preference.
+//
+// `lightweight-charts` renders the TradingView attribution logo by injecting a `<style>` element
+// and setting its `innerText`. That is an INLINE stylesheet, and the deployed policy is
+// `style-src 'self'` with no `'unsafe-inline'` (see `src/lib/securityHeaders.ts`), so the browser
+// refuses it. Measured in the running app: an injected style element's rules do not apply under
+// this policy. The chart itself still paints, because it is a canvas - only the logo's positioning
+// would be lost, and silently, in production only.
+//
+// Turning the logo off is what keeps the strict policy honest. If it is ever turned back on, the
+// choice is to add `'unsafe-inline'` to `style-src` or to hash that exact stylesheet; this test
+// exists so that becomes a decision rather than a discovery.
+describe('the chart configuration the CSP depends on', () => {
+  it('disables the attribution logo, whose injected stylesheet the CSP would block', () => {
+    render(<CurveChart trades={[trade(1, '1')]} />)
+    expect(createChartOptions).toHaveBeenCalled()
+    const options = createChartOptions.mock.calls[0][0] as { layout?: { attributionLogo?: boolean } }
+    expect(options.layout?.attributionLogo).toBe(false)
   })
 })

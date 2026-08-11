@@ -6,3 +6,11 @@ dist-ssr
 .env
 .env.local
 .DS_Store
+
+# Wrangler's local state: build cache, miniflare's simulated storage and dev-session metadata.
+# Regenerated on demand, and it records what was bound during `wrangler pages dev`.
+.wrangler
+
+# Wrangler's own local-secrets file. This project uses .env.local instead (wrangler reads it
+# automatically), but an ignore here means a future .dev.vars can never be committed by accident.
+.dev.vars

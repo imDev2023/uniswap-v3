@@ -1,4 +1,5 @@
 import { getAddress, isAddress, zeroAddress, type Address } from 'viem'
+import { subgraphUrlFrom } from './subgraphUrl'
 
 // Contract addresses come from the environment so the same build targets testnet or mainnet
 // (docs/deploy.md). Until they're filled in, they read as the zero address and the app runs in a
@@ -32,7 +33,7 @@ export const isSwapConfigured = SWAP_ROUTER_ADDRESS !== zeroAddress
 /** Whether exact quotes are available (vs. the spot-price estimate fallback). */
 export const isQuoterConfigured = QUOTER_ADDRESS !== zeroAddress
 
-// Deployed as `octopus/octopus`, so the path carries both segments. The self-hosted stack in
-// subgraph/docker remaps graph-node's 8000 to host 8100 (8000 collides with other local services).
-export const SUBGRAPH_URL =
-  import.meta.env.VITE_SUBGRAPH_URL || 'http://localhost:8100/subgraphs/name/octopus/octopus'
+// Declared in `./subgraphUrl` rather than here, because the production CSP generator must resolve
+// the SAME default - including when the variable is unset - or it names no origin for a fetch the
+// app still makes. See that module for the defect this prevents.
+export const SUBGRAPH_URL = subgraphUrlFrom(import.meta.env.VITE_SUBGRAPH_URL)

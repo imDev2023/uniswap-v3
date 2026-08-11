@@ -2,6 +2,8 @@
 import { type ProxyOptions, defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { OPT_OUT_VAR, UPSTREAM_VAR, bundleCredentialGuard } from './build/bundleCredentialGuard'
+import { securityHeadersPlugin } from './build/securityHeaders'
+import { parseUpstream } from './src/lib/rpcUpstream'
 
 // Stage 4 key protection.
 //
@@ -19,7 +21,7 @@ import { OPT_OUT_VAR, UPSTREAM_VAR, bundleCredentialGuard } from './build/bundle
 // to "our origin can be used as an RPC". Only the second of those is fixable after the fact.
 
 /**
- * Forward the app's proxy path to the keyed upstream.
+ * Forward the app's proxy path to the keyed upstream, in `dev` and `preview`.
  *
  * The upstream is split into origin and path rather than passed whole, because http-proxy JOINS the
  * target's path with the incoming request path: a target of `https://host/v2/<key>` receiving
@@ -28,15 +30,18 @@ import { OPT_OUT_VAR, UPSTREAM_VAR, bundleCredentialGuard } from './build/bundle
  *
  * `changeOrigin` rewrites the Host header to the upstream, which managed providers need for TLS SNI
  * and virtual-host routing.
+ *
+ * ⚠️ The decomposition itself lives in `src/lib/rpcUpstream.ts` and is NOT repeated here, because
+ * production serves this same path from `functions/rpc.ts` on entirely different plumbing. Two
+ * copies of this rule would diverge silently, and only in production.
  */
 const rpcProxy = (path: string, upstream: string): Record<string, ProxyOptions> => {
-  const target = new URL(upstream)
-  const upstreamPath = `${target.pathname}${target.search}`
+  const target = parseUpstream(upstream)
   return {
     [path]: {
       target: target.origin,
       changeOrigin: true,
-      rewrite: () => upstreamPath,
+      rewrite: () => target.pathAndSearch,
     },
   }
 }
@@ -68,7 +73,13 @@ export default defineConfig(({ mode }) => {
   const proxy = upstream !== '' && proxyPath !== '' ? rpcProxy(proxyPath, upstream) : undefined
 
   return {
-    plugins: [react(), bundleCredentialGuard(env[OPT_OUT_VAR] === '1')],
+    plugins: [
+      react(),
+      bundleCredentialGuard(env[OPT_OUT_VAR] === '1'),
+      // Emits `_headers` for Cloudflare Pages. Generated rather than committed because `connect-src`
+      // is derived from this same `env` - see `build/securityHeaders.ts`.
+      securityHeadersPlugin(env),
+    ],
     // `preview` serves the built bundle, so it needs the same route the dev server has. Otherwise
     // the one command that exercises a production build cannot reach the proxy that build assumes.
     server: { proxy },

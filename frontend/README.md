@@ -76,7 +76,20 @@ A single endpoint cannot recover from that, because the error it returns is not 
 Put the keyed endpoint in `RPC_UPSTREAM_URL` and set `VITE_RPC_PROXY_PATH=/rpc`.
 The browser then talks to `/rpc` on its own origin, and the server attaches the key on the way out.
 `vite.config.ts` serves that path in `dev` and in `preview`; **a deployed static host does not**, so
-production needs the host to serve it (a rewrite, an edge function or a reverse proxy).
+production needs the host to serve it.
+Here that is `functions/rpc.ts`, a Cloudflare Pages Function - see [Deploy](#deploy-cloudflare-pages).
+
+⚠️ **The two variables belong in different places, and this is the thing most easily got wrong.**
+`VITE_RPC_PROXY_PATH` is inlined at **build** time, so it belongs in the build environment.
+`RPC_UPSTREAM_URL` is read at **run** time by whatever answers the path, so in production it is a
+secret on the Function and **must not be a build variable**.
+Nothing needs it to be: Vite reads it only to run its own dev proxy, and a production build has no
+dev proxy to run.
+
+Both servers get "where does this request actually go" from one place, `src/lib/rpcUpstream.ts`.
+The rule is that the incoming request path contributes **nothing** to the outgoing URL: the key is a
+path segment at every managed provider, so a proxy that *joins* paths turns
+`https://host/v2/<key>` plus `/rpc` into `/v2/<key>/rpc`, which they all answer with a 404.
 
 `npm run build` **fails** if a credential-shaped URL reaches the output
 (`build/bundleCredentialGuard.ts`).
@@ -103,6 +116,114 @@ npm run dev        # vite dev server
 npm test           # vitest — pure curve math, formatting, query shapes
 npm run build      # tsc -b + vite build (typecheck + production bundle)
 ```
+
+## Deploy (Cloudflare Pages)
+
+Chosen 2026-08-10 over Netlify and Vercel on proxy request economics, and over a pure static host
+because one cannot serve `/rpc` at all.
+The app polls chain state continuously, so free-tier **request** limits bind long before bandwidth
+or build minutes do.
+
+Limits verified 2026-08-11 - re-check them, they move:
+
+| | Free tier |
+| --- | --- |
+| Pages Functions requests | **100,000/day**, shared with Workers |
+| Static asset requests | free and unlimited (they do not count) |
+| CPU per request | 10 ms (a pass-through proxy uses almost none) |
+| Subrequests per request | 50 (this Function makes 1) |
+| Builds | 500/month, 1 concurrent |
+| Files / max size | 20,000 / 25 MiB |
+
+⚠️ **That daily cap is the real constraint and it is not generous.** Only `/rpc` counts, and it is
+one HTTP request per read: `src/lib/wagmi.ts` builds transports with a bare `http(url)` and no
+batching. Summing the app's RPC polls - 8 s (`PoolFacts`, `SwapPanel`), 10 s (`useOnchainToken`),
+15 s x2 (`useLaunchTerms`), 20 s (`useIndexerStatus`), 30 s (`useClaimableFees`), 60 s
+(`useReclaimStatus`) - a single open token page is roughly **27 requests/min**, so 100,000/day is
+about **60 tab-hours**. Ample for testnet, tight for a public launchpad.
+Enabling viem's request batching or a Cloudflare rate-limiting rule are the two levers, in that
+order; neither is done.
+
+> The often-quoted "the app polls every ~5 s" is `LIVE_REFETCH_MS` in `src/hooks/useSubgraph.ts`,
+> which is the **subgraph** poll. It goes to `VITE_SUBGRAPH_URL` and never touches `/rpc`.
+
+### Layout
+
+```
+frontend/
+  functions/rpc.ts     -> served at /rpc. Pages routes by FILE NAME.
+  wrangler.jsonc       -> project name, output dir, PINNED compatibility_date
+  dist/                -> build output; dist/_headers is GENERATED, not committed
+```
+
+`functions/` must sit at the project root, **never** inside `dist/`, which Pages serves verbatim.
+
+### Deploying
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID=<your account id>        # not committed; see wrangler.jsonc
+cd frontend
+
+VITE_RPC_PROXY_PATH=/rpc npm run build                # build-time half
+npx wrangler pages secret put RPC_UPSTREAM_URL        # run-time half, prompts; never echoed
+npx wrangler pages deploy dist
+```
+
+Direct upload, deliberately: it needs no connected Git repository, so hosting does not force a
+decision about pushing this repo. Automatic deploy-on-push is what that trades away.
+
+⚠️ `wrangler pages deploy` does **not** upload `.env` or `.env.local`; secrets travel only via
+`pages secret put` or an explicit `--secrets-file`. `wrangler pages dev` *does* read `.env.local`
+automatically, which is why local runs need no extra flag once the key is in `RPC_UPSTREAM_URL`.
+
+### Running the deployed shape locally
+
+⚠️ **The dev proxy and the Function are not equivalent, and the dev one is the weaker.**
+They agree on the only thing that must not diverge - where the request goes, via
+`src/lib/rpcUpstream.ts` - and on nothing else.
+`functions/rpc.ts` additionally refuses non-POST, caps the body at 1 MB, rebuilds the request
+headers from nothing rather than forwarding the caller's, and redacts upstream error bodies;
+`vite.config.ts`'s `rpcProxy` does none of that, because it is http-proxy bound to localhost and
+reachable only by whoever is running the dev server.
+So a request shape that works in `dev` can be refused in production.
+
+`npm run preview` is Vite, not Cloudflare, so it exercises the dev proxy rather than the Function.
+To run what actually ships:
+
+```bash
+npm run build
+npx wrangler pages dev --port 5274 \
+  --binding RPC_UPSTREAM_URL=https://rpc.testnet.chain.robinhood.com
+```
+
+Pointing the binding at the **public** endpoint exercises the whole path without putting a key
+anywhere. Verify with `curl -X POST localhost:5274/rpc -d
+'{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'` - `0xb626` is 46630, which proves the
+request reached the intended chain rather than merely returning something.
+
+### Security headers
+
+`dist/_headers` is **generated at build time** by `build/securityHeaders.ts`, from the policy in
+`src/lib/securityHeaders.ts`.
+It is not committed, because `connect-src` has to name every origin the app may talk to and those
+come from the build environment - a hand-written list would be right on the day it was written and
+silently wrong the first time `VITE_SUBGRAPH_URL` or `VITE_CHAIN_ID` moved.
+A blocked `fetch` renders as an empty panel, not as an error.
+
+⚠️ **`_headers` does not reach the Function.** Measured: the app shell came back carrying all eight
+headers and `/rpc` came back with none, because `_headers` is applied by Pages' static-asset layer.
+`functions/rpc.ts` therefore sets its own (`apiSecurityHeaders`).
+
+⚠️ **`style-src` is `'self'` with no `'unsafe-inline'`, and that is load-bearing on one chart
+option.** `lightweight-charts` renders the TradingView attribution logo by injecting a `<style>`
+element, which this policy blocks - verified in the running app. `CurveChart.tsx` sets
+`attributionLogo: false`, so the path never runs, and a test pins it.
+
+**SRI is deliberately not implemented.** Vite emits two external assets, both same-origin,
+content-hashed and served by the same host as the HTML that references them. An attacker able to
+alter `/assets/index-*.js` can alter `index.html` and its `integrity` attributes in the same breath,
+so there is no split in trust for SRI to protect - while a stale or edge-transformed hash blanks the
+whole app. Recorded in `docs/security-checklist.md`.
 
 ## v1 notes / follow-ups
 

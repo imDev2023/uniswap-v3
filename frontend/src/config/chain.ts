@@ -1,5 +1,6 @@
 import { defineChain } from 'viem'
 import { resolveProxyUrl, resolveRpcUrls } from '../lib/rpcEndpoints'
+import { PUBLIC_RPC_BY_CHAIN, activeChainIdFrom } from './publicRpc'
 
 // Robinhood Chain is an Arbitrum L2 with native ETH gas (spec #11). The Graph's hosted nets don't
 // support 4663, so data comes from a self-hosted subgraph (see subgraph/README.md) and RPC is
@@ -7,11 +8,8 @@ import { resolveProxyUrl, resolveRpcUrls } from '../lib/rpcEndpoints'
 
 // Documented public endpoints, per docs.robinhood.com/chain/connecting. Rate limited and stated to
 // be unsuitable for production, so they serve as the last-resort entry rather than the preferred
-// one - see resolveRpcUrls for the ordering policy.
-const PUBLIC_RPC_BY_CHAIN: Record<number, string> = {
-  4663: 'https://rpc.mainnet.chain.robinhood.com',
-  46630: 'https://rpc.testnet.chain.robinhood.com',
-}
+// one - see resolveRpcUrls for the ordering policy. Declared in `./publicRpc` rather than here
+// because the production CSP generator has to name the same origins and must not restate them.
 
 // A same-origin proxy that keeps the credential on the server, when the deployment declares one.
 // Resolved once, against the page's own origin. `window` is absent under SSR and in a non-DOM test
@@ -91,7 +89,7 @@ export const robinhoodTestnet = defineChain({
   contracts: { multicall3: { address: MULTICALL3_ADDRESS } },
 })
 
-const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 46630)
+const CHAIN_ID = activeChainIdFrom(import.meta.env.VITE_CHAIN_ID)
 
 /** The chain this build targets, selected by VITE_CHAIN_ID (defaults to testnet 46630). */
 export const activeChain = CHAIN_ID === 4663 ? robinhoodMainnet : robinhoodTestnet

@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    // Cloudflare's runtime, not the browser's and not Node's. This is the whole reason the Pages
+    // Function needs a project of its own: `@cloudflare/workers-types` redeclares the same globals
+    // the DOM lib does, so pulling it into tsconfig.app.json would change what every component in
+    // src/ believes `fetch` and `Response` are. Kept apart, `functions/rpc.ts` is checked against
+    // the runtime that will actually execute it, and the app is not.
+    "types": ["@cloudflare/workers-types"]
+  },
+  // `functions/rpc.ts` also pulls in the handler it adapts, which is checked here against the
+  // Workers globals and in tsconfig.app.json against the DOM ones - so a change that suits only one
+  // of the two runtimes fails the build rather than production.
+  "include": ["functions"]
+}

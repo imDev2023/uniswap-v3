@@ -369,13 +369,14 @@ Curve pricing is a closed-form function of the curve's own immutable reserves.
 Out of scope for the contracts, tracked in `CLAUDE.md`'s Stage 4 list.
 The open items that SlowMist calls out and we have **not** done:
 
-- ⚠️ **RPC key protection: closed in the code, BUILT for the host, and not yet deployed.** See [RPC key protection](#rpc-key-protection) below for what now holds and what does not.
-- **No monitoring is wired.** `scripts/indexer-health.mjs` exists; nothing runs it.
-- ⚠️ **Frontend hardening is BUILT AND VERIFIED LOCALLY, and NOTHING IS DEPLOYED** (#43, 2026-08-11).
-  Cloudflare Pages was chosen on 2026-08-10; #43 built `frontend/functions/rpc.ts` for `/rpc`, `frontend/wrangler.jsonc`, and a **generated** `dist/_headers`.
-  HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `X-XSS-Protection: 0` are all set, and were verified against the running app under `wrangler pages dev` with zero CSP violations in the console.
+- ✅ **RPC key protection is closed in the code AND deployed.** `/rpc` is served by `frontend/functions/rpc.ts` on Cloudflare Pages, with `RPC_UPSTREAM_URL` set as a run-time secret. See [RPC key protection](#rpc-key-protection) below for what holds, what does not, and the one exemption #45 added.
+- ⚠️ **No monitoring is wired, and the deployed indexer now has no working monitor at all.** `scripts/indexer-health.mjs` exists and nothing runs it, and since #45 it cannot watch the live indexer even if something did: it is built on graph-node's index-node status API (`indexingStatusesForSubgraphName`), which the Goldsky endpoint does not expose. Measured 2026-08-11. Watching the managed deployment means rewriting it against `_meta.block.timestamp` versus the chain head, which is what the app's own `useIndexerStatus` already does.
+- ✅ **Frontend hardening is BUILT AND DEPLOYED, and verified on Cloudflare's real edge** (#43 built it, deployed 2026-08-11 to https://octopus-68a.pages.dev).
+  `frontend/functions/rpc.ts` serves `/rpc`, `frontend/wrangler.jsonc` pins the compatibility date, and `dist/_headers` is **generated** rather than committed.
+  HSTS, CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `X-XSS-Protection: 0` are all set, and all eight survive on the app shell in production.
+  Re-verified on the live site after #45 pointed the app at a real indexer: the CSP's `connect-src` names `https://api.goldsky.com`, and the loaded page reports **zero console messages and zero errors**.
   **SRI is deliberately NOT implemented** - reasoning below.
-  ⚠️ This line stays open until a real deployment serves them, because "verified under `wrangler pages dev`" is not "verified in production": that is miniflare, not Cloudflare's edge, and the account, domain and secret are not yet in place.
+  ⚠️ `_headers` is applied by Pages' **static asset** layer and does not reach the Function; `functions/rpc.ts` sets its own headers on every reply, including error replies.
 - **No incident-response process, no drills, no published contact.**
 
 ### Subresource Integrity: declined, with reasons
@@ -419,7 +420,50 @@ That is a per-visitor recurring cost, invisible from our side, and it survives r
 | The app calls a same-origin path, `VITE_RPC_PROXY_PATH` | `frontend/src/config/chain.ts` | The browser learns an origin it was already talking to, and nothing else. ⚠️ `resolveProxyUrl` also accepts an absolute URL, but the Pages Function does **not** serve that topology: it refuses cross-site callers with 403 and sends no `Access-Control-Allow-Origin` for a browser to accept. Both halves must be added deliberately by whoever wants a separate-origin proxy. Pinned by a test. |
 | Cross-site browser requests are refused | `frontend/src/lib/rpcProxyHandler.ts`, `crossSite` | Closes the drive-by half of quota abuse. Absent CORS stops another site READING the answer, not the request ARRIVING and being billed: a CORS-simple `content-type: text/plain` POST is never preflighted. Measured against the deployed edge on 2026-08-11, before the guard: `Origin: https://evil.example` returned 200 and a real `eth_chainId`. Branches on `Sec-Fetch-Site`, which page JavaScript cannot forge. A **missing** header is allowed on purpose, so curl, wallets and servers still work. ⚠️ `same-site` is allowed too, which is a real gap on a custom apex with sibling subdomains. |
 | The chain object offers the wallet the **public** endpoint only | `frontend/src/config/chain.ts`, `walletRpcUrlsFor` | Closes leak 2 outright, independent of hosting. Four tests in `chain.test.ts` fail if the two lists are ever unified again. |
-| The build **fails** on a credential-shaped URL in the output | `frontend/build/bundleCredentialGuard.ts` | The protection cannot be silently undone by a `.env.local` copied from another machine. It runs in `generateBundle`, so a leaking build writes no `dist` at all. |
+| The build **fails** on a credential-shaped URL in the output | `frontend/build/bundleCredentialGuard.ts` | The protection cannot be silently undone by a `.env.local` copied from another machine. It runs in `generateBundle`, so a leaking build writes no `dist` at all. ⚠️ Narrowed in #45 - see below. |
+
+**The one exemption, added 2026-08-11 (#45), and why it is not a hole.**
+
+The guard judges by shape, not by provider, and the managed subgraph endpoint that now serves the deployed site is credential-*shaped*: `https://api.goldsky.com/api/public/project_<25 opaque chars>/subgraphs/octopus/1.0.0/gn`.
+It blocked the build.
+
+It is not a credential:
+
+- it is **read-only over data that is already public on chain**, and it cannot deploy, delete, pause or mutate anything - those need the CLI auth token in `~/.goldsky`, which is a separate secret and is not in the repo;
+- the segment is a **tenant identifier**, shared by every subgraph in the project rather than granting access to one;
+- it is **published by construction**: the browser fetches the subgraph directly, so no configuration exists in which a working app hides it;
+- and the guard's own remedy does not apply, because the subgraph is not routed through `/rpc` and there is nothing to move into `RPC_UPSTREAM_URL`.
+
+The real exposure is quota consumption, which is the same shape as the `/rpc` budget and is Goldsky's meter rather than ours.
+
+`bundleCredentialGuard` therefore takes a second argument, `publishedUrls`, and a finding matching one of them is reported on every build rather than being fatal.
+Four properties make that safe, each pinned by a test and each verified by mutation:
+
+1. **The list is a TRACKED CONSTANT**, `PUBLISHED_SUBGRAPH_URLS` in `frontend/src/config/subgraphUrl.ts`, and never a value read from the environment.
+   This is the property the whole exemption rests on, and see below for what happened when it was absent.
+2. **The match is on the exact URL, never the origin or the provider.** A second endpoint at `api.goldsky.com` still fails the build. Mutating `isPublished` to compare origins fails three tests.
+3. **A query-string credential is never exemptible**, whatever the list says. `location: 'query'` means the URL carried a value under a parameter named `apiKey`, `dkey` or similar, and nothing is published by construction under a name like that. Removing that one line fails two tests.
+4. **The exemption never silences anything.** Every build prints `declared published by construction` with the URL redacted. A build printing `reached the production bundle` is still a hard failure.
+5. **It cannot absorb a neighbour.** Redaction reduces every tenant at one host to the same string, so the finding dedup key carries the published flag as well as the redacted URL. Removing it from the key fails the test written for exactly that.
+
+⚠️ **`ALLOW_BUNDLED_RPC_CREDENTIAL=1` was deliberately not used.** It downgrades the guard globally, so a genuine Alchemy key would also pass as a warning, and using it per-deploy would make the opt-out the standing build command - which is precisely what #42 established a guard must never teach.
+
+⚠️ **This is an allowlist, and it fails LOUD only because the list is a tracked constant.**
+`rpcCredentials.ts` refuses to keep a list of providers because a **denylist** fails *silent* when it goes out of date.
+This list fails *loud*: point the app at any other credential-shaped endpoint and the build breaks until somebody edits the constant.
+An ordinary version bump breaks it too, which is the intended cost - the endpoint is also named in the CSP, the deploy command and four documents, so moving it was never a one-line change.
+
+⚠️ **How this was first built, and why the shape of the mistake is worth keeping.**
+`publishedUrls` was originally `subgraphUrlFrom(env.VITE_SUBGRAPH_URL)` - the allowlist computed from the very variable that put the URL into the bundle.
+It could therefore never fail to match, so *anything* placed in that variable was exempt.
+Measured rather than argued: a real Alchemy-shaped key in `VITE_SUBGRAPH_URL` **built successfully** and was written to `dist` in plaintext, under a warning reading *"That is expected for the subgraph endpoint ... it must carry no privilege beyond reading public data"*.
+The written argument for it named the fail-loud property above, which the code did not have.
+Found in review on 2026-08-12 and fixed by pinning the constant; the regression test stubs the environment and requires the build to fail anyway.
+**A control derived from the input it judges is not a control.**
+
+**The honest limit that remains:** an endpoint added to `PUBLISHED_SUBGRAPH_URLS` is trusted on the strength of whoever added it.
+The list is short, tracked, and reviewable in a diff, which is the whole of the defence.
+The realistic case it now catches and previously did not is a move to The Graph's decentralized gateway, `https://gateway.thegraph.com/api/<API_KEY>/subgraphs/id/<id>`, whose path segment is a genuinely billable key.
 
 **What does not hold, and is honest to state:**
 

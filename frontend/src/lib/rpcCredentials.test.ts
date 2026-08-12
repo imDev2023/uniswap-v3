@@ -12,6 +12,11 @@ const DRPC = 'https://lb.drpc.org/ogrpc?network=ethereum&dkey=Ai8xK2mQ0pR4sT7vW1
 const PUBLIC_TESTNET = 'https://rpc.testnet.chain.robinhood.com'
 const PUBLIC_MAINNET = 'https://rpc.mainnet.chain.robinhood.com'
 
+// The managed-subgraph shape, with filler in place of the tenant id: credential-SHAPED, and not a
+// credential. `OTHER_TENANT` differs only in that segment, so the two redact to the same string.
+const SUBGRAPH = 'https://api.goldsky.com/api/public/project_aaaa1111bbbb2222cccc3333/subgraphs/octopus/1.0.0/gn'
+const OTHER_TENANT = 'https://api.goldsky.com/api/public/project_dddd4444eeee5555ffff6666/subgraphs/octopus/1.0.0/gn'
+
 describe('classifyUrl', () => {
   it('flags a key carried as a path segment', () => {
     const found = classifyUrl(ALCHEMY)
@@ -133,5 +138,45 @@ describe('findCredentials', () => {
     // Vite emits index.html through the same bundle object, and a hand-edited preconnect or script
     // tag is a route into it that never touches src/.
     expect(findCredentials(`<link rel="preconnect" href="${ALCHEMY}">`)).toHaveLength(1)
+  })
+
+  it('marks nothing published when no published urls are supplied', () => {
+    expect(findCredentials(`"${ALCHEMY}"`)[0].published).toBe(false)
+  })
+
+  it('marks a supplied url published, and leaves a real key alone', () => {
+    const found = findCredentials(`a="${SUBGRAPH}",b="${ALCHEMY}";`, [SUBGRAPH])
+    expect(found.find((f) => f.redacted.includes('goldsky'))?.published).toBe(true)
+    expect(found.find((f) => f.redacted.includes('alchemy'))?.published).toBe(false)
+  })
+
+  it('matches the exact url, so a sibling endpoint at the same host is not published', () => {
+    expect(findCredentials(`"${OTHER_TENANT}"`, [SUBGRAPH])[0].published).toBe(false)
+  })
+
+  it('compares urls canonically, so an equivalent spelling still matches', () => {
+    // `URL` normalises a default port away. The published list is written by a human into a config
+    // file and the bundle carries whatever the app resolved, so the two spellings need not be
+    // byte-identical to mean the same endpoint.
+    const withPort = SUBGRAPH.replace('https://api.goldsky.com', 'https://api.goldsky.com:443')
+    expect(findCredentials(`"${SUBGRAPH}"`, [withPort])[0].published).toBe(true)
+  })
+
+  it('⚠️ never publishes a QUERY-string credential, even when it is explicitly listed', () => {
+    // Nothing is published by construction under a parameter named `dkey`. The exemption exists for
+    // an opaque PATH segment that identifies a tenant; a provider asking for a key in the query is
+    // asking for a secret. No allowlist entry may override that, so this passes the URL as its own
+    // published entry - the most generous input possible - and still expects false.
+    expect(findCredentials(`"${DRPC}"`, [DRPC])[0].published).toBe(false)
+  })
+
+  it('⚠️ does not let a published url absorb an unpublished one that redacts identically', () => {
+    // Redaction replaces the opaque segment, so every tenant at one host reduces to the SAME
+    // string. Deduplicating on the redacted form alone would collapse these two into one finding
+    // carrying whichever flag was seen first - and if the published one came first, a genuinely
+    // undeclared endpoint would inherit its exemption and never be reported.
+    const found = findCredentials(`a="${SUBGRAPH}",b="${OTHER_TENANT}";`, [SUBGRAPH])
+    expect(found[0].redacted).toBe(found[1].redacted)
+    expect(found.map((f) => f.published).sort()).toEqual([false, true])
   })
 })

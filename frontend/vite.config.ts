@@ -3,6 +3,7 @@ import { type ProxyOptions, defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { OPT_OUT_VAR, UPSTREAM_VAR, bundleCredentialGuard } from './build/bundleCredentialGuard'
 import { securityHeadersPlugin } from './build/securityHeaders'
+import { PUBLISHED_SUBGRAPH_URLS } from './src/config/subgraphUrl'
 import { parseUpstream } from './src/lib/rpcUpstream'
 
 // Stage 4 key protection.
@@ -75,7 +76,12 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      bundleCredentialGuard(env[OPT_OUT_VAR] === '1'),
+      // ⚠️ A TRACKED CONSTANT, never `env`. This originally passed
+      // `subgraphUrlFrom(env.VITE_SUBGRAPH_URL)`, which computed the allowlist from the same value
+      // that put the URL in the bundle: it could never fail to match, so any credential placed in
+      // that variable shipped to production under a warning saying it was expected. Reading the
+      // environment here re-opens that hole, whatever the resolution around it looks like.
+      bundleCredentialGuard(env[OPT_OUT_VAR] === '1', PUBLISHED_SUBGRAPH_URLS),
       // Emits `_headers` for Cloudflare Pages. Generated rather than committed because `connect-src`
       // is derived from this same `env` - see `build/securityHeaders.ts`.
       securityHeadersPlugin(env),

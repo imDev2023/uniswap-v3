@@ -23,3 +23,30 @@ export const DEFAULT_SUBGRAPH_URL = 'http://localhost:8100/subgraphs/name/octopu
  * string is a variable somebody blanked, not a request to fetch from the empty URL.
  */
 export const subgraphUrlFrom = (raw: string | undefined): string => raw || DEFAULT_SUBGRAPH_URL
+
+/**
+ * Subgraph endpoints this project has decided are published to every visitor.
+ *
+ * The browser fetches the subgraph directly, so whatever the app resolves is readable by anyone who
+ * opens the bundle. That is not a leak, it is the design - but the managed endpoint's URL carries an
+ * opaque tenant segment that is credential-SHAPED, so `bundleCredentialGuard` would otherwise fail
+ * the build on it. This list is what tells the guard the difference.
+ *
+ * ⚠️ A TRACKED CONSTANT, and deliberately NOT derived from `VITE_SUBGRAPH_URL`.
+ * An earlier version passed `subgraphUrlFrom(env.VITE_SUBGRAPH_URL)` to the guard, which meant the
+ * allowlist was computed from the very value it was asked to judge: it could never fail to match, so
+ * ANY credential put in that variable shipped to production under a reassuring warning. A real key
+ * pasted there built successfully and was written to `dist` in plaintext. Reviewed and fixed 2026-08-12.
+ *
+ * Because the list is written here rather than read from the environment, it fails LOUD: point the
+ * app at a different credential-shaped endpoint and the build breaks until somebody adds it below.
+ * That includes an ordinary version bump, which is the intended cost - the endpoint is also named in
+ * the CSP, the deploy command and four documents, so moving it was never a one-line change.
+ *
+ * ⚠️ Adding an entry here is a security decision. An endpoint belongs on this list only if it is
+ * read-only over data that is already public, and carries no privilege the bundle should not hand to
+ * every visitor. `isPublished` in `../lib/rpcCredentials.ts` has the full argument.
+ */
+export const PUBLISHED_SUBGRAPH_URLS: readonly string[] = [
+  'https://api.goldsky.com/api/public/project_cmsaqlax74bi401vn1h6bc1uh/subgraphs/octopus/1.0.0/gn',
+]

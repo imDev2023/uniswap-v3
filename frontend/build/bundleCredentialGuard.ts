@@ -61,23 +61,50 @@ const textOf = (output: OutputChunk | OutputAsset): string => {
  * @param acknowledged The operator has stated that a bundled credential is deliberate and
  *        domain-allowlisted at the provider. Downgrades the failure to a warning; it never silences
  *        it, because an allowlist is a provider-side control this build cannot verify.
+ * @param publishedUrls Endpoints this project has already established are visible to every visitor,
+ *        so finding one in the output is the design rather than a leak. Today that is the subgraph:
+ *        the browser fetches it directly, so no configuration hides it, and the managed provider's
+ *        URL carries an opaque tenant segment that is credential-SHAPED without being a credential.
+ *        Reported and not fatal - see `isPublished` in `src/lib/rpcCredentials.ts` for why the match
+ *        is exact rather than by origin, and why a query-string credential is never exemptible.
+ *
+ *        ⚠️ MUST be a tracked constant (`PUBLISHED_SUBGRAPH_URLS`), never a value read from the
+ *        environment. An allowlist computed from the same variable that puts the URL in the bundle
+ *        can never fail to match, which silently exempts whatever that variable holds.
  */
-export const bundleCredentialGuard = (acknowledged: boolean): Plugin => ({
+export const bundleCredentialGuard = (
+  acknowledged: boolean,
+  publishedUrls: readonly string[] = [],
+): Plugin => ({
   name: GUARD_PLUGIN_NAME,
   apply: 'build',
   enforce: 'post',
   generateBundle(_options, bundle) {
-    const findings: string[] = []
+    const leaked: string[] = []
+    const published: string[] = []
     for (const [fileName, output] of Object.entries(bundle)) {
       const text = textOf(output)
       if (text === '') continue
-      for (const found of findCredentials(text)) {
-        findings.push(`  ${fileName}\n    ${found.redacted}   (credential in the URL ${found.location})`)
+      for (const found of findCredentials(text, publishedUrls)) {
+        const line = `  ${fileName}\n    ${found.redacted}   (credential in the URL ${found.location})`
+        ;(found.published ? published : leaked).push(line)
       }
     }
-    if (findings.length === 0) return
 
-    const detail = findings.join('\n')
+    // Reported every time, never merely tolerated. The exemption is a judgement about one endpoint,
+    // and a judgement nobody is reminded of is one nobody re-examines when the endpoint changes.
+    if (published.length > 0) {
+      this.warn(
+        `A credential-shaped URL is in the bundle and was declared published by construction:\n` +
+          `${published.join('\n')}\n\n` +
+          `That is expected for the subgraph endpoint, which the browser fetches directly. It is ` +
+          `readable by every visitor, so it must carry no privilege beyond reading public data.`,
+      )
+    }
+
+    if (leaked.length === 0) return
+
+    const detail = leaked.join('\n')
     if (acknowledged) {
       this.warn(
         `A credential-shaped URL is in the bundle, allowed by ${OPT_OUT_VAR}:\n${detail}\n\n` +

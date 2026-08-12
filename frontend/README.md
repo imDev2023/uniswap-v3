@@ -144,14 +144,38 @@ Limits verified 2026-08-11 - re-check them, they move:
 | Builds | 500/month, 1 concurrent |
 | Files / max size | 20,000 / 25 MiB |
 
-⚠️ **That daily cap is the real constraint and it is not generous.** Only `/rpc` counts, and it is
-one HTTP request per read: `src/lib/wagmi.ts` builds transports with a bare `http(url)` and no
-batching. Summing the app's RPC polls - 8 s (`PoolFacts`, `SwapPanel`), 10 s (`useOnchainToken`),
-15 s x2 (`useLaunchTerms`), 20 s (`useIndexerStatus`), 30 s (`useClaimableFees`), 60 s
-(`useReclaimStatus`) - a single open token page is roughly **27 requests/min**, so 100,000/day is
-about **60 tab-hours**. Ample for testnet, tight for a public launchpad.
-Enabling viem's request batching or a Cloudflare rate-limiting rule are the two levers, in that
-order; neither is done.
+⚠️ **That daily cap is the real constraint.** Only `/rpc` counts.
+
+⚠️ **The figures below are MEASURED as of 2026-08-11 (#45), and they replace an earlier estimate of ~27 requests/min and ~60 tab-hours.**
+Method: 60-second HAR captures against the deployed site with no wallet connected.
+A CONNECTED wallet was never measured and may be higher.
+
+| Page | `/rpc` calls per minute |
+| --- | --- |
+| Token page (`/token/<addr>`, ungraduated) | **13** |
+| Swap page (`/swap/<addr>`, graduated pool) | **12** |
+| Homepage | **3** |
+
+At 13/min, 100,000/day is about **128 tab-hours**.
+Ample for testnet, still finite for a public launchpad.
+
+⚠️ **Contract reads are already batched, which is why the measurement came in at half the estimate.**
+11 of those 13 calls are a single `eth_call` to multicall3 (`0xcA11bde05977b3631167028862bE2a173976CA11`, selector `0x82ad56cb`), because wagmi enables multicall batching by default.
+"`wagmi.ts` uses a bare `http(url)` with no batching" is true of the **transport** and misleading about the **effect**.
+Turning on viem's `http(url, { batch: true })` would fold the remaining separate JSON-RPC posts into one HTTP request and is still worth doing, but it is a smaller lever than it looks; re-measure before scoping it.
+A Cloudflare rate-limiting rule is the other lever.
+Neither is done.
+
+⚠️ **`/rpc` is not the only path the app's RPC traffic takes.**
+The same capture caught three reads going directly to `https://rpc.testnet.chain.robinhood.com`, ahead of any `/rpc` call and all returning 200 - viem's `fallback` transport ranking, not a proxy failure.
+So the daily cap bounds the proxy, not the app's total RPC usage.
+
+⚠️ **A subgraph read can cost two HTTP requests**, because `application/json` is not CORS-simple and
+the endpoint preflights it.
+Measured on the homepage: 36 POST plus 25 OPTIONS per minute, which is ~1.7x rather than 2x, because
+the preflight result is cached and so there is not one OPTIONS per POST.
+Those bill Goldsky's quota rather than Cloudflare's; size a future subgraph budget on the measured
+ratio rather than on a doubling.
 
 > The often-quoted "the app polls every ~5 s" is `LIVE_REFETCH_MS` in `src/hooks/useSubgraph.ts`,
 > which is the **subgraph** poll. It goes to `VITE_SUBGRAPH_URL` and never touches `/rpc`.
@@ -173,10 +197,26 @@ frontend/
 export CLOUDFLARE_ACCOUNT_ID=<your account id>        # not committed; see wrangler.jsonc
 cd frontend
 
-VITE_RPC_PROXY_PATH=/rpc npm run build                # build-time half
+VITE_SUBGRAPH_URL=https://api.goldsky.com/api/public/project_cmsaqlax74bi401vn1h6bc1uh/subgraphs/octopus/1.0.0/gn \
+  VITE_RPC_PROXY_PATH=/rpc npm run build              # build-time half
 npx wrangler pages secret put RPC_UPSTREAM_URL        # run-time half, prompts; never echoed
-npx wrangler pages deploy dist
+npx wrangler pages deploy dist --project-name octopus
 ```
+
+⚠️ **`VITE_SUBGRAPH_URL` must be passed explicitly and is not optional.**
+Left unset, `subgraphUrlFrom` falls back to `http://localhost:8100/...`, which would put a localhost origin into a **public** CSP and make every visitor's browser probe their own machine.
+Between #43 and #45 this slot held `https://indexer.invalid/...` deliberately, because no reachable indexer existed; that placeholder is gone.
+
+⚠️ **The build prints a credential-guard WARNING for this URL, and that is the guard working.**
+The Goldsky endpoint carries an opaque tenant segment (`/api/public/project_<id>/`) that is credential-shaped without being a credential, so it is listed in **`src/config/subgraphUrl.ts` as `PUBLISHED_SUBGRAPH_URLS`** and reported on every build rather than being fatal.
+A message reading `declared published by construction` is expected.
+A message reading `reached the production bundle` is a real leak and fails the build.
+Do **not** reach for `ALLOW_BUNDLED_RPC_CREDENTIAL=1` to quiet either one - it downgrades the guard globally, including for a genuine RPC key.
+
+⚠️ **Changing the subgraph endpoint is a TWO-line change, and the build stops you if you do one.**
+The URL above and the entry in `PUBLISHED_SUBGRAPH_URLS` must match exactly, so a version bump to `1.0.1` fails the build with `reached the production bundle` until the constant is updated too.
+That is deliberate: the allowlist is a tracked constant precisely so it cannot follow the variable it is meant to judge.
+The endpoint is also named in the CSP, `docs/deployments-testnet.md` and `subgraph/README.md`, so this was never a one-line change anyway.
 
 Direct upload, deliberately: it needs no connected Git repository, so hosting does not force a
 decision about pushing this repo. Automatic deploy-on-push is what that trades away.

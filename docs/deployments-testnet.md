@@ -20,6 +20,7 @@ The tokenomics redeploy.
 | Treasury | `0x8Ec5f1e04531416d337E61733DfC5d1685D9A80C` |
 | Deploy blocks | **97379690** (first tx) - 97379693 (last) |
 | Subgraph `startBlock` | **97379693** - all four launchpad contracts are created in that one block |
+| Indexer serving the live site | **Goldsky `octopus/1.0.0`**, deployed 2026-08-11 (#45) against these addresses. Endpoint `https://api.goldsky.com/api/public/project_cmsaqlax74bi401vn1h6bc1uh/subgraphs/octopus/1.0.0/gn`. Backfilled ~2M blocks in 11.5 minutes and settled at a 28-block / 5-second lag. The self-hosted stack in `subgraph/docker` stays the local-development path |
 | Gas spent | ~0.00055 ETH for the whole pipeline |
 | Build | **#38** - redeployed for the tokenomics program (#33-#37): conditional LP lock, per-launch curve allocation, vesting from graduation, and the `nonReentrant` guard on `createLaunch` |
 

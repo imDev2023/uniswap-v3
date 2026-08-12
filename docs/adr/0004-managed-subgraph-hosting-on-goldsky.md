@@ -1,5 +1,15 @@
 # Indexing runs on Goldsky, not a self-hosted graph-node
 
+> **Status: ACCEPTED, deferred once, then implemented for the deployed site on 2026-08-11 (#45).**
+>
+> This ADR was written on 2026-08-01 and never retracted, but it was **not acted on** in #38: self-hosting was kept because stopping graph-node by hand is the easiest way to exercise the app's degradation behaviour, and that was recorded as settled decision 12 ("self-hosted indexing stays; Goldsky declined again"). The two statements contradicted each other for ten days.
+>
+> #45 resolved the contradiction in this ADR's favour, and narrowed it: **the deployed site is served by Goldsky (`octopus/1.0.0`); the self-hosted stack remains the local-development path** and keeps the stop-the-indexer test cheap. Both run from the same manifest and mappings. The decision below therefore applies to production hosting, not to whether a graph-node ever runs on a developer's machine.
+>
+> ⚠️ The consequence recorded below - that the reorg recovery levers are not available on managed infrastructure - is now a **live** risk rather than a hypothetical one. Goldsky's behaviour under a large reorg on this chain is still unmeasured.
+>
+> ⚠️ One consequence this ADR did not anticipate: `scripts/indexer-health.mjs` cannot watch the managed deployment at all. It is built on graph-node's index-node status API, which the Goldsky endpoint does not expose. Monitoring the managed path needs a rewrite against `_meta` plus the chain head.
+
 Robinhood Chain is not on The Graph's hosted or decentralized networks, so the read model ran on a self-hosted graph-node and the plan was to keep doing that on a VM with managed Postgres.
 Measurement on 2026-08-01 changed the answer: Goldsky supports the chain by name, **accepted our existing manifest unmodified**, and indexes it far tighter than our own tuned stack.
 

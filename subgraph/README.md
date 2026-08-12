@@ -5,13 +5,16 @@ needs: live **curve progress** per token, per-wallet **holders**, a **trade** hi
 a **graduation feed** of tokens that reached the DEX. Data layer is a subgraph on **The Graph's
 graph-node toolchain** (spec #11, decision #8).
 
-## Why self-hosted
+## Why not The Graph
 
-The Graph's hosted service and decentralized network **do not support chain 4663**. So this subgraph
-runs on a **self-hosted `graph-node`** pointed at the Robinhood RPC. That is purely a
-deploy/infra choice — the manifest, mappings, schema, and `matchstick` tests are all standard The
-Graph tooling and would run unchanged on any graph-node. `network: robinhood` in `subgraph.yaml` is
-just the label that graph-node's `ethereum:` config binds to the 4663 RPC.
+The Graph's hosted service and decentralized network **do not support chain 4663**, so this subgraph
+cannot be deployed there. Everything else is standard: the manifest, mappings, schema and
+`matchstick` tests are ordinary The Graph tooling and run unchanged on any graph-node.
+`network: robinhood` in `subgraph.yaml` is just the label that graph-node's `ethereum:` config binds
+to the 4663 RPC.
+
+Where it actually runs is a deploy/infra choice, and since #45 there are two answers - see
+[Two deployments, on purpose](#two-deployments-on-purpose).
 
 ## What it indexes
 
@@ -70,6 +73,64 @@ done
 ```
 
 Re-extract and re-run `codegen` whenever a contract's events change.
+
+## Two deployments, on purpose
+
+Since #45 (2026-08-11) this subgraph runs in two places, from the same manifest and mappings:
+
+| | Where | Serves |
+| --- | --- | --- |
+| **Managed** | Goldsky `octopus/1.0.0` - `https://api.goldsky.com/api/public/project_cmsaqlax74bi401vn1h6bc1uh/subgraphs/octopus/1.0.0/gn` | the **deployed site** at `octopus-68a.pages.dev` |
+| **Self-hosted** | `docker/docker-compose.yml`, `http://localhost:8100/subgraphs/name/octopus/octopus` | **local development**, and the stop-the-indexer degradation test |
+
+[ADR-0004](../docs/adr/0004-managed-subgraph-hosting-on-goldsky.md) is the reasoning for the managed path.
+Self-hosting was kept in #38 because stopping graph-node is the easiest way to exercise the app's
+degradation behaviour, and that is still true, so both stay.
+
+⚠️ **The recovery levers documented below are SELF-HOSTED ONLY.**
+The reorg-deadlock procedure works by purging graph-node's block cache in Postgres and rewinding the
+deployment. Neither is available on managed infrastructure, so the same failure on Goldsky is a
+support ticket rather than a runbook. Goldsky's behaviour under a large reorg on this chain is
+**unmeasured** and cannot be induced on demand.
+
+⚠️ **`scripts/indexer-health.mjs` does NOT work against Goldsky.**
+It is built on graph-node's index-node status API (`indexingStatusesForSubgraphName`), and the
+Goldsky endpoint has no such field - the query returns ``Type `Query` has no field
+`indexingStatusesForSubgraphName` ``. Measured 2026-08-11. Monitoring the managed deployment means
+comparing `_meta.block.timestamp` against the chain head over RPC, which is what
+`frontend/src/hooks/useIndexerStatus.ts` already does. The script still works against the local
+stack.
+
+### Deploy to Goldsky
+
+```bash
+cd subgraph
+npx graph codegen
+npx graph build --network robinhood-testnet   # stamps addresses from networks.json
+goldsky subgraph deploy octopus/1.0.0 --path .
+git checkout -- subgraph.yaml                 # AFTER deploying, never before
+```
+
+⚠️ **`npx graph build --network` rewrites `subgraph.yaml` IN PLACE**, stamping the addresses from
+`networks.json` into the tracked manifest.
+`--path` is the subgraph PROJECT directory (`goldsky subgraph deploy --help`: "Path to subgraph"),
+so the CLI reads that stamped manifest when it runs.
+That is the whole reason for the ordering: stamp, deploy, and only then restore the file with
+`git checkout`.
+Restoring it first deploys the unstamped manifest, and restoring it never leaves a modified
+`subgraph.yaml` in the working tree that looks like somebody's edit.
+
+Measured 2026-08-11: ~2M blocks backfilled in **11.5 minutes** (690 s), settling at a 28-block /
+5-second lag against the chain head.
+[ADR-0004](../docs/adr/0004-managed-subgraph-hosting-on-goldsky.md)'s 1.93M-in-425 s figure is the
+same order but **1.6x optimistic**; budget from the measurement.
+
+⚠️ **A backfilling subgraph answers differently from a synced one.**
+`_meta.block.timestamp` is `null` during backfill and a **real timestamp** once caught up, and
+`_meta.block.number` advances in large discrete batches - flat for two minutes, then +975,447 blocks
+at once. Neither a null timestamp nor a flat block number means anything is wrong until it has
+caught up, and `goldsky subgraph list` disagrees with `_meta` by ~160,000 blocks while it runs.
+`_meta` is what the app sees, so it is the only one that settles a question about the app.
 
 ## Deploy (self-hosted graph-node)
 

@@ -61,6 +61,19 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
 
+      # ⚠️ Load-bearing, and its absence is what made the FIRST CI run this project ever had go red.
+      # contracts/remappings.txt maps `@openzeppelin/=node_modules/@openzeppelin/`, and
+      # contracts/node_modules/ is gitignored - so solc cannot resolve a single OpenZeppelin import on
+      # a fresh checkout. Reproduced on a clean clone: `forge build` fails with Error (6275) without
+      # this step and exits 0 with it. The @uniswap/v3-* artifacts vm.getCode reads live here too
+      # (foundry.toml's fs_permissions grants ./node_modules). Never delete this to "speed up" a job
+      # that compiles Solidity.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Solidity dependencies
+        run: npm ci
+
       # deny_warnings in foundry.toml makes this fail on any compiler warning.
       - name: Build
         run: forge build --sizes
@@ -74,6 +87,14 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+
+      # Same reason as the build job: no node_modules, no OpenZeppelin, no compile. Jobs do not share
+      # a filesystem, so every job that compiles Solidity needs its own copy.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Solidity dependencies
+        run: npm ci
 
       # ⚠️ Every fork test is PINNED to an ARCHIVE endpoint (contracts/test/ForkConfig.sol) and fails
       # LOUDLY without these, which is the intended behaviour - a fork test silently falling back to a
@@ -130,9 +151,25 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
 
+      # Same reason as the build job.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Solidity dependencies
+        run: npm ci
+
+      # ⚠️ `target` is LOAD-BEARING, and its absence was a SILENT PASS rather than a failure.
+      # `defaults.run.working-directory` applies to `run:` steps only, NEVER to `uses:` steps, and
+      # this action defaults `target` to the repository root - which holds no foundry.toml, because
+      # the Foundry project is contracts/. Measured locally: from the root the same command reports
+      # "No contract was analyzed", 0 contracts, 0 results, and EXIT 0. So this job would have gone
+      # GREEN having inspected nothing, and its `if: success()` step below would then have recorded
+      # evidence reading "no findings at medium or above". From contracts/ it analyzes 38 contracts
+      # and returns 15 results. A security job that cannot fail is a dashboard.
       - uses: crytic/slither-action@v0.4.0
         id: slither
         with:
+          target: contracts/
           # The repo's own copy, for the same reason the Solhint step uses the repo's: a project's
           # triage decisions belong to the project, not to the shared baseline it started from.
           slither-config: contracts/slither.config.json
@@ -175,10 +212,15 @@ jobs:
 
       # Merge the evidence both upstream jobs recorded. The gate reads results rather
       # than re-running the tools, so it stays fast enough to run locally too.
+      # ⚠️ `path` is resolved from the WORKSPACE ROOT, not from `defaults.run.working-directory`, but
+      # the merge step below is a `run:` step and therefore executes inside contracts/. Written as
+      # `path: evidence` the artifacts landed at the root while the script looked in contracts/,
+      # found nothing, and silently fell back to the COMMITTED .evm-standards.json - so the gate
+      # would report on a stored record dated 2026-08-07 while appearing to read this run.
       - uses: actions/download-artifact@v4
         with:
           pattern: evidence-*
-          path: evidence
+          path: contracts/evidence
           merge-multiple: false
 
       - name: Merge evidence
@@ -225,6 +267,13 @@ jobs:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
 
+      # Same reason as the build job: Medusa compiles the project, so it needs the deps too.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Solidity dependencies
+        run: npm ci
+
       # Restore the corpus so nightly runs compound instead of starting cold.
       # This is the setting that makes a fuzzing programme worth having.
       - uses: actions/cache@v4
@@ -242,9 +291,17 @@ jobs:
       - name: Run Medusa
         run: medusa fuzz --config lib/evm-security-standards/tooling/medusa.json
 
+  # ⚠️ Echidna is NOT configured for this repository. `contract:` below reads a repository VARIABLE
+  # that has never been set (checked via the API: the repo has no Actions variables at all), so this
+  # job would fire at 03:00 with an empty contract name and go red nightly, on a public repo. The
+  # guard makes it SKIP visibly instead, which is the honest rendering of "not configured yet" - a
+  # skipped job says so, whereas removing the job entirely would hide the gap. Set the variable and
+  # the job starts running with no further edit here.
   echidna:
     name: Echidna (nightly)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && vars.ECHIDNA_CONTRACT != ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -252,6 +309,14 @@ jobs:
         with:
           submodules: recursive
       - uses: foundry-rs/foundry-toolchain@v1
+
+      # Same reason as the build job. Present so that setting ECHIDNA_CONTRACT is the ONLY thing
+      # standing between this job and a real run.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Solidity dependencies
+        run: npm ci
 
       - uses: actions/cache@v4
         with:

@@ -136,7 +136,14 @@ jobs:
         # the aggregate sails past any single-provider budget.
         # ⚠️ It MUST be a flag. As a foundry.toml profile key forge 1.7.1 calls it unknown and
         # silently ignores it; see the note in contracts/foundry.toml.
-        run: forge test -vvv --compute-units-per-second 100
+        #
+        # ⚠️ `--threads 1` is the half that actually works, and run #3 is the evidence.
+        # `--compute-units-per-second` alone took the failures from 19 to 13 and no further, because
+        # it is a PER-PROVIDER budget while forge runs test suites in PARALLEL - 19 suites each
+        # entitled to 100 CUPS is 1,900 CUPS in aggregate, so the throttle was never the binding
+        # constraint. Serialising the suites is what puts the aggregate back under one budget.
+        # Cost is wall-clock, which is free on a public repo, and it falls as the fork cache fills.
+        run: forge test -vvv --threads 1 --compute-units-per-second 100
 
       # `if: always()` is the load-bearing half. See the restore step: a red run is exactly the run
       # whose fetched fork state is most worth keeping.

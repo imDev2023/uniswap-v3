@@ -187,6 +187,12 @@ jobs:
         with:
           name: evidence-forge
           path: contracts/.evm-standards.json
+          # ⚠️ `.evm-standards.json` is a DOTFILE and upload-artifact@v4 skips hidden files by
+          # default. Without this it logs `No files were found with the provided path` as a WARNING,
+          # uploads nothing, and the step still reports SUCCESS - so the gate downstream found
+          # 0 artifacts and silently graded itself against the committed 2026-08-07 record while
+          # printing green. Measured in run #4. Never remove this line.
+          include-hidden-files: true
 
   slither:
     name: Slither
@@ -241,6 +247,8 @@ jobs:
         with:
           name: evidence-slither
           path: contracts/.evm-standards.json
+          # Same dotfile trap as evidence-forge above.
+          include-hidden-files: true
 
   gate:
     name: Pre-deployment gate

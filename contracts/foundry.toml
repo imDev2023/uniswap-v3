@@ -48,6 +48,12 @@ depth = 64
 fail_on_revert = false
 shrink_run_limit = 5000
 
+# ⚠️ There is deliberately NO `compute_units_per_second` here. It is NOT a foundry.toml profile key
+# in forge 1.7.1 - setting it prints `Warning: Found unknown compute_units_per_second config for
+# profile ci` and throttles NOTHING, which is a silent no-op wearing the costume of a rate limit.
+# The real surface is the CLI flag `--compute-units-per-second`, applied in the workflow's test step
+# where the 429s actually happened. Verified with `FOUNDRY_PROFILE=ci forge config`.
+
 # ⚠️ `.github/workflows/evm-security.yml` sets FOUNDRY_PROFILE=ci and this section did not exist, so
 # every CI job silently ran the default depth while the workflow's name implied a deep campaign.
 [profile.ci.fuzz]

@@ -96,6 +96,27 @@ jobs:
       - name: Install Solidity dependencies
         run: npm ci
 
+      # ⚠️ RESTORE/SAVE split ON PURPOSE, and the reason is the whole point of the step.
+      # `actions/cache` saves only when the job SUCCEEDS. This job's failure mode is a cold cache
+      # causing 429s, so the plain action would never save on the run that most needed it and CI
+      # could never converge - each run would start cold, fail, and discard what it had fetched.
+      # Splitting restore from a save with `if: always()` means every run keeps whatever fork state
+      # it managed to pull, so even a red run leaves the next one warmer.
+      # Keyed on ForkConfig.sol because EVERY fork block is pinned there: same file, same blocks,
+      # same cache. Change a pinned block and the key changes with it.
+      - name: Restore Foundry fork cache
+        id: forkcache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          # The run_id suffix makes every save a NEW entry rather than a collision against an
+          # existing key, and the restore-keys prefixes then pick the most recent match. Without it
+          # the second save onwards is a no-op and the cache freezes at whatever the first run got.
+          key: foundry-rpc-${{ hashFiles('contracts/test/ForkConfig.sol') }}-${{ github.run_id }}
+          restore-keys: |
+            foundry-rpc-${{ hashFiles('contracts/test/ForkConfig.sol') }}-
+            foundry-rpc-
+
       # ⚠️ Every fork test is PINNED to an ARCHIVE endpoint (contracts/test/ForkConfig.sol) and fails
       # LOUDLY without these, which is the intended behaviour - a fork test silently falling back to a
       # pruning endpoint is how flakiness got in. They live in contracts/.env locally and must be
@@ -105,7 +126,26 @@ jobs:
         env:
           RPC_MAINNET_ARCHIVE_URL: ${{ secrets.RPC_MAINNET_ARCHIVE_URL }}
           RPC_TESTNET_ARCHIVE_URL: ${{ secrets.RPC_TESTNET_ARCHIVE_URL }}
-        run: forge test -vvv
+        # ⚠️ `--compute-units-per-second` is why this passes. Run #2 failed 19 tests with
+        # `Max retries exceeded HTTP error 429` and ZERO assertion failures. The identical command
+        # passes locally only because ~/.foundry/cache/rpc already holds 131 pinned fork blocks;
+        # a runner starts cold, so every read is live. `[profile.ci.fuzz] runs = 1024` multiplies it,
+        # because a fuzzed address is one the fork has never seen and `vm.deal` on it is a network
+        # round trip - the same mechanism that killed the invariant campaigns in #40, now hitting the
+        # example-based suites. Foundry assumes 330 CUPS per provider and runs suites in PARALLEL, so
+        # the aggregate sails past any single-provider budget.
+        # ⚠️ It MUST be a flag. As a foundry.toml profile key forge 1.7.1 calls it unknown and
+        # silently ignores it; see the note in contracts/foundry.toml.
+        run: forge test -vvv --compute-units-per-second 100
+
+      # `if: always()` is the load-bearing half. See the restore step: a red run is exactly the run
+      # whose fetched fork state is most worth keeping.
+      - name: Save Foundry fork cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: foundry-rpc-${{ hashFiles('contracts/test/ForkConfig.sol') }}-${{ github.run_id }}
 
       # ⚠️ Deliberately needs NO secrets. The invariant campaign is the one suite here that does not
       # fork: Foundry gives each `invariant_` function its own campaign, each re-runs `setUp` against
